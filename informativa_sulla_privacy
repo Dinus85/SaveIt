@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        h3 { color: #2196F3; margin-top: 5px; }
+        p { margin-bottom: 5px; }
+        ul { margin-left: 20px; padding-left: 0; }
+        li { margin-bottom: 3px; }
+    </style>
+</head>
+<body>
+    <p>SmartChef si impegna a proteggere la tua privacy. Questa informativa sulla privacy descrive come raccogliamo, utilizziamo, condividiamo e proteggiamo le tue informazioni personali quando utilizzi la nostra applicazione.</p>
+
+    <h3>INFORMAZIONI CHE RACCOGLIAMO</h3>
+    <p>Raccogliamo le seguenti informazioni:</p>
+    <ul>
+        <li>Informazioni personali: nome, cognome, indirizzo email, data di nascita, genere</li>
+        <li>Informazioni sull'account: credenziali di accesso, preferenze</li>
+        <li>Informazioni sull'utilizzo: ricette salvate, cronologia di ricerca, interazioni con l'app</li>
+        <li>Dati del dispositivo: tipo di dispositivo, sistema operativo, identificatori unici</li>
+    </ul>
+
+    <h3>COME UTILIZZIAMO LE TUE INFORMAZIONI</h3>
+    <p>Utilizziamo le tue informazioni per:</p>
+    <ul>
+        <li>Fornire e migliorare i nostri servizi</li>
+        <li>Personalizzare la tua esperienza all'interno dell'app</li>
+        <li>Comunicare con te riguardo aggiornamenti o promozioni</li>
+        <li>Analizzare come utilizzi la nostra app per migliorarla</li>
+        <li>Rispettare i nostri obblighi legali</li>
+    </ul>
+
+    <h3>CONDIVISIONE DELLE INFORMAZIONI</h3>
+    <p>Possiamo condividere le tue informazioni con:</p>
+    <ul>
+        <li>Fornitori di servizi che ci aiutano a gestire l'app</li>
+        <li>Partner commerciali, con il tuo consenso</li>
+        <li>Autorità competenti, quando richiesto dalla legge</li>
+        <li>In caso di fusione, vendita o trasferimento di attività</li>
+    </ul>
+    
+    <p>Non vendiamo mai le tue informazioni personali a terze parti.</p>
+
+    <h3>COOKIES E TECNOLOGIE SIMILI</h3>
+    <p>SmartChef utilizza cookies e tecnologie simili per fornire, proteggere e migliorare la nostra app. I cookies sono piccoli file di testo memorizzati sul tuo dispositivo.</p>
+
+    <h3>TIPI DI COOKIES UTILIZZATI</h3>
+    <ul>
+        <li>Cookies essenziali: necessari per il funzionamento dell'app</li>
+        <li>Cookies analitici: ci aiutano a capire come interagisci con l'app</li>
+        <li>Cookies funzionali: ricordano le tue preferenze e personalizzazioni</li>
+        <li>Cookies di marketing: utilizzati per scopi pubblicitari (solo con il tuo consenso)</li>
+    </ul>
+
+    <h3>COME GESTIRE I COOKIES</h3>
+    <p>Puoi gestire le tue preferenze sui cookies attraverso le impostazioni del tuo dispositivo o browser. Tuttavia, la disabilitazione di alcuni cookies potrebbe influire sulla tua esperienza d'uso dell'app.</p>
+
+    <h3>I TUOI DIRITTI</h3>
+    <p>Hai il diritto di:</p>
+    <ul>
+        <li>Accedere alle tue informazioni personali</li>
+        <li>Correggere informazioni inesatte</li>
+        <li>Richiedere la cancellazione dei tuoi dati</li>
+        <li>Opporti al trattamento dei tuoi dati</li>
+        <li>Richiedere la limitazione del trattamento</li>
+        <li>Ricevere i tuoi dati in un formato leggibile</li>
+    </ul>
+
+    <h3>SICUREZZA DEI DATI</h3>
+    <p>Adottiamo misure di sicurezza appropriate per proteggere le tue informazioni personali da accessi non autorizzati, alterazioni, divulgazioni o distruzioni.</p>
+
+    <h3>MODIFICHE ALLA POLITICA SULLA PRIVACY</h3>
+    <p>Ci riserviamo il diritto di modificare questa politica sulla privacy in qualsiasi momento. Le modifiche entreranno in vigore dopo la pubblicazione nell'app.</p>
+
+    <h3>CONTATTI</h3>
+    <p>Per domande riguardanti la nostra politica sulla privacy, contattaci all'indirizzo email privacy@smartchef.com.</p>
+</body>
+</html>
