@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        h3 { color: #2196F3; margin-top: 20px; }
+        p { margin-bottom: 15px; }
+        ul { margin-left: 20px; padding-left: 0; }
+        li { margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <h3>COSA INTENDIAMO PER COMUNICAZIONI MARKETING</h3>
+    <p>Le comunicazioni marketing comprendono messaggi promozionali, offerte speciali, aggiornamenti sui prodotti, newsletter e altre informazioni commerciali che ti inviamo per tenerti informato sui nostri servizi e offerte.</p>
+
+    <h3>TIPI DI COMUNICAZIONI MARKETING</h3>
+    <p>Possiamo inviarti comunicazioni marketing tramite:</p>
+    <ul>
+        <li>Email</li>
+        <li>Notifiche push nell'app</li>
+        <li>SMS (se hai fornito il tuo numero di telefono)</li>
+        <li>Post sui social media</li>
+    </ul>
+
+    <h3>CONTENUTO DELLE COMUNICAZIONI</h3>
+    <p>Le nostre comunicazioni marketing possono includere:</p>
+    <ul>
+        <li>Nuove ricette e contenuti aggiunti all'app</li>
+        <li>Offerte speciali e promozioni</li>
+        <li>Suggerimenti e consigli culinari</li>
+        <li>Aggiornamenti sulle funzionalità dell'app</li>
+        <li>Sondaggi sulla tua esperienza</li>
+        <li>Notizie sul mondo della cucina</li>
+    </ul>
+
+    <h3>BASE LEGALE</h3>
+    <p>Inviamo comunicazioni marketing sulla base del tuo consenso esplicito, che puoi revocare in qualsiasi momento.</p>
+
+    <h3>COME ISCRIVERSI</h3>
+    <p>Puoi scegliere di ricevere le nostre comunicazioni marketing:</p>
+    <ul>
+        <li>Durante la registrazione all'app</li>
+        <li>Dalle impostazioni del tuo account</li>
+        <li>Tramite moduli di iscrizione all'interno dell'app</li>
+    </ul>
+
+    <h3>COME ANNULLARE L'ISCRIZIONE</h3>
+    <p>Puoi annullare l'iscrizione alle nostre comunicazioni marketing in qualsiasi momento:</p>
+    <ul>
+        <li>Cliccando sul link "Annulla iscrizione" presente in ogni email</li>
+        <li>Modificando le tue preferenze nelle impostazioni del tuo account</li>
+        <li>Contattando il nostro servizio clienti</li>
+    </ul>
+
+    <h3>FREQUENZA DELLE COMUNICAZIONI</h3>
+    <p>Ci impegniamo a rispettare la tua casella di posta e a non inviarti un numero eccessivo di comunicazioni. In generale, non invieremo più di una comunicazione a settimana, a meno che non ci siano offerte speciali o eventi particolari.</p>
+
+    <h3>MARKETING DI TERZE PARTI</h3>
+    <p>Non vendiamo né condividiamo i tuoi dati con terze parti per scopi di marketing diretto senza il tuo consenso esplicito.</p>
+
+    <h3>MODIFICHE ALLA POLITICA DI MARKETING</h3>
+    <p>Ci riserviamo il diritto di modificare questa politica di marketing in qualsiasi momento. Le modifiche entreranno in vigore dopo la pubblicazione nell'app.</p>
+
+    <h3>CONTATTI</h3>
+    <p>Per domande riguardanti le nostre comunicazioni marketing, contattaci all'indirizzo email marketing@smartchef.com.</p>
+</body>
+</html>
