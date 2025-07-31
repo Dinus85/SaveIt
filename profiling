@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        h3 { color: #2196F3; margin-top: 20px; }
+        p { margin-bottom: 15px; }
+        ul { margin-left: 20px; padding-left: 0; }
+        li { margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <h3>COSA INTENDIAMO PER PROFILAZIONE</h3>
+    <p>Per profilazione intendiamo l'utilizzo delle tue informazioni personali per analizzare o prevedere aspetti riguardanti le tue preferenze, interessi, comportamenti e altre caratteristiche personali. Questo ci consente di personalizzare la tua esperienza nell'app SmartChef.</p>
+
+    <h3>COME UTILIZZIAMO LA PROFILAZIONE</h3>
+    <p>La profilazione ci permette di:</p>
+    <ul>
+        <li>Suggerirti ricette basate sulle tue preferenze culinarie e alimentari</li>
+        <li>Personalizzare i contenuti che vedi nell'app</li>
+        <li>Ottimizzare le funzionalità dell'app in base al tuo modo di utilizzarla</li>
+        <li>Migliorare le nostre campagne di marketing per renderle più rilevanti per te</li>
+        <li>Analizzare le tendenze culinarie tra i nostri utenti</li>
+    </ul>
+
+    <h3>DATI UTILIZZATI PER LA PROFILAZIONE</h3>
+    <p>Per effettuare la profilazione, possiamo utilizzare i seguenti dati:</p>
+    <ul>
+        <li>Ricette che hai salvato, visto o cercato</li>
+        <li>Ingredienti che hai segnalato come preferiti o da evitare</li>
+        <li>Interazioni con l'app (frequenza di utilizzo, funzionalità utilizzate)</li>
+        <li>Informazioni demografiche fornite durante la registrazione (età, genere)</li>
+        <li>Informazioni sui dispositivi utilizzati per accedere all'app</li>
+    </ul>
+
+    <h3>BASE LEGALE</h3>
+    <p>Effettuiamo la profilazione sulla base del tuo consenso esplicito, che puoi revocare in qualsiasi momento dalle impostazioni del tuo account.</p>
+
+    <h3>I TUOI DIRITTI</h3>
+    <p>Hai il diritto di:</p>
+    <ul>
+        <li>Revocare il consenso alla profilazione in qualsiasi momento</li>
+        <li>Ottenere informazioni sui dati che utilizziamo per la profilazione</li>
+        <li>Opporti alla profilazione</li>
+        <li>Richiedere l'intervento umano in caso di decisioni automatizzate</li>
+        <li>Richiedere la cancellazione dei tuoi dati</li>
+    </ul>
+
+    <h3>PERIODO DI CONSERVAZIONE</h3>
+    <p>Conserviamo i dati utilizzati per la profilazione per tutto il periodo in cui il tuo account è attivo. In caso di cancellazione dell'account, elimineremo o anonimizzeremo questi dati entro 30 giorni.</p>
+
+    <h3>DECISIONI AUTOMATIZZATE</h3>
+    <p>La profilazione che effettuiamo può comportare decisioni automatizzate che influenzano la tua esperienza nell'app. Ad esempio, il contenuto che vedi potrebbe essere determinato da algoritmi basati sul tuo comportamento precedente.</p>
+
+    <h3>MODIFICHE ALLA POLITICA DI PROFILAZIONE</h3>
+    <p>Ci riserviamo il diritto di modificare questa politica di profilazione in qualsiasi momento. Le modifiche entreranno in vigore dopo la pubblicazione nell'app.</p>
+
+    <h3>CONTATTI</h3>
+    <p>Per domande riguardanti la nostra politica di profilazione, contattaci all'indirizzo email privacy@smartchef.com.</p>
+</body>
+</html>
