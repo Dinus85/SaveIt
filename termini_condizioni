@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        h3 { color: #2196F3; margin-top: 20px; }
+        p { margin-bottom: 15px; }
+        ul { margin-left: 20px; padding-left: 0; }
+        li { margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <p>Benvenuto in SmartChef! Utilizzando la nostra app, accetti i seguenti termini e condizioni di utilizzo.</p>
+
+    <h3>ACCETTAZIONE DEI TERMINI</h3>
+    <p>Utilizzando l'app SmartChef, accetti di essere vincolato dai presenti Termini e Condizioni. Se non accetti questi termini, ti preghiamo di non utilizzare l'app.</p>
+
+    <h3>LICENZA D'USO</h3>
+    <p>Ti concediamo una licenza limitata, non esclusiva e non trasferibile per accedere e utilizzare l'app SmartChef per uso personale e non commerciale.</p>
+
+    <h3>RESTRIZIONI D'USO</h3>
+    <p>Accetti di non:</p>
+    <ul>
+        <li>Copiare, modificare o creare opere derivate dall'app</li>
+        <li>Tentare di decompilare, disassemblare o hackerare l'app</li>
+        <li>Utilizzare l'app per scopi illegali o non autorizzati</li>
+        <li>Violare i diritti di proprietà intellettuale di altri</li>
+        <li>Utilizzare l'app in modo da danneggiare, disabilitare o sovraccaricare i nostri server</li>
+    </ul>
+
+    <h3>CONTENUTI DEGLI UTENTI</h3>
+    <p>Potresti avere la possibilità di pubblicare ricette, commenti o altri contenuti nell'app. Mantieni la proprietà di questi contenuti, ma ci concedi una licenza mondiale, non esclusiva, royalty-free per utilizzare, riprodurre, modificare, adattare, pubblicare, tradurre, distribuire e mostrare tali contenuti.</p>
+
+    <h3>ACCOUNT</h3>
+    <p>Sei responsabile di mantenere la riservatezza delle credenziali del tuo account e di tutte le attività che si verificano sul tuo account. Ci riserviamo il diritto di chiudere il tuo account in qualsiasi momento a nostra esclusiva discrezione.</p>
+
+    <h3>LIMITAZIONE DI RESPONSABILITÀ</h3>
+    <p>L'app è fornita "così com'è" senza garanzie di alcun tipo. Non saremo responsabili per danni diretti, indiretti, incidentali, speciali, consequenziali o punitivi derivanti dall'uso dell'app.</p>
+
+    <h3>MODIFICHE AI TERMINI</h3>
+    <p>Ci riserviamo il diritto di modificare questi termini in qualsiasi momento. Le modifiche entreranno in vigore dopo la pubblicazione nell'app. È tua responsabilità rivedere periodicamente questi termini.</p>
+
+    <h3>LEGGE APPLICABILE</h3>
+    <p>Questi termini sono regolati dalle leggi italiane, senza riguardo ai principi di conflitto di leggi.</p>
+
+    <h3>CONTATTI</h3>
+    <p>Per domande riguardanti questi Termini e Condizioni, contattaci all'indirizzo email support@smartchef.com.</p>
+</body>
+</html>
