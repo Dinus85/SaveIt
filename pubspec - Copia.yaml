@@ -1,0 +1,87 @@
+name: saveit
+description: Un'app per salvare e organizzare i tuoi link preferiti da social media e web.
+
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+
+  flutter:
+    sdk: flutter
+  
+
+  # UI
+  cupertino_icons: ^1.0.6
+  
+  # Storage
+  shared_preferences: ^2.2.3
+  
+  # ===============================
+  # NETWORK & REMOTE CONTENT
+  # ===============================
+  http: ^1.1.0                    # Per chiamate HTTP ai siti web e GitHub
+  html: ^0.15.4                   # Per parsing HTML e metadati Open Graph
+  universal_html: ^2.2.4          # Cross-platform HTML parsing (per Flutter Web)
+  
+  # ConnettivitÃ 
+  connectivity_plus: ^6.1.4       # Per controllo connessione di rete
+  
+  # URL launcher - per aprire link reali
+  url_launcher: ^6.2.6            # Per aprire link esterni
+  
+  # Image caching e processing
+  cached_network_image: ^3.3.1    # Per cache immagini da Open Graph
+  
+  # ===============================
+  # CONDIVISIONE CONTENUTI
+  # ===============================
+  receive_intent: ^0.2.3          # Plugin per ricevere contenuti condivisi
+  
+  # ===============================
+  # ANALYTICS & UTILITIES
+  # ===============================
+  intl: ^0.20.2                   # Per formattazione date nelle statistiche
+  package_info_plus: ^8.3.0       # Info app per debug
+  device_info_plus: ^11.5.0       # Info device per debug network
+  receive_sharing_intent: ^1.8.1
+  firebase_core: ^4.0.0
+  firebase_auth: ^6.0.1
+  google_sign_in: ^6.1.5
+  crypto: ^3.0.6
+  cloud_firestore: ^6.0.1
+
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icon/
+
+# ==========================================
+# CONFIGURAZIONI PLATFORM-SPECIFIC
+# ==========================================
+
+# Android permissions (android/app/src/main/AndroidManifest.xml)
+# Assicurati di avere:
+# <uses-permission android:name="android.permission.INTERNET" />
+# <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+# iOS permissions (ios/Runner/Info.plist)  
+# Assicurati di avere:
+# <key>NSAppTransportSecurity</key>
+# <dict>
+#   <key>NSAllowsArbitraryLoads</key>
+#   <true/>
+# </dict>

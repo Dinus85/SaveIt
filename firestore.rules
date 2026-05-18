@@ -1,0 +1,156 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasUserDoc() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function dashboardAccessDoc() {
+      return get(/databases/$(database)/documents/dashboard_accesses/$(request.auth.token.email));
+    }
+
+    function hasDashboardAccessDoc() {
+      return signedIn()
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/dashboard_accesses/$(request.auth.token.email));
+    }
+
+    function dashboardRole() {
+      return currentUserDoc().data.dashboardRole;
+    }
+
+    function dashboardAccessRole() {
+      return hasDashboardAccessDoc()
+        ? dashboardAccessDoc().data.dashboardRole
+        : 'none';
+    }
+
+    function currentUserBlocked() {
+      return hasUserDoc() && currentUserDoc().data.isBlocked == true;
+    }
+
+    function isDashboardAdmin() {
+      return signedIn()
+        && !currentUserBlocked()
+        && (
+          (hasUserDoc() && (currentUserDoc().data.role == 'admin' || dashboardRole() == 'admin'))
+          || dashboardAccessRole() == 'admin'
+        );
+    }
+
+    function isDashboardEditor() {
+      return signedIn()
+        && !currentUserBlocked()
+        && (
+          isDashboardAdmin()
+          || (hasUserDoc() && dashboardRole() == 'editor')
+          || dashboardAccessRole() == 'editor'
+        );
+    }
+
+    function isDashboardViewer() {
+      return signedIn()
+        && !currentUserBlocked()
+        && (
+          isDashboardEditor()
+          || (hasUserDoc() && dashboardRole() == 'author')
+          || dashboardAccessRole() == 'author'
+        );
+    }
+
+    function editorCanOnlyBlockUser() {
+      return isDashboardEditor()
+        && !isDashboardAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'isBlocked',
+          'blockedReason',
+          'blockedAt',
+          'blockedUpdatedAt',
+          'blockedUpdatedBy'
+        ]);
+    }
+
+    function selfRoleIsAllowed() {
+      return !('role' in request.resource.data)
+        || request.resource.data.role in ['free', 'premium'];
+    }
+
+    function selfDashboardAccessIsAllowed() {
+      return !('dashboardRole' in request.resource.data)
+        || request.resource.data.dashboardRole == 'none';
+    }
+
+    function doesNotSelfAssignAdminFields() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'isBlocked',
+        'blockedReason',
+        'blockedAt',
+        'blockedUpdatedAt',
+        'blockedUpdatedBy',
+        'roleUpdatedBy',
+        'dashboardRole',
+        'dashboardRoleUpdatedAt',
+        'dashboardRoleUpdatedBy'
+      ]);
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isDashboardViewer();
+      allow list: if isDashboardViewer();
+
+      allow create: if isOwner(userId)
+        && selfRoleIsAllowed()
+        && selfDashboardAccessIsAllowed();
+      allow update: if isDashboardAdmin()
+        || editorCanOnlyBlockUser()
+        || (isOwner(userId) && selfRoleIsAllowed() && doesNotSelfAssignAdminFields());
+      allow delete: if isDashboardAdmin() || isOwner(userId);
+
+      match /{document=**} {
+        allow read: if isOwner(userId) || isDashboardViewer();
+        allow write: if isOwner(userId) || isDashboardAdmin();
+      }
+    }
+
+    match /admin_logs/{logId} {
+      allow read: if isDashboardViewer();
+      allow create: if isDashboardEditor();
+      allow update, delete: if false;
+    }
+
+    match /dashboard_accesses/{accessId} {
+      allow get: if isDashboardViewer()
+        || (signedIn() && request.auth.token.email == accessId);
+      allow list, create, update, delete: if isDashboardAdmin();
+    }
+
+    match /user_notifications/{userId}/notifications/{notificationId} {
+      allow read: if isOwner(userId) || isDashboardViewer();
+      allow update: if isOwner(userId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'readAt'
+        ]);
+      allow create, delete: if isDashboardEditor();
+    }
+
+    match /notification_campaigns/{campaignId} {
+      allow read: if isDashboardViewer();
+      allow create: if isDashboardEditor();
+      allow update, delete: if false;
+    }
+  }
+}

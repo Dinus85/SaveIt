@@ -1,0 +1,109 @@
+name: savein
+description: Un'app per salvare e organizzare i tuoi link preferiti da social media e web.
+
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+2
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+
+  flutter:
+    sdk: flutter
+  
+
+  # UI
+  cupertino_icons: ^1.0.6
+  
+  # Storage
+  shared_preferences: ^2.2.3
+  
+  # ===============================
+  # FIREBASE - VERSIONI CORRETTE
+  # ===============================
+  firebase_core: ^3.6.0           # ✅ CORRETTO
+  firebase_auth: ^5.3.0           # ✅ CORRETTO
+  cloud_firestore: ^5.4.0         # ✅ CORRETTO
+  cloud_functions: ^5.1.3         # Per Cloud Functions
+  google_sign_in: ^6.1.5
+  crypto: ^3.0.6
+  
+  # ===============================
+  # NETWORK & REMOTE CONTENT
+  # ===============================
+  http: ^1.1.0                    # Per chiamate HTTP ai siti web e GitHub
+  html: ^0.15.4                   # Per parsing HTML e metadati Open Graph
+  universal_html: ^2.2.4          # Cross-platform HTML parsing (per Flutter Web)
+  
+  # Connettività 
+  connectivity_plus: ^6.1.4       # Per controllo connessione di rete
+  
+  # URL launcher - per aprire link reali
+  url_launcher: ^6.2.6            # Per aprire link esterni
+  
+  # Image caching e processing
+  cached_network_image: ^3.3.1    # Per cache immagini da Open Graph
+  path_provider: ^2.1.5          # Per salvare anteprime immagine localmente (cache persistente)
+  
+  # ===============================
+  # CONDIVISIONE CONTENUTI
+  # ===============================
+  receive_intent: ^0.2.3          # Plugin per ricevere contenuti condivisi
+  receive_sharing_intent: ^1.8.1
+  
+  # ===============================
+  # ANALYTICS & UTILITIES
+  # ===============================
+  intl: ^0.20.2                   # Per formattazione date nelle statistiche
+  package_info_plus: ^8.3.0       # Info app per debug
+  device_info_plus: ^11.5.0       # Info device per debug network
+  firebase_storage: ^12.4.10
+  image: ^4.8.0
+  google_mobile_ads: ^7.0.0
+  firebase_messaging: ^15.2.10
+  share_plus: ^12.0.2
+  flutter_local_notifications: ^20.1.0
+  timezone: ^0.10.1
+  flutter_timezone: ^5.0.2
+
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon_phone.png"
+  remove_alpha_ios: false
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon_phone.png"
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icon/
+
+# ==========================================
+# CONFIGURAZIONI PLATFORM-SPECIFIC
+# ==========================================
+
+# Android permissions (android/app/src/main/AndroidManifest.xml)
+# Assicurati di avere:
+# <uses-permission android:name="android.permission.INTERNET" />
+# <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+# iOS permissions (ios/Runner/Info.plist)  
+# Assicurati di avere:
+# <key>NSAppTransportSecurity</key>
+# <dict>
+#   <key>NSAllowsArbitraryLoads</key>
+#   <true/>
+# </dict>
