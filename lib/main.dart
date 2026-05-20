@@ -1015,10 +1015,7 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
               ),
             ),
           ),
-          if (!_isSearching) ...[
-            SizedBox(height: 12),
-            _buildPromotionBanner(themeColors),
-          ],
+          if (!_isSearching) SizedBox(height: 12),
         ],
       ),
     );
@@ -1287,6 +1284,7 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
   Widget _buildFoldersGrid() {
     final sortedFolders = _getSortedFolders();
     final showAds = AppAccessService().hasAds;
+    final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
 
     // Costruisce una lista di widget: righe da 2 cartelle + banner ogni 4 cartelle
     final List<Widget> rows = [];
@@ -1339,6 +1337,22 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 100),
         children: [
+          _buildPromotionBanner(themeColors),
+          if (sortedFolders.isNotEmpty) const SizedBox(height: 12),
+          if (sortedFolders.isEmpty)
+            SizedBox(
+              height: 260,
+              child: Center(
+                child: Text(
+                  'Trascina verso il basso per aggiornare le cartelle',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: themeColors.subtitleColor,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
           for (int i = 0; i < rows.length; i++) ...[
             rows[i],
             if (i < rows.length - 1 &&
@@ -1356,6 +1370,10 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     // Filtra solo le cartelle di livello 0 (root folders)
     final rootFolders =
         _folderService.folders.where((folder) => folder.level == 0).toList();
+
+    if (rootFolders.isEmpty) {
+      return [];
+    }
 
     // Trova la cartella "Tutti"
     final tuttiFolder = rootFolders.firstWhere(
