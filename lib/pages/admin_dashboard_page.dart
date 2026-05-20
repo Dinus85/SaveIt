@@ -1,7 +1,12 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:universal_html/html.dart' as html;
 
 import '../services/auth_service.dart';
 
@@ -1147,6 +1152,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             _activeSection == _AdminDashboardSection.users,
                         onPressed: _goToDashboardHome,
                       ),
+                      const SizedBox(width: 10),
+                      _AdminNavButton(
+                        label: 'Banner promo',
+                        selected:
+                            _activeSection == _AdminDashboardSection.promos,
+                        onPressed: () {
+                          setState(() {
+                            _activeSection = _AdminDashboardSection.promos;
+                          });
+                        },
+                      ),
                       if (_selectedUserId != null &&
                           (_activeSection ==
                                   _AdminDashboardSection.userDetail ||
@@ -1233,18 +1249,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             _AdminDashboardSection.notifications,
                         onPressed: _openNotificationsSection,
                       ),
-                      const SizedBox(width: 10),
-                      _AdminNavButton(
-                        label: 'Banner promo',
-                        selected:
-                            _activeSection == _AdminDashboardSection.promos,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.promos;
-                          });
-                        },
-                      ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Accessi',
                         selected:
@@ -2862,7 +2866,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 title: 'Funzionamento',
                 lines: const [
                   'SaveIn mostra questi banner sotto la barra di ricerca e nella pagina Account.',
-                  'Dimensioni consigliate: card full-width responsive, padding 14-16px, altezza automatica. Se aggiungi immagini future: 1200x400 o 1200x628.',
+                  'Il campo imageUrl e l’immagine realmente vista dagli utenti dentro al banner.',
+                  'Dimensioni immagine consigliate: 1200x400 px (formato 3:1). Alternativa accettabile: 1200x628 px, ma verra ritagliata/adattata.',
                   'type=cross_promo attiva la promo SaveIn/SmartChef; type=generic_promo apre un URL o mostra una proposta diversa.',
                   'Se oncePerUser=true, il banner sparisce dopo il primo utilizzo. Se la cross-promo e gia stata usata da una delle due app, non viene piu mostrata.',
                   'Priorita piu alta = banner scelto per primo quando piu banner sono attivi.',
@@ -2921,6 +2926,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                               Chip(label: Text('Tipo: ${banner.type}')),
                               Chip(label: Text('App: ${banner.app}')),
                               Chip(label: Text('Priorita: ${banner.priority}')),
+                              if (banner.imageUrl.isNotEmpty)
+                                const Chip(label: Text('Immagine presente')),
                               Chip(
                                 label: Text(
                                   banner.oncePerUser
@@ -3051,12 +3058,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     final secondaryController =
         TextEditingController(text: existing?.secondaryCtaLabel ?? '');
     final urlController = TextEditingController(text: existing?.actionUrl ?? '');
+    final imageUrlController =
+        TextEditingController(text: existing?.imageUrl ?? '');
     final priorityController =
         TextEditingController(text: (existing?.priority ?? 10).toString());
     var active = existing?.active ?? false;
     var oncePerUser = existing?.oncePerUser ?? true;
     var type = existing?.type ?? 'generic_promo';
     var app = existing?.app ?? 'savein';
+    var uploadingImage = false;
 
     final saved = await showDialog<bool>(
           context: context,
@@ -3138,6 +3148,100 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       ),
                       const SizedBox(height: 10),
                       TextField(
+                        controller: imageUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'URL immagine banner',
+                          hintText: 'Consigliato 1200x400 px',
+                        ),
+                        onChanged: (_) => setDialogState(() {}),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: uploadingImage
+                                  ? null
+                                  : () async {
+                                      final docId =
+                                          idController.text.trim().isEmpty
+                                              ? 'new_banner'
+                                              : idController.text.trim();
+                                      setDialogState(() => uploadingImage = true);
+                                      final uploadedUrl =
+                                          await _pickAndUploadPromotionBannerImage(
+                                        docId: docId,
+                                      );
+                                      if (uploadedUrl != null) {
+                                        imageUrlController.text = uploadedUrl;
+                                      }
+                                      setDialogState(() => uploadingImage = false);
+                                    },
+                              icon: uploadingImage
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.upload_file),
+                              label: Text(
+                                uploadingImage
+                                    ? 'Caricamento...'
+                                    : 'Carica immagine banner',
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: uploadingImage
+                                  ? null
+                                  : () async {
+                                      final selectedUrl =
+                                          await _showPromotionBannerImageHistory();
+                                      if (selectedUrl != null) {
+                                        imageUrlController.text = selectedUrl;
+                                        setDialogState(() {});
+                                      }
+                                    },
+                              icon: const Icon(Icons.photo_library_outlined),
+                              label: const Text('Scegli dallo storico'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Formato consigliato: 1200x400 px. L’immagine viene mostrata come banner 3:1.',
+                          style: TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      if (imageUrlController.text.trim().isNotEmpty)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: AspectRatio(
+                            aspectRatio: 3,
+                            child: Image.network(
+                              imageUrlController.text.trim(),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: Colors.black12,
+                                alignment: Alignment.center,
+                                child: const Text('Anteprima non disponibile'),
+                              ),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 10),
+                      TextField(
                         controller: priorityController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(labelText: 'Priorita'),
@@ -3193,6 +3297,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       'secondaryCtaLabel': secondaryController.text.trim(),
       'action': type == 'cross_promo' ? 'activate_cross_promo' : 'open_url',
       'actionUrl': urlController.text.trim(),
+      'imageUrl': imageUrlController.text.trim(),
       'targetApp': app,
       'direction': type == 'cross_promo' ? 'savein_to_smartchef' : '',
       'priority': int.tryParse(priorityController.text.trim()) ?? 10,
@@ -3201,6 +3306,216 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       'updatedBy': AuthService().currentUser?.email,
       if (existing == null) 'createdAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  Future<String?> _pickAndUploadPromotionBannerImage({
+    required String docId,
+  }) async {
+    try {
+      final input = html.FileUploadInputElement()
+        ..accept = 'image/png,image/jpeg,image/webp'
+        ..multiple = false;
+      input.click();
+      await input.onChange.first;
+
+      final file = input.files?.isNotEmpty == true ? input.files!.first : null;
+      if (file == null) return null;
+
+      final reader = html.FileReader();
+      reader.readAsArrayBuffer(file);
+      await reader.onLoad.first;
+
+      final result = reader.result;
+      final Uint8List bytes;
+      if (result is ByteBuffer) {
+        bytes = Uint8List.view(result);
+      } else if (result is Uint8List) {
+        bytes = result;
+      } else if (result is List<int>) {
+        bytes = Uint8List.fromList(result);
+      } else {
+        throw Exception('Formato file non leggibile');
+      }
+
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        throw Exception('Immagine non valida');
+      }
+      if (decoded.width < 900 || decoded.height < 300) {
+        _showAdminSnackBar(
+          'Immagine caricata, ma consigliata almeno 1200x400 px',
+        );
+      }
+
+      final safeDocId = docId.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final safeFileName =
+          file.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'uploadPromotionBannerImage',
+      );
+      final response = await callable.call<Map<String, dynamic>>(
+        {
+          'docId': safeDocId,
+          'fileName': safeFileName,
+          'contentType': file.type.isEmpty ? 'image/png' : file.type,
+          'base64': base64Encode(bytes),
+          'width': decoded.width,
+          'height': decoded.height,
+        },
+      );
+      final data = Map<String, dynamic>.from(response.data);
+      return data['imageUrl']?.toString();
+    } catch (error) {
+      _showAdminSnackBar(
+        'Errore caricamento immagine: $error',
+        isError: true,
+      );
+      return null;
+    }
+  }
+
+  Future<String?> _showPromotionBannerImageHistory() async {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Storico immagini banner'),
+        content: SizedBox(
+          width: 760,
+          height: 520,
+          child: FutureBuilder<List<_PromotionBannerImageAsset>>(
+            future: _loadPromotionBannerImageHistory(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final images = snapshot.data ?? const <_PromotionBannerImageAsset>[];
+              if (images.isEmpty) {
+                return const Center(
+                  child: Text('Nessuna immagine caricata nello storico.'),
+                );
+              }
+              return GridView.builder(
+                itemCount: images.length,
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 240,
+                  mainAxisExtent: 220,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                ),
+                itemBuilder: (context, index) {
+                  final image = images[index];
+                  return Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: Image.network(
+                            image.imageUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Icon(Icons.broken_image_outlined),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Text(
+                            image.fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: () => Navigator.of(dialogContext)
+                                      .pop(image.imageUrl),
+                                  child: const Text('Usa'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                tooltip: 'Elimina definitivamente',
+                                onPressed: () async {
+                                  final confirmed = await showDialog<bool>(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: const Text('Eliminare immagine?'),
+                                          content: const Text(
+                                            'Il file verra eliminato definitivamente dallo Storage. Se un banner la usa ancora, non sara piu visibile.',
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.of(context).pop(false),
+                                              child: const Text('Annulla'),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: () =>
+                                                  Navigator.of(context).pop(true),
+                                              child: const Text('Elimina'),
+                                            ),
+                                          ],
+                                        ),
+                                      ) ??
+                                      false;
+                                  if (!confirmed) return;
+                                  await _deletePromotionBannerImage(image.filePath);
+                                  if (!dialogContext.mounted) return;
+                                  Navigator.of(dialogContext).pop();
+                                },
+                                icon: const Icon(Icons.delete_outline),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Chiudi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<List<_PromotionBannerImageAsset>>
+      _loadPromotionBannerImageHistory() async {
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'listPromotionBannerImages',
+    );
+    final response = await callable.call<Map<String, dynamic>>();
+    final data = Map<String, dynamic>.from(response.data);
+    final rawImages = data['images'];
+    if (rawImages is! List) return const [];
+    return rawImages
+        .whereType<Map>()
+        .map((item) => _PromotionBannerImageAsset.fromMap(
+              Map<String, dynamic>.from(item),
+            ))
+        .where((item) => item.imageUrl.isNotEmpty && item.filePath.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _deletePromotionBannerImage(String filePath) async {
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'deletePromotionBannerImage',
+    );
+    await callable.call<Map<String, dynamic>>({'filePath': filePath});
+    _showAdminSnackBar('Immagine eliminata definitivamente');
   }
 
   Widget _buildGlobalStatsPage() {
@@ -5756,6 +6071,7 @@ class _PromotionBannerRecord {
   final String ctaLabel;
   final String secondaryCtaLabel;
   final String actionUrl;
+  final String imageUrl;
   final int priority;
   final bool oncePerUser;
 
@@ -5769,6 +6085,7 @@ class _PromotionBannerRecord {
     required this.ctaLabel,
     required this.secondaryCtaLabel,
     required this.actionUrl,
+    required this.imageUrl,
     required this.priority,
     required this.oncePerUser,
   });
@@ -5787,6 +6104,7 @@ class _PromotionBannerRecord {
       ctaLabel: (data['ctaLabel'] ?? '').toString(),
       secondaryCtaLabel: (data['secondaryCtaLabel'] ?? '').toString(),
       actionUrl: (data['actionUrl'] ?? '').toString(),
+      imageUrl: (data['imageUrl'] ?? '').toString(),
       priority: (data['priority'] as num?)?.toInt() ?? 0,
       oncePerUser: data['oncePerUser'] != false,
     );
@@ -5803,6 +6121,26 @@ class _PromotionBannerStats {
     required this.clicks,
     required this.redemptions,
   });
+}
+
+class _PromotionBannerImageAsset {
+  final String filePath;
+  final String imageUrl;
+  final String fileName;
+
+  const _PromotionBannerImageAsset({
+    required this.filePath,
+    required this.imageUrl,
+    required this.fileName,
+  });
+
+  factory _PromotionBannerImageAsset.fromMap(Map<String, dynamic> data) {
+    return _PromotionBannerImageAsset(
+      filePath: (data['filePath'] ?? '').toString(),
+      imageUrl: (data['imageUrl'] ?? '').toString(),
+      fileName: (data['fileName'] ?? '').toString(),
+    );
+  }
 }
 
 class _AdminInfoBox extends StatelessWidget {

@@ -1061,24 +1061,48 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                isCrossPromo
-                    ? Icons.local_fire_department
-                    : Icons.campaign_outlined,
-                color: isCrossPromo ? Color(0xFFD97706) : Colors.black87,
-              ),
-              SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      banner.title,
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
+                    if (banner.imageUrl.trim().isNotEmpty) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: AspectRatio(
+                          aspectRatio: 3,
+                          child: Image.network(
+                            banner.imageUrl.trim(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: Colors.black12,
+                              alignment: Alignment.center,
+                              child: Icon(Icons.broken_image_outlined),
+                            ),
+                          ),
+                        ),
                       ),
+                      SizedBox(height: 10),
+                    ],
+                    Row(
+                      children: [
+                        Icon(
+                          isCrossPromo
+                              ? Icons.local_fire_department
+                              : Icons.campaign_outlined,
+                          color: isCrossPromo ? Color(0xFFD97706) : Colors.black87,
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            banner.title,
+                            style: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     SizedBox(height: 4),
                     Text(

@@ -3,11 +3,30 @@ const functionsV1 = require("firebase-functions/v1");
 const {onCall, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 // Inizializza Firebase Admin
 admin.initializeApp();
 
 const db = admin.firestore();
+
+const requireDashboardAdmin = async (auth, actionLabel) => {
+  if (!auth) {
+    throw new HttpsError("unauthenticated", "Login richiesto");
+  }
+  const role = await getDashboardRoleForCaller(auth);
+  if (role !== "admin") {
+    throw new HttpsError(
+        "permission-denied",
+        `Solo gli admin possono ${actionLabel}`
+    );
+  }
+};
+
+const firebaseStorageDownloadUrl = (bucketName, filePath, token) => {
+  const encodedPath = encodeURIComponent(filePath);
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`;
+};
 
 // Configurazione Nodemailer - supporta sia Aruba SMTP che Gmail
 // Per Aruba: impostare EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASSWORD
@@ -842,6 +861,7 @@ const promotionBannerResponse = (promo) => ({
   secondaryCtaLabel: (promo.secondaryCtaLabel || "").toString(),
   action: (promo.action || "open_url").toString(),
   actionUrl: (promo.actionUrl || "").toString(),
+  imageUrl: (promo.imageUrl || "").toString(),
   targetApp: (promo.targetApp || "").toString(),
   priority: Number(promo.priority || 0),
 });
@@ -904,6 +924,109 @@ exports.recordPromotionBannerEvent = onCall(async (request) => {
   }, {merge: true});
   return {ok: true};
 });
+
+exports.uploadPromotionBannerImage = onCall(
+    {timeoutSeconds: 60, memory: "512MiB"},
+    async (request) => {
+      const auth = request.auth;
+      await requireDashboardAdmin(auth, "caricare immagini banner");
+
+      const data = request.data || {};
+      const docId = (data.docId || "banner").toString().trim();
+      const fileName = (data.fileName || "banner.png").toString().trim();
+      const contentType = (data.contentType || "image/png").toString().trim();
+      const base64 = (data.base64 || "").toString();
+      if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Formato immagine non valido. Usa PNG, JPG o WEBP."
+        );
+      }
+      const buffer = Buffer.from(base64, "base64");
+      if (!buffer.length) {
+        throw new HttpsError("invalid-argument", "File immagine vuoto");
+      }
+      if (buffer.length > 5 * 1024 * 1024) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Immagine troppo grande. Usa un file sotto 5 MB."
+        );
+      }
+
+      const safeDocId = docId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const token = crypto.randomUUID();
+      const filePath = `promotion_banners/${safeDocId}/${Date.now()}_${safeFileName}`;
+      const bucket = admin.storage().bucket();
+      const file = bucket.file(filePath);
+      await file.save(buffer, {
+        metadata: {
+          contentType,
+          metadata: {
+            firebaseStorageDownloadTokens: token,
+            recommendedSize: "1200x400",
+            uploadedBy: auth.token.email || auth.uid,
+          },
+        },
+      });
+
+      const encodedPath = encodeURIComponent(filePath);
+      return {
+        filePath,
+        imageUrl: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${token}`,
+      };
+    }
+);
+
+exports.listPromotionBannerImages = onCall(
+    {timeoutSeconds: 60, memory: "512MiB"},
+    async (request) => {
+      const auth = request.auth;
+      await requireDashboardAdmin(auth, "vedere lo storico immagini banner");
+
+      const bucket = admin.storage().bucket();
+      const [files] = await bucket.getFiles({prefix: "promotion_banners/"});
+      const images = files
+          .filter((file) => !file.name.endsWith("/"))
+          .map((file) => {
+            const metadata = file.metadata || {};
+            const customMetadata = metadata.metadata || {};
+            const tokens = (customMetadata.firebaseStorageDownloadTokens || "")
+                .toString()
+                .split(",")
+                .map((token) => token.trim())
+                .filter(Boolean);
+            const token = tokens[0] || crypto.randomUUID();
+            return {
+              filePath: file.name,
+              imageUrl: firebaseStorageDownloadUrl(bucket.name, file.name, token),
+              fileName: file.name.split("/").pop() || file.name,
+              size: Number(metadata.size || 0),
+              contentType: metadata.contentType || "",
+              createdAt: metadata.timeCreated || "",
+              updatedAt: metadata.updated || "",
+            };
+          })
+          .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+
+      return {images};
+    }
+);
+
+exports.deletePromotionBannerImage = onCall(
+    {timeoutSeconds: 60, memory: "256MiB"},
+    async (request) => {
+      const auth = request.auth;
+      await requireDashboardAdmin(auth, "eliminare immagini banner");
+
+      const filePath = (request.data?.filePath || "").toString().trim();
+      if (!filePath || !filePath.startsWith("promotion_banners/")) {
+        throw new HttpsError("invalid-argument", "Percorso immagine non valido");
+      }
+      await admin.storage().bucket().file(filePath).delete({ignoreNotFound: true});
+      return {ok: true};
+    }
+);
 
 exports.activateSmartChefLaunchPromo = onCall(
     async (request) => {

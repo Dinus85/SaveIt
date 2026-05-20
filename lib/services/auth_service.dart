@@ -261,6 +261,7 @@ class PromotionBanner {
   final String secondaryCtaLabel;
   final String action;
   final String actionUrl;
+  final String imageUrl;
   final String targetApp;
 
   const PromotionBanner({
@@ -272,6 +273,7 @@ class PromotionBanner {
     required this.secondaryCtaLabel,
     required this.action,
     required this.actionUrl,
+    required this.imageUrl,
     required this.targetApp,
   });
 
@@ -287,6 +289,7 @@ class PromotionBanner {
       secondaryCtaLabel: data['secondaryCtaLabel']?.toString() ?? '',
       action: data['action']?.toString() ?? 'open_url',
       actionUrl: data['actionUrl']?.toString() ?? '',
+      imageUrl: data['imageUrl']?.toString() ?? '',
       targetApp: data['targetApp']?.toString() ?? '',
     );
   }

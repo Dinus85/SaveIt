@@ -25,7 +25,7 @@ Alcuni identificativi tecnici restano volutamente invariati per non rompere Fire
 
 Identificativi tecnici ancora legacy:
 - Firebase project ID: `saveit-app-1784d`
-- Android package: `com.example.saveit`
+- Android package / Play Store package: `eu.savein.app`
 - iOS bundle ID: `com.example.saveit`
 - Firebase auth domain: `saveit-app-1784d.firebaseapp.com`
 - Firebase storage bucket: `saveit-app-1784d.firebasestorage.app`
@@ -178,6 +178,7 @@ Sezioni:
 - Cartelle utente
 - Piani Free/Premium
 - Costi/Ricavi
+- Banner promo
 - Accessi dashboard: gestisce `dashboard_accesses`, non la lista utenti app
 
 Vincoli UI:
@@ -186,6 +187,46 @@ Vincoli UI:
 - Dettaglio utente in pagina dedicata, non pannello laterale
 - Post: elenco titoli, filtro per provenienza/social/sito
 - Cartelle: espandibili, con sottocartelle e post
+
+## Promo incrociate e banner dinamici
+
+SaveIn! supporta banner promozionali configurabili da dashboard e promo incrociate con SmartChef.
+
+Collezioni Firestore:
+- `promotion_banners`: configurazione banner. Campi principali: `active`, `app`, `apps`, `type`, `title`, `message`, `ctaLabel`, `secondaryCtaLabel`, `action`, `actionUrl`, `imageUrl`, `priority`, `oncePerUser`, `direction`.
+- `promotion_banner_events`: statistiche aggregate per banner (`view`, `click`) con `promotionId`, `eventType`, `placement`, `count`.
+- `promotion_redemptions`: riscatti promo, usato per nascondere banner `oncePerUser` e mostrare statistiche utilizzi.
+- `cross_app_promos`: stato promo SaveIn! ↔ SmartChef, con direzioni `savein_to_smartchef` e `smartchef_to_savein`.
+
+Dashboard:
+- La voce `Banner promo` e' subito vicino a `Home dashboard` per non restare nascosta nello scroll orizzontale.
+- La pagina permette creare, modificare, attivare/disattivare, eliminare e vedere statistiche dei banner.
+- Il campo `imageUrl` e' l'immagine realmente mostrata agli utenti; dimensione consigliata `1200x400 px` (rapporto 3:1). Immagini `1200x628` sono accettate ma vengono adattate/ritagliate.
+- Il pulsante `Carica immagine banner` carica immagini PNG/JPG/WEBP su Firebase Storage tramite Cloud Function admin-only.
+- Il pulsante `Scegli dallo storico` mostra tutte le immagini presenti in Storage sotto `promotion_banners/`, consente di riutilizzarle e di eliminarle definitivamente. Eliminare un'immagine usata da un banner rompe la visualizzazione di quel banner finche' non si sostituisce `imageUrl`.
+
+Cloud Functions:
+- `getActivePromotionBanner`: restituisce il banner attivo piu' prioritario per utente/app, rispettando `active`, finestra temporale, `oncePerUser` e riscatti gia' presenti.
+- `recordPromotionBannerEvent`: registra view/click.
+- `uploadPromotionBannerImage`: carica file banner su Storage, solo admin dashboard.
+- `listPromotionBannerImages`: elenca storico immagini banner da Storage, solo admin dashboard.
+- `deletePromotionBannerImage`: elimina definitivamente un file banner da Storage, solo admin dashboard.
+- `activateSmartChefLaunchPromo`, `confirmSmartChefCrossPromo`, `receiveSmartChefLaunchPromo`, `claimPendingSmartChefLaunchPromo`: gestiscono la promo incrociata account-based tramite email.
+
+UI utente:
+- Home SaveIn!: banner sotto la barra di ricerca.
+- Pagina Account: banner anche nella sezione account/piano.
+- Se `imageUrl` e' valorizzato, l'immagine viene mostrata in alto nel banner; titolo, messaggio e CTA restano sotto.
+- Le view vengono deduplicate localmente per evitare conteggi ripetuti nella stessa sessione.
+
+Deploy:
+```powershell
+flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY_TIMEOUT='60'; firebase deploy --only functions,hosting }
+```
+
+Build mobile:
+- Versione preparata per prossima release: `pubspec.yaml` `1.0.0+8`.
+- Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
 
 ## Import post e metadati
 
@@ -735,3 +776,4 @@ L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla p
 - Non perdere `android/savein-release.jks` e la sua password: senza di essi è impossibile pubblicare aggiornamenti su Play Store.
 - La Privacy Policy pubblica è su GitHub Pages (`dinus85.github.io/saveit-legal-content/privacy.html`). Per aggiornarla modificare `privacy.html` nel repo `Dinus85/saveit-legal-content`.
 - Per aggiornare gli ID AdMob iOS, creare l'app su AdMob per iOS e sostituire gli ID di test in `interstitial_ad_service.dart` e `ios/Runner/Info.plist`.
+- Le immagini banner promo stanno in Firebase Storage sotto `promotion_banners/` e sono gestite da funzioni admin-only. Non aprire regole Storage pubbliche in scrittura per gestire questi upload.
