@@ -745,6 +745,560 @@ exports.sendWelcomeEmail = functionsV1.auth.user().onCreate(async (user) => {
 });
 
 const normalizeEmail = (email) => (email || "").toString().toLowerCase().trim();
+const CROSS_PROMO_DURATION_DAYS = 30;
+const CROSS_PROMO_CLAIM_WINDOW_DAYS = 14;
+const PROMOTION_BANNERS_COLLECTION = "promotion_banners";
+const PROMOTION_REDEMPTIONS_COLLECTION = "promotion_redemptions";
+const PROMOTION_EVENTS_COLLECTION = "promotion_banner_events";
+const SAVEIN_SMARTCHEF_PROMO_ID = "savein_smartchef_launch";
+
+const addDays = (date, days) => {
+  const copy = new Date(date.getTime());
+  copy.setDate(copy.getDate() + days);
+  return copy;
+};
+
+const requireCrossPromoConfig = () => {
+  const smartChefBackendUrl = (process.env.SMARTCHEF_BACKEND_URL || "").replace(/\/$/, "");
+  const secret = process.env.CROSS_PROMO_SECRET || "";
+  if (!smartChefBackendUrl || !secret) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Configurazione promo mancante: imposta SMARTCHEF_BACKEND_URL e CROSS_PROMO_SECRET."
+    );
+  }
+  return {smartChefBackendUrl, secret};
+};
+
+const promoRedemptionId = (email, promotionId) =>
+  `${normalizeEmail(email)}|${(promotionId || "").toString().trim()}`;
+
+const timestampToDate = (value) => {
+  if (!value) return null;
+  if (value.toDate) return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const promotionMatchesApp = (promo, appId) => {
+  const apps = Array.isArray(promo.apps) ? promo.apps : [];
+  const app = (promo.app || promo.targetApp || "").toString().toLowerCase();
+  return app === "both" || app === appId || apps.includes(appId) || apps.includes("both");
+};
+
+const isPromotionInWindow = (promo, now = new Date()) => {
+  const startsAt = timestampToDate(promo.startsAt);
+  const endsAt = timestampToDate(promo.endsAt);
+  if (startsAt && now < startsAt) return false;
+  if (endsAt && now > endsAt) return false;
+  return true;
+};
+
+const isPromotionUsableForUser = async ({email, promotionId, direction}) => {
+  const redemption = await db
+      .collection(PROMOTION_REDEMPTIONS_COLLECTION)
+      .doc(promoRedemptionId(email, promotionId))
+      .get();
+  if (redemption.exists) return false;
+
+  const directions = direction ?
+    [direction, "savein_to_smartchef", "smartchef_to_savein"] :
+    ["savein_to_smartchef", "smartchef_to_savein"];
+  for (const promoDirection of [...new Set(directions)]) {
+    const crossPromo = await db.collection("cross_app_promos")
+        .doc(`${email}|${promoDirection}`)
+        .get();
+    if (crossPromo.exists) {
+      const status = (crossPromo.data()?.status || "").toString();
+      if (["pending", "claimed"].includes(status)) {
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+const getConfiguredPromotion = async ({promotionId, appId, email, direction}) => {
+  const snap = await db.collection(PROMOTION_BANNERS_COLLECTION).doc(promotionId).get();
+  if (!snap.exists) return null;
+  const promo = {id: snap.id, ...snap.data()};
+  if (promo.active !== true) return null;
+  if (!promotionMatchesApp(promo, appId)) return null;
+  if (!isPromotionInWindow(promo)) return null;
+  const oncePerUser = promo.oncePerUser !== false;
+  if (oncePerUser) {
+    const usable = await isPromotionUsableForUser({email, promotionId, direction});
+    if (!usable) return null;
+  }
+  return promo;
+};
+
+const promotionBannerResponse = (promo) => ({
+  id: promo.id,
+  type: (promo.type || "generic_promo").toString(),
+  title: (promo.title || "").toString(),
+  message: (promo.message || "").toString(),
+  ctaLabel: (promo.ctaLabel || "Scopri").toString(),
+  secondaryCtaLabel: (promo.secondaryCtaLabel || "").toString(),
+  action: (promo.action || "open_url").toString(),
+  actionUrl: (promo.actionUrl || "").toString(),
+  targetApp: (promo.targetApp || "").toString(),
+  priority: Number(promo.priority || 0),
+});
+
+exports.getActivePromotionBanner = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) {
+    throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+  }
+  const email = normalizeEmail(auth.token?.email);
+  if (!email) return {banner: null};
+
+  const snap = await db.collection(PROMOTION_BANNERS_COLLECTION)
+      .where("active", "==", true)
+      .limit(30)
+      .get();
+  const candidates = [];
+  for (const doc of snap.docs) {
+    const promo = {id: doc.id, ...doc.data()};
+    if (!promotionMatchesApp(promo, "savein")) continue;
+    if (!isPromotionInWindow(promo)) continue;
+    const oncePerUser = promo.oncePerUser !== false;
+    const direction = promo.direction || (promo.id === SAVEIN_SMARTCHEF_PROMO_ID ? "savein_to_smartchef" : "");
+    if (oncePerUser) {
+      const usable = await isPromotionUsableForUser({email, promotionId: promo.id, direction});
+      if (!usable) continue;
+    }
+    candidates.push(promo);
+  }
+
+  candidates.sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0));
+  return {banner: candidates.length ? promotionBannerResponse(candidates[0]) : null};
+});
+
+exports.recordPromotionBannerEvent = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) {
+    throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+  }
+  const email = normalizeEmail(auth.token?.email);
+  const data = request.data || {};
+  const promotionId = (data.promotionId || "").toString().trim();
+  const eventType = (data.eventType || "").toString().trim();
+  const placement = (data.placement || "").toString().trim();
+  if (!promotionId || !["view", "click"].includes(eventType)) {
+    throw new HttpsError("invalid-argument", "Evento banner non valido.");
+  }
+
+  const docId = `${email}|${promotionId}|${eventType}|${placement || "default"}`;
+  await db.collection(PROMOTION_EVENTS_COLLECTION).doc(docId).set({
+    email,
+    normalizedEmail: email,
+    userId: auth.uid,
+    promotionId,
+    eventType,
+    placement,
+    count: admin.firestore.FieldValue.increment(1),
+    firstSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+  return {ok: true};
+});
+
+exports.activateSmartChefLaunchPromo = onCall(
+    async (request) => {
+      const auth = request.auth;
+      if (!auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Devi essere autenticato per attivare la promo."
+        );
+      }
+
+      const email = normalizeEmail(auth.token?.email);
+      if (!email) {
+        throw new HttpsError(
+            "failed-precondition",
+            "Il tuo account non ha un'email valida."
+        );
+      }
+
+      const configuredPromo = await getConfiguredPromotion({
+        promotionId: SAVEIN_SMARTCHEF_PROMO_ID,
+        appId: "savein",
+        email,
+        direction: "savein_to_smartchef",
+      });
+      if (!configuredPromo) {
+        throw new HttpsError(
+            "failed-precondition",
+            "Questa promo non è attiva oppure è già stata utilizzata."
+        );
+      }
+
+      const {smartChefBackendUrl, secret} = requireCrossPromoConfig();
+      const now = new Date();
+      const premiumUntil = addDays(now, CROSS_PROMO_DURATION_DAYS);
+      const claimBy = addDays(now, CROSS_PROMO_CLAIM_WINDOW_DAYS);
+      const promoId = `${email}|savein_to_smartchef`;
+      const userRef = db.collection("users").doc(auth.uid);
+      const promoRef = db.collection("cross_app_promos").doc(promoId);
+      const redemptionRef = db.collection(PROMOTION_REDEMPTIONS_COLLECTION)
+          .doc(promoRedemptionId(email, SAVEIN_SMARTCHEF_PROMO_ID));
+
+      await db.runTransaction(async (transaction) => {
+        const promoSnap = await transaction.get(promoRef);
+        const redemptionSnap = await transaction.get(redemptionRef);
+        if (redemptionSnap.exists) {
+          throw new HttpsError(
+              "already-exists",
+              "Hai già utilizzato questa promo."
+          );
+        }
+        const existing = promoSnap.exists ? promoSnap.data() : {};
+        if (existing?.status === "claimed") {
+          throw new HttpsError(
+              "already-exists",
+              "Hai già completato questa promo con SmartChef."
+          );
+        }
+
+        transaction.set(userRef, {
+          role: "premium",
+          premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+          premiumSource: "cross_promo_savein_to_smartchef",
+          roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          roleUpdatedBy: "cross_promo_savein_to_smartchef",
+          email,
+          normalizedEmail: email,
+        }, {merge: true});
+
+        transaction.set(promoRef, {
+          email,
+          normalizedEmail: email,
+          sourceApp: "savein",
+          targetApp: "smartchef",
+          status: "pending",
+          sourceUid: auth.uid,
+          durationDays: CROSS_PROMO_DURATION_DAYS,
+          claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
+          saveinActivatedAt: admin.firestore.Timestamp.fromDate(now),
+          saveinPremiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+          targetClaimBy: admin.firestore.Timestamp.fromDate(claimBy),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: existing?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+
+        transaction.set(redemptionRef, {
+          email,
+          normalizedEmail: email,
+          promotionId: SAVEIN_SMARTCHEF_PROMO_ID,
+          sourceApp: "savein",
+          targetApp: "smartchef",
+          direction: "savein_to_smartchef",
+          status: "started",
+          userId: auth.uid,
+          redeemedAt: admin.firestore.FieldValue.serverTimestamp(),
+          premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+        }, {merge: true});
+      });
+
+      const response = await fetch(`${smartChefBackendUrl}/cross-promos/savein-pending`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Cross-Promo-Secret": secret,
+        },
+        body: JSON.stringify({
+          email,
+          sourceUid: auth.uid,
+          durationDays: CROSS_PROMO_DURATION_DAYS,
+          claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
+          saveinActivatedAt: now.toISOString(),
+          saveinPremiumUntil: premiumUntil.toISOString(),
+          claimBy: claimBy.toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new HttpsError(
+            "internal",
+            `SmartChef non ha accettato la promo (${response.status}). ${text}`
+        );
+      }
+
+      await db.collection("admin_logs").add({
+        action: "cross_promo_savein_to_smartchef_started",
+        actorId: auth.uid,
+        actorEmail: email,
+        targetEmail: email,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        details: {
+          promoId,
+          premiumUntil: premiumUntil.toISOString(),
+          claimBy: claimBy.toISOString(),
+        },
+      });
+
+      return {
+        success: true,
+        status: "pending",
+        targetApp: "smartchef",
+        durationDays: CROSS_PROMO_DURATION_DAYS,
+        claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
+        premiumUntil: premiumUntil.toISOString(),
+        claimBy: claimBy.toISOString(),
+      };
+    }
+);
+
+exports.confirmSmartChefCrossPromo = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ok: false, error: "method_not_allowed"});
+    return;
+  }
+
+  const expectedSecret = process.env.CROSS_PROMO_SECRET || "";
+  const providedSecret = req.get("X-Cross-Promo-Secret") || "";
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    res.status(403).json({ok: false, error: "forbidden"});
+    return;
+  }
+
+  const body = req.body || {};
+  const email = normalizeEmail(body.email);
+  if (!email) {
+    res.status(400).json({ok: false, error: "missing_email"});
+    return;
+  }
+
+  const promoId = `${email}|savein_to_smartchef`;
+  const smartchefPremiumUntil = body.smartchefPremiumUntil ?
+    new Date(body.smartchefPremiumUntil) :
+    null;
+
+  await db.collection("cross_app_promos").doc(promoId).set({
+    status: "claimed",
+    smartchefUid: (body.smartchefUid || "").toString(),
+    smartchefClaimedAt: body.smartchefClaimedAt ?
+      admin.firestore.Timestamp.fromDate(new Date(body.smartchefClaimedAt)) :
+      admin.firestore.FieldValue.serverTimestamp(),
+    smartchefPremiumUntil: smartchefPremiumUntil && !Number.isNaN(smartchefPremiumUntil.getTime()) ?
+      admin.firestore.Timestamp.fromDate(smartchefPremiumUntil) :
+      null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  await db.collection("admin_logs").add({
+    action: "cross_promo_smartchef_claimed",
+    actorEmail: email,
+    targetEmail: email,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    details: {
+      promoId,
+      smartchefUid: (body.smartchefUid || "").toString(),
+      smartchefPremiumUntil: body.smartchefPremiumUntil || null,
+    },
+  });
+
+  res.json({ok: true});
+});
+
+exports.receiveSmartChefLaunchPromo = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ok: false, error: "method_not_allowed"});
+    return;
+  }
+
+  const expectedSecret = process.env.CROSS_PROMO_SECRET || "";
+  const providedSecret = req.get("X-Cross-Promo-Secret") || "";
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    res.status(403).json({ok: false, error: "forbidden"});
+    return;
+  }
+
+  const body = req.body || {};
+  const email = normalizeEmail(body.email);
+  if (!email) {
+    res.status(400).json({ok: false, error: "missing_email"});
+    return;
+  }
+
+  const now = new Date();
+  const claimBy = body.claimBy ? new Date(body.claimBy) : addDays(now, CROSS_PROMO_CLAIM_WINDOW_DAYS);
+  const smartchefPremiumUntil = body.smartchefPremiumUntil ?
+    new Date(body.smartchefPremiumUntil) :
+    null;
+  const promoId = `${email}|smartchef_to_savein`;
+  const promoRef = db.collection("cross_app_promos").doc(promoId);
+  const promoSnap = await promoRef.get();
+  const existing = promoSnap.exists ? promoSnap.data() : {};
+
+  if (existing?.status === "claimed") {
+    res.json({ok: true, status: "claimed", email});
+    return;
+  }
+
+  await promoRef.set({
+    email,
+    normalizedEmail: email,
+    sourceApp: "smartchef",
+    targetApp: "savein",
+    status: "pending",
+    smartchefUid: (body.smartchefUid || "").toString(),
+    durationDays: CROSS_PROMO_DURATION_DAYS,
+    claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
+    smartchefActivatedAt: body.smartchefActivatedAt ?
+      admin.firestore.Timestamp.fromDate(new Date(body.smartchefActivatedAt)) :
+      admin.firestore.Timestamp.fromDate(now),
+    smartchefPremiumUntil: smartchefPremiumUntil && !Number.isNaN(smartchefPremiumUntil.getTime()) ?
+      admin.firestore.Timestamp.fromDate(smartchefPremiumUntil) :
+      null,
+    targetClaimBy: admin.firestore.Timestamp.fromDate(claimBy),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: existing?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  await db.collection("admin_logs").add({
+    action: "cross_promo_smartchef_to_savein_pending",
+    actorEmail: email,
+    targetEmail: email,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    details: {
+      promoId,
+      smartchefUid: (body.smartchefUid || "").toString(),
+      claimBy: claimBy.toISOString(),
+    },
+  });
+
+  res.json({
+    ok: true,
+    status: "pending",
+    email,
+    claimBy: claimBy.toISOString(),
+  });
+});
+
+exports.claimPendingSmartChefLaunchPromo = onCall(
+    async (request) => {
+      const auth = request.auth;
+      if (!auth) {
+        throw new HttpsError(
+            "unauthenticated",
+            "Devi essere autenticato per attivare la promo."
+        );
+      }
+
+      const email = normalizeEmail(auth.token?.email);
+      if (!email) {
+        throw new HttpsError(
+            "failed-precondition",
+            "Il tuo account non ha un'email valida."
+        );
+      }
+
+      const now = new Date();
+      const premiumUntil = addDays(now, CROSS_PROMO_DURATION_DAYS);
+      const promoId = `${email}|smartchef_to_savein`;
+      const promoRef = db.collection("cross_app_promos").doc(promoId);
+      const userRef = db.collection("users").doc(auth.uid);
+      let claimed = false;
+      let reason = "not_found";
+      let claimBy = null;
+
+      await db.runTransaction(async (transaction) => {
+        const promoSnap = await transaction.get(promoRef);
+        if (!promoSnap.exists) {
+          return;
+        }
+
+        const promo = promoSnap.data() || {};
+        if (promo.status === "claimed") {
+          reason = "already_claimed";
+          return;
+        }
+
+        const targetClaimBy = promo.targetClaimBy?.toDate ?
+          promo.targetClaimBy.toDate() :
+          null;
+        claimBy = targetClaimBy;
+        if (targetClaimBy && now > targetClaimBy) {
+          reason = "expired";
+          transaction.set(promoRef, {
+            status: "expired",
+            expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, {merge: true});
+          return;
+        }
+
+        transaction.set(userRef, {
+          role: "premium",
+          premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+          premiumSource: "cross_promo_smartchef_to_savein",
+          roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          roleUpdatedBy: "cross_promo_smartchef_to_savein",
+          email,
+          normalizedEmail: email,
+        }, {merge: true});
+
+        transaction.set(promoRef, {
+          status: "claimed",
+          saveinUid: auth.uid,
+          saveinClaimedAt: admin.firestore.Timestamp.fromDate(now),
+          saveinPremiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+
+        claimed = true;
+        reason = "claimed";
+      });
+
+      if (claimed) {
+        const smartChefConfirmUrl = (process.env.SMARTCHEF_CROSS_PROMO_CONFIRM_URL || "").trim();
+        const secret = process.env.CROSS_PROMO_SECRET || "";
+        if (smartChefConfirmUrl && secret) {
+          await fetch(smartChefConfirmUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Cross-Promo-Secret": secret,
+            },
+            body: JSON.stringify({
+              email,
+              saveinUid: auth.uid,
+              saveinClaimedAt: now.toISOString(),
+              saveinPremiumUntil: premiumUntil.toISOString(),
+            }),
+          }).catch(() => null);
+        }
+
+        await db.collection("admin_logs").add({
+          action: "cross_promo_smartchef_to_savein_claimed",
+          actorId: auth.uid,
+          actorEmail: email,
+          targetEmail: email,
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          details: {
+            promoId,
+            premiumUntil: premiumUntil.toISOString(),
+          },
+        });
+      }
+
+      return {
+        success: true,
+        claimed,
+        reason,
+        sourceApp: "smartchef",
+        targetApp: "savein",
+        durationDays: CROSS_PROMO_DURATION_DAYS,
+        premiumUntil: claimed ? premiumUntil.toISOString() : null,
+        claimBy: claimBy ? claimBy.toISOString() : null,
+      };
+    }
+);
 
 const getDashboardRoleForCaller = async (auth) => {
   const uid = auth?.uid;

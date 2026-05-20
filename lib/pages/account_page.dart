@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/folder.dart';
 import '../utils/theme_helpers.dart';
 import '../pages/simple_stats_page.dart';
@@ -1037,6 +1038,13 @@ class AccountPage extends StatelessWidget {
                   cardTextColor,
                   cardSubtitleColor,
                 ),
+                _buildSmartChefPromoCard(
+                  context,
+                  currentUser,
+                  cardColor,
+                  cardTextColor,
+                  cardSubtitleColor,
+                ),
 
                 // Account
                 Text(
@@ -1524,6 +1532,88 @@ class AccountPage extends StatelessWidget {
     );
   }
 
+  String _formatDate(DateTime date) {
+    final d = date.toLocal();
+    return '${d.day.toString().padLeft(2, '0')}/'
+        '${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  Future<void> _openSmartChefStore() async {
+    final uri = Uri.parse(
+      'https://play.google.com/store/apps/details?id=com.smartchef.app',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _activateSmartChefPromo(BuildContext context) async {
+    final user = AuthService().currentUser;
+    final email = user?.email ?? '';
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text('Promo lancio SaveIn! + SmartChef'),
+            content: Text(
+              'Attivando la promo ottieni SaveIn! Premium per 30 giorni da oggi.\n\n'
+              'Per ottenere anche SmartChef Premium gratis, devi registrarti o accedere '
+              'a SmartChef entro 14 giorni usando la stessa email:\n$email',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text('Annulla'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text('Attiva promo'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+
+    try {
+      final result = await AuthService().activateSmartChefLaunchPromo();
+      if (!context.mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Premium SaveIn! attivato'),
+          content: Text(
+            'La versione Premium è stata attivata il giorno '
+            '${_formatDate(DateTime.now())} e scadrà il '
+            '${_formatDate(result.premiumUntil)}, dopo 30 giorni di utilizzo.\n\n'
+            'Ora installa o apri SmartChef e accedi con la stessa email entro il '
+            '${_formatDate(result.claimBy)} per attivare anche lì il mese gratuito.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('Chiudi'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _openSmartChefStore();
+              },
+              child: Text('Apri SmartChef'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   void _showAdminRoleManagementDialog(BuildContext context) {
     final emailController = TextEditingController();
     AppUserRole selectedRole = AppUserRole.premium;
@@ -1694,6 +1784,134 @@ class AccountPage extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSmartChefPromoCard(
+    BuildContext context,
+    User? currentUser,
+    Color cardColor,
+    Color textColor,
+    Color subtitleColor,
+  ) {
+    if (currentUser == null || currentUser.isAdmin) {
+      return SizedBox.shrink();
+    }
+
+    return FutureBuilder<PromotionBanner?>(
+      future: AuthService().getActivePromotionBanner(),
+      builder: (context, snapshot) {
+        final banner = snapshot.data;
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            banner == null) {
+          return SizedBox.shrink();
+        }
+        AuthService().recordPromotionBannerEvent(
+          promotionId: banner.id,
+          eventType: 'view',
+          placement: 'savein_account',
+        );
+
+        final isCrossPromo = banner.isCrossPromo;
+        final bgColor = isCrossPromo ? Color(0xFFFFF7E6) : cardColor;
+        final borderColor =
+            isCrossPromo ? Color(0xFFFFB020) : textColor.withOpacity(0.12);
+        final icon = isCrossPromo
+            ? Icons.local_fire_department
+            : Icons.campaign_outlined;
+        final iconColor = isCrossPromo ? Color(0xFFD97706) : textColor;
+
+        return Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(16),
+          margin: EdgeInsets.only(bottom: 24),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 2,
+                offset: Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: iconColor),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      banner.title,
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              Text(
+                banner.message,
+                style: TextStyle(color: subtitleColor, fontSize: 14),
+              ),
+              SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (isCrossPromo)
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        await AuthService().recordPromotionBannerEvent(
+                          promotionId: banner.id,
+                          eventType: 'click',
+                          placement: 'savein_account',
+                        );
+                        if (!context.mounted) return;
+                        await _activateSmartChefPromo(context);
+                      },
+                      icon: Icon(Icons.card_giftcard),
+                      label: Text(banner.ctaLabel),
+                    )
+                  else if (banner.actionUrl.trim().isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        await AuthService().recordPromotionBannerEvent(
+                          promotionId: banner.id,
+                          eventType: 'click',
+                          placement: 'savein_account',
+                        );
+                        await launchUrl(
+                          Uri.parse(banner.actionUrl),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: Icon(Icons.open_in_new),
+                      label: Text(banner.ctaLabel),
+                    ),
+                  if (isCrossPromo)
+                    OutlinedButton.icon(
+                      onPressed: _openSmartChefStore,
+                      icon: Icon(Icons.open_in_new),
+                      label: Text(
+                        banner.secondaryCtaLabel.trim().isNotEmpty
+                            ? banner.secondaryCtaLabel
+                            : 'Apri SmartChef',
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

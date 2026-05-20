@@ -16,7 +16,7 @@ class AppAccessService {
   final AuthService _authService = AuthService();
 
   AppUserRole get currentRole =>
-      _authService.currentUser?.role ?? AppUserRole.free;
+      _authService.currentUser?.effectiveRole ?? AppUserRole.free;
 
   bool get isFree => currentRole == AppUserRole.free;
   bool get isPremium => currentRole == AppUserRole.premium;

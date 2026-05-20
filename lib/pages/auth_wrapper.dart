@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_service.dart';
 import '../services/sharing_service.dart';
 import '../services/migration_service.dart';
@@ -124,7 +123,9 @@ class AuthWrapper extends StatelessWidget {
         // Nessuna migrazione necessaria, mostra app normale
         return AppNotificationListener(
           userId: user.id,
-          child: _buildSuccessTransition(user),
+          child: _CrossPromoNotificationGate(
+            child: _buildSuccessTransition(user),
+          ),
         );
       },
     );
@@ -495,6 +496,60 @@ class AuthWrapper extends StatelessWidget {
       ),
     );
   }
+}
+
+class _CrossPromoNotificationGate extends StatefulWidget {
+  final Widget child;
+
+  const _CrossPromoNotificationGate({required this.child});
+
+  @override
+  State<_CrossPromoNotificationGate> createState() =>
+      _CrossPromoNotificationGateState();
+}
+
+class _CrossPromoNotificationGateState
+    extends State<_CrossPromoNotificationGate> {
+  bool _scheduled = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_scheduled) return;
+    _scheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final result = AuthService().consumeCrossPromotionNotification();
+      if (result == null) return;
+      final activatedAt = DateTime.now();
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Premium SaveIn! attivato'),
+          content: Text(
+            'La versione Premium è stata attivata il giorno '
+            '${_formatDate(activatedAt)} e scadrà il '
+            '${_formatDate(result.premiumUntil)}, dopo 30 giorni di utilizzo.',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Perfetto'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  String _formatDate(DateTime date) {
+    final d = date.toLocal();
+    return '${d.day.toString().padLeft(2, '0')}/'
+        '${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 // LOGOUT BUTTON MIGLIORATO

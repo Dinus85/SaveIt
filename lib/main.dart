@@ -586,6 +586,7 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
   bool _isSearching = false;
   bool _isInitializing = false;
   bool _isRefreshing = false; // Previene loop
+  Future<PromotionBanner?>? _promotionBannerFuture;
 
   Timer? _searchDebounceTimer;
   Timer? _syncDebounce; // Debounce per sync
@@ -606,6 +607,7 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     _searchController.addListener(_onSearchChanged);
+    _promotionBannerFuture = AuthService().getActivePromotionBanner();
     _initializeFolderService();
     _setupDataServiceCallback();
 
@@ -1013,9 +1015,214 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
               ),
             ),
           ),
+          if (!_isSearching) ...[
+            SizedBox(height: 12),
+            _buildPromotionBanner(themeColors),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildPromotionBanner(ThemeColors themeColors) {
+    return FutureBuilder<PromotionBanner?>(
+      future: _promotionBannerFuture,
+      builder: (context, snapshot) {
+        final banner = snapshot.data;
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            banner == null) {
+          return SizedBox.shrink();
+        }
+        AuthService().recordPromotionBannerEvent(
+          promotionId: banner.id,
+          eventType: 'view',
+          placement: 'savein_home_search',
+        );
+
+        final isCrossPromo = banner.isCrossPromo;
+        return Container(
+          width: double.infinity,
+          padding: EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: isCrossPromo ? Color(0xFFFFF7E6) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isCrossPromo ? Color(0xFFFFB020) : Colors.black12,
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                isCrossPromo
+                    ? Icons.local_fire_department
+                    : Icons.campaign_outlined,
+                color: isCrossPromo ? Color(0xFFD97706) : Colors.black87,
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      banner.title,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      banner.message,
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12.5,
+                        height: 1.25,
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (isCrossPromo)
+                          ElevatedButton(
+                            onPressed: () async {
+                              await AuthService().recordPromotionBannerEvent(
+                                promotionId: banner.id,
+                                eventType: 'click',
+                                placement: 'savein_home_search',
+                              );
+                              if (!context.mounted) return;
+                              await _activateSmartChefPromo(context);
+                            },
+                            child: Text(banner.ctaLabel),
+                          )
+                        else if (banner.actionUrl.trim().isNotEmpty)
+                          ElevatedButton(
+                            onPressed: () async {
+                              await AuthService().recordPromotionBannerEvent(
+                                promotionId: banner.id,
+                                eventType: 'click',
+                                placement: 'savein_home_search',
+                              );
+                              await launchUrl(
+                                Uri.parse(banner.actionUrl),
+                                mode: LaunchMode.externalApplication,
+                              );
+                            },
+                            child: Text(banner.ctaLabel),
+                          ),
+                        if (isCrossPromo)
+                          OutlinedButton(
+                            onPressed: _openSmartChefStore,
+                            child: Text(
+                              banner.secondaryCtaLabel.trim().isNotEmpty
+                                  ? banner.secondaryCtaLabel
+                                  : 'Apri SmartChef',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openSmartChefStore() async {
+    final uri = Uri.parse(
+      'https://play.google.com/store/apps/details?id=it.smartchef.app',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _activateSmartChefPromo(BuildContext context) async {
+    final user = AuthService().currentUser;
+    final email = user?.email ?? '';
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text('Promo lancio SaveIn! + SmartChef'),
+            content: Text(
+              'Attivando la promo ottieni SaveIn! Premium per 30 giorni da oggi.\n\n'
+              'Per ottenere anche SmartChef Premium gratis, devi registrarti o accedere '
+              'a SmartChef entro 14 giorni usando la stessa email:\n$email',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text('Annulla'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text('Attiva promo'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+
+    try {
+      final result = await AuthService().activateSmartChefLaunchPromo();
+      if (!context.mounted) return;
+      setState(() {
+        _promotionBannerFuture = AuthService().getActivePromotionBanner();
+      });
+
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Premium SaveIn! attivato'),
+          content: Text(
+            'La versione Premium è stata attivata il giorno '
+            '${_formatDate(DateTime.now())} e scadrà il '
+            '${_formatDate(result.premiumUntil)}, dopo 30 giorni di utilizzo.\n\n'
+            'Ora installa o apri SmartChef e accedi con la stessa email entro il '
+            '${_formatDate(result.claimBy)} per attivare anche lì il mese gratuito.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text('Chiudi'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _openSmartChefStore();
+              },
+              child: Text('Apri SmartChef'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final d = date.toLocal();
+    return '${d.day.toString().padLeft(2, '0')}/'
+        '${d.month.toString().padLeft(2, '0')}/${d.year}';
   }
 
   Widget _buildSearchResults(ThemeColors themeColors) {

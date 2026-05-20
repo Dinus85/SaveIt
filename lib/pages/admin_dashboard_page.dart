@@ -1235,6 +1235,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       ),
                       const SizedBox(width: 10),
                       _AdminNavButton(
+                        label: 'Banner promo',
+                        selected:
+                            _activeSection == _AdminDashboardSection.promos,
+                        onPressed: () {
+                          setState(() {
+                            _activeSection = _AdminDashboardSection.promos;
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 10),
+                      _AdminNavButton(
                         label: 'Accessi',
                         selected:
                             _activeSection == _AdminDashboardSection.accesses,
@@ -1270,9 +1281,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     ? _buildFinancePage()
                     : _activeSection == _AdminDashboardSection.notifications
                         ? _buildNotificationsPage()
-                        : _activeSection == _AdminDashboardSection.accesses
-                            ? _buildDashboardAccessPage()
-                            : StreamBuilder<
+                        : _activeSection == _AdminDashboardSection.promos
+                            ? _buildPromotionBannersPage()
+                            : _activeSection == _AdminDashboardSection.accesses
+                                ? _buildDashboardAccessPage()
+                                : StreamBuilder<
                                 QuerySnapshot<Map<String, dynamic>>>(
                                 stream:
                                     _firestore.collection('users').snapshots(),
@@ -2802,6 +2815,392 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         },
       ),
     );
+  }
+
+  Widget _buildPromotionBannersPage() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore.collection('promotion_banners').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Errore caricamento banner: ${snapshot.error}'));
+        }
+
+        final banners = (snapshot.data?.docs ?? [])
+            .map(_PromotionBannerRecord.fromDoc)
+            .toList()
+          ..sort((a, b) => b.priority.compareTo(a.priority));
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Banner promo',
+                      style: TextStyle(
+                        color: Color(0xFF111827),
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => _showPromotionBannerDialog(),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Nuovo banner'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _AdminInfoBox(
+                title: 'Funzionamento',
+                lines: const [
+                  'SaveIn mostra questi banner sotto la barra di ricerca e nella pagina Account.',
+                  'Dimensioni consigliate: card full-width responsive, padding 14-16px, altezza automatica. Se aggiungi immagini future: 1200x400 o 1200x628.',
+                  'type=cross_promo attiva la promo SaveIn/SmartChef; type=generic_promo apre un URL o mostra una proposta diversa.',
+                  'Se oncePerUser=true, il banner sparisce dopo il primo utilizzo. Se la cross-promo e gia stata usata da una delle due app, non viene piu mostrata.',
+                  'Priorita piu alta = banner scelto per primo quando piu banner sono attivi.',
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (banners.isEmpty)
+                const _AdminEmptyState(message: 'Nessun banner configurato.')
+              else
+                ...banners.map(
+                  (banner) => Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                banner.active
+                                    ? Icons.visibility
+                                    : Icons.visibility_off,
+                                color: banner.active
+                                    ? Colors.green.shade700
+                                    : Colors.grey.shade600,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  banner.title.isEmpty ? banner.id : banner.title,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              Switch(
+                                value: banner.active,
+                                onChanged: (value) =>
+                                    _togglePromotionBanner(banner, value),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            banner.message,
+                            style: const TextStyle(color: Color(0xFF4B5563)),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              Chip(label: Text('ID: ${banner.id}')),
+                              Chip(label: Text('Tipo: ${banner.type}')),
+                              Chip(label: Text('App: ${banner.app}')),
+                              Chip(label: Text('Priorita: ${banner.priority}')),
+                              Chip(
+                                label: Text(
+                                  banner.oncePerUser
+                                      ? 'Una volta per utente'
+                                      : 'Ripetibile',
+                                ),
+                              ),
+                            ],
+                          ),
+                          FutureBuilder<_PromotionBannerStats>(
+                            future: _loadPromotionBannerStats(banner.id),
+                            builder: (context, statsSnapshot) {
+                              final stats = statsSnapshot.data;
+                              if (stats == null) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    Chip(label: Text('Viste: ${stats.views}')),
+                                    Chip(label: Text('Click: ${stats.clicks}')),
+                                    Chip(label: Text('Utilizzi: ${stats.redemptions}')),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () =>
+                                    _showPromotionBannerDialog(existing: banner),
+                                icon: const Icon(Icons.edit),
+                                label: const Text('Modifica'),
+                              ),
+                              TextButton.icon(
+                                onPressed: () => _deletePromotionBanner(banner),
+                                icon: const Icon(Icons.delete_outline),
+                                label: const Text('Elimina'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<_PromotionBannerStats> _loadPromotionBannerStats(String id) async {
+    final events = await _firestore
+        .collection('promotion_banner_events')
+        .where('promotionId', isEqualTo: id)
+        .get();
+    final redemptions = await _firestore
+        .collection('promotion_redemptions')
+        .where('promotionId', isEqualTo: id)
+        .get();
+
+    var views = 0;
+    var clicks = 0;
+    for (final doc in events.docs) {
+      final data = doc.data();
+      final count = (data['count'] as num?)?.toInt() ?? 1;
+      if (data['eventType'] == 'view') views += count;
+      if (data['eventType'] == 'click') clicks += count;
+    }
+    return _PromotionBannerStats(
+      views: views,
+      clicks: clicks,
+      redemptions: redemptions.size,
+    );
+  }
+
+  Future<void> _togglePromotionBanner(
+    _PromotionBannerRecord banner,
+    bool active,
+  ) async {
+    await _firestore.collection('promotion_banners').doc(banner.id).set({
+      'active': active,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedBy': AuthService().currentUser?.email,
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> _deletePromotionBanner(_PromotionBannerRecord banner) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Eliminare banner?'),
+            content: Text('Vuoi eliminare definitivamente "${banner.id}"?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Annulla'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Elimina'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed) return;
+    await _firestore.collection('promotion_banners').doc(banner.id).delete();
+  }
+
+  Future<void> _showPromotionBannerDialog({
+    _PromotionBannerRecord? existing,
+  }) async {
+    final idController = TextEditingController(text: existing?.id ?? '');
+    final titleController = TextEditingController(text: existing?.title ?? '');
+    final messageController =
+        TextEditingController(text: existing?.message ?? '');
+    final ctaController =
+        TextEditingController(text: existing?.ctaLabel ?? 'Scopri');
+    final secondaryController =
+        TextEditingController(text: existing?.secondaryCtaLabel ?? '');
+    final urlController = TextEditingController(text: existing?.actionUrl ?? '');
+    final priorityController =
+        TextEditingController(text: (existing?.priority ?? 10).toString());
+    var active = existing?.active ?? false;
+    var oncePerUser = existing?.oncePerUser ?? true;
+    var type = existing?.type ?? 'generic_promo';
+    var app = existing?.app ?? 'savein';
+
+    final saved = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: Text(existing == null ? 'Nuovo banner' : 'Modifica banner'),
+              content: SizedBox(
+                width: 620,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: idController,
+                        enabled: existing == null,
+                        decoration: const InputDecoration(
+                          labelText: 'ID documento',
+                          hintText: 'es. savein_generic_offer',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: type,
+                        decoration: const InputDecoration(labelText: 'Tipo'),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'cross_promo',
+                            child: Text('cross_promo'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'generic_promo',
+                            child: Text('generic_promo'),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => type = value ?? type),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: app,
+                        decoration:
+                            const InputDecoration(labelText: 'App visibile'),
+                        items: const [
+                          DropdownMenuItem(value: 'savein', child: Text('SaveIn')),
+                          DropdownMenuItem(value: 'both', child: Text('Entrambe')),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => app = value ?? app),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: titleController,
+                        decoration: const InputDecoration(labelText: 'Titolo'),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: messageController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(labelText: 'Testo banner'),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: ctaController,
+                        decoration: const InputDecoration(labelText: 'Testo CTA'),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: secondaryController,
+                        decoration: const InputDecoration(
+                          labelText: 'CTA secondaria',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: urlController,
+                        decoration: const InputDecoration(
+                          labelText: 'URL azione (per generic_promo)',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: priorityController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Priorita'),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: active,
+                        title: const Text('Attivo'),
+                        onChanged: (value) =>
+                            setDialogState(() => active = value),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: oncePerUser,
+                        title: const Text('Una sola volta per utente'),
+                        onChanged: (value) =>
+                            setDialogState(() => oncePerUser = value),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Annulla'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Salva'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+
+    if (!saved) return;
+    final id = idController.text.trim();
+    if (id.isEmpty) {
+      _showAdminSnackBar('ID banner obbligatorio', isError: true);
+      return;
+    }
+
+    await _firestore.collection('promotion_banners').doc(id).set({
+      'active': active,
+      'app': app,
+      'apps': app == 'both' ? ['savein', 'smartchef'] : [app],
+      'type': type,
+      'title': titleController.text.trim(),
+      'message': messageController.text.trim(),
+      'ctaLabel': ctaController.text.trim(),
+      'secondaryCtaLabel': secondaryController.text.trim(),
+      'action': type == 'cross_promo' ? 'activate_cross_promo' : 'open_url',
+      'actionUrl': urlController.text.trim(),
+      'targetApp': app,
+      'direction': type == 'cross_promo' ? 'savein_to_smartchef' : '',
+      'priority': int.tryParse(priorityController.text.trim()) ?? 10,
+      'oncePerUser': oncePerUser,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedBy': AuthService().currentUser?.email,
+      if (existing == null) 'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Widget _buildGlobalStatsPage() {
@@ -5343,7 +5742,125 @@ enum _AdminDashboardSection {
   globalStats,
   finance,
   notifications,
+  promos,
   accesses,
+}
+
+class _PromotionBannerRecord {
+  final String id;
+  final bool active;
+  final String app;
+  final String type;
+  final String title;
+  final String message;
+  final String ctaLabel;
+  final String secondaryCtaLabel;
+  final String actionUrl;
+  final int priority;
+  final bool oncePerUser;
+
+  const _PromotionBannerRecord({
+    required this.id,
+    required this.active,
+    required this.app,
+    required this.type,
+    required this.title,
+    required this.message,
+    required this.ctaLabel,
+    required this.secondaryCtaLabel,
+    required this.actionUrl,
+    required this.priority,
+    required this.oncePerUser,
+  });
+
+  factory _PromotionBannerRecord.fromDoc(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return _PromotionBannerRecord(
+      id: doc.id,
+      active: data['active'] == true,
+      app: (data['app'] ?? data['targetApp'] ?? 'savein').toString(),
+      type: (data['type'] ?? 'generic_promo').toString(),
+      title: (data['title'] ?? '').toString(),
+      message: (data['message'] ?? '').toString(),
+      ctaLabel: (data['ctaLabel'] ?? '').toString(),
+      secondaryCtaLabel: (data['secondaryCtaLabel'] ?? '').toString(),
+      actionUrl: (data['actionUrl'] ?? '').toString(),
+      priority: (data['priority'] as num?)?.toInt() ?? 0,
+      oncePerUser: data['oncePerUser'] != false,
+    );
+  }
+}
+
+class _PromotionBannerStats {
+  final int views;
+  final int clicks;
+  final int redemptions;
+
+  const _PromotionBannerStats({
+    required this.views,
+    required this.clicks,
+    required this.redemptions,
+  });
+}
+
+class _AdminInfoBox extends StatelessWidget {
+  final String title;
+  final List<String> lines;
+
+  const _AdminInfoBox({
+    required this.title,
+    required this.lines,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFD1D5DB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ...lines.map(
+            (line) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text('• $line'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminEmptyState extends StatelessWidget {
+  final String message;
+
+  const _AdminEmptyState({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(message, textAlign: TextAlign.center),
+    );
+  }
 }
 
 enum _AdminStatsPeriod {

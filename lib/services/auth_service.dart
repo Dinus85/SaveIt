@@ -82,6 +82,8 @@ class User {
   final bool acceptedPrivacy;
   final bool acceptedMarketing;
   final DateTime createdAt;
+  final DateTime? premiumUntil;
+  final String? premiumSource;
 
   User({
     required this.id,
@@ -97,6 +99,8 @@ class User {
     required this.acceptedPrivacy,
     required this.acceptedMarketing,
     required this.createdAt,
+    this.premiumUntil,
+    this.premiumSource,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -118,6 +122,10 @@ class User {
       acceptedMarketing: json['acceptedMarketing'] ?? false,
       createdAt:
           DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      premiumUntil: json['premiumUntil'] != null
+          ? DateTime.tryParse(json['premiumUntil'])
+          : null,
+      premiumSource: json['premiumSource'],
     );
   }
 
@@ -136,6 +144,8 @@ class User {
       'acceptedPrivacy': acceptedPrivacy,
       'acceptedMarketing': acceptedMarketing,
       'createdAt': createdAt.toIso8601String(),
+      'premiumUntil': premiumUntil?.toIso8601String(),
+      'premiumSource': premiumSource,
     };
   }
 
@@ -151,6 +161,8 @@ class User {
     bool? acceptedTerms,
     bool? acceptedPrivacy,
     bool? acceptedMarketing,
+    DateTime? premiumUntil,
+    String? premiumSource,
   }) {
     return User(
       id: this.id,
@@ -166,11 +178,25 @@ class User {
       acceptedPrivacy: acceptedPrivacy ?? this.acceptedPrivacy,
       acceptedMarketing: acceptedMarketing ?? this.acceptedMarketing,
       createdAt: this.createdAt,
+      premiumUntil: premiumUntil ?? this.premiumUntil,
+      premiumSource: premiumSource ?? this.premiumSource,
     );
   }
 
-  bool get isFree => role == AppUserRole.free;
-  bool get isPremium => role == AppUserRole.premium;
+  bool get hasActiveTimedPremium =>
+      premiumUntil != null && premiumUntil!.isAfter(DateTime.now());
+  AppUserRole get effectiveRole {
+    if (role == AppUserRole.admin) return AppUserRole.admin;
+    if (role == AppUserRole.premium) {
+      if (premiumUntil == null || hasActiveTimedPremium) {
+        return AppUserRole.premium;
+      }
+    }
+    return AppUserRole.free;
+  }
+
+  bool get isFree => effectiveRole == AppUserRole.free;
+  bool get isPremium => effectiveRole == AppUserRole.premium;
   bool get isAdmin => role == AppUserRole.admin;
   DashboardAccessRole get effectiveDashboardRole =>
       isAdmin ? DashboardAccessRole.admin : dashboardRole;
@@ -197,6 +223,75 @@ class AuthResult {
   });
 }
 
+class CrossPromotionResult {
+  final String status;
+  final DateTime premiumUntil;
+  final DateTime claimBy;
+  final int durationDays;
+  final int claimWindowDays;
+  final String targetApp;
+
+  CrossPromotionResult({
+    required this.status,
+    required this.premiumUntil,
+    required this.claimBy,
+    required this.durationDays,
+    required this.claimWindowDays,
+    required this.targetApp,
+  });
+
+  factory CrossPromotionResult.fromMap(Map<String, dynamic> data) {
+    return CrossPromotionResult(
+      status: data['status']?.toString() ?? 'pending',
+      premiumUntil: DateTime.parse(data['premiumUntil'].toString()).toLocal(),
+      claimBy: DateTime.parse(data['claimBy'].toString()).toLocal(),
+      durationDays: (data['durationDays'] as num?)?.toInt() ?? 30,
+      claimWindowDays: (data['claimWindowDays'] as num?)?.toInt() ?? 14,
+      targetApp: data['targetApp']?.toString() ?? 'smartchef',
+    );
+  }
+}
+
+class PromotionBanner {
+  final String id;
+  final String type;
+  final String title;
+  final String message;
+  final String ctaLabel;
+  final String secondaryCtaLabel;
+  final String action;
+  final String actionUrl;
+  final String targetApp;
+
+  const PromotionBanner({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.message,
+    required this.ctaLabel,
+    required this.secondaryCtaLabel,
+    required this.action,
+    required this.actionUrl,
+    required this.targetApp,
+  });
+
+  bool get isCrossPromo => type == 'cross_promo';
+
+  factory PromotionBanner.fromMap(Map<String, dynamic> data) {
+    return PromotionBanner(
+      id: data['id']?.toString() ?? '',
+      type: data['type']?.toString() ?? 'generic_promo',
+      title: data['title']?.toString() ?? '',
+      message: data['message']?.toString() ?? '',
+      ctaLabel: data['ctaLabel']?.toString() ?? 'Scopri',
+      secondaryCtaLabel: data['secondaryCtaLabel']?.toString() ?? '',
+      action: data['action']?.toString() ?? 'open_url',
+      actionUrl: data['actionUrl']?.toString() ?? '',
+      targetApp: data['targetApp']?.toString() ?? '',
+    );
+  }
+}
+
 class AuthService extends ChangeNotifier {
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
@@ -214,6 +309,8 @@ class AuthService extends ChangeNotifier {
   StreamSubscription<firebase_auth.User?>? _authSubscription;
   Completer<void>? _initializationCompleter;
   Completer<void>? _consentLoadingCompleter;
+  CrossPromotionResult? _pendingCrossPromotionNotification;
+  final Set<String> _trackedPromotionEvents = <String>{};
   DateTime? _lastConsentSyncAt;
   String? _lastConsentSyncUserId;
   bool _isProcessingAuthStateChange = false;
@@ -223,8 +320,20 @@ class AuthService extends ChangeNotifier {
   User? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
+  CrossPromotionResult? consumeCrossPromotionNotification() {
+    final result = _pendingCrossPromotionNotification;
+    _pendingCrossPromotionNotification = null;
+    return result;
+  }
 
   String _normalizeEmail(String email) => email.toLowerCase().trim();
+
+  DateTime? _dateFromFirestoreValue(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
 
   Future<User?> reloadCurrentUserFromFirestore() async {
     final firebaseUser = _firebaseAuth.currentUser;
@@ -857,6 +966,8 @@ class AuthService extends ChangeNotifier {
         final marketingConsent =
             data['consents']?['marketing']?['accepted'] ?? false;
         final role = AppUserRoleX.fromValue(data['role'] as String?);
+        final premiumUntil = _dateFromFirestoreValue(data['premiumUntil']);
+        final premiumSource = data['premiumSource'] as String?;
         final userDashboardRole =
             DashboardAccessRoleX.fromValue(data['dashboardRole'] as String?);
 
@@ -889,7 +1000,9 @@ class AuthService extends ChangeNotifier {
                 _currentUser!.role != role ||
                 _currentUser!.dashboardRole != dashboardRole ||
                 _currentUser!.isBlocked != isBlocked ||
-                _currentUser!.blockedReason != blockedReason)) {
+                _currentUser!.blockedReason != blockedReason ||
+                _currentUser!.premiumUntil != premiumUntil ||
+                _currentUser!.premiumSource != premiumSource)) {
           if (kDebugMode)
             print('DEBUG: ⚠️ Consenso diverso, sincronizzando da cloud...');
 
@@ -900,6 +1013,8 @@ class AuthService extends ChangeNotifier {
             isBlocked: isBlocked,
             blockedReason: blockedReason,
             blockedAt: blockedAt,
+            premiumUntil: premiumUntil,
+            premiumSource: premiumSource,
           );
 
           await _saveUserLocally(_currentUser!);
@@ -999,6 +1114,7 @@ class AuthService extends ChangeNotifier {
       // Sincronizza da Firestore per aggiornare ruolo, blocco, consenso marketing.
       // Essenziale per utenti il cui ruolo è stato cambiato dall'admin dashboard.
       await _loadMarketingConsentFromFirestore();
+      await _claimPendingSmartChefLaunchPromoIfAvailable();
     } catch (e) {
       print('ERRORE caricamento dati utente: $e');
       _currentUser = User(
@@ -1084,6 +1200,118 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       if (kDebugMode) print('ERRORE aggiornamento ruolo utente: $e');
       return false;
+    }
+  }
+
+  Future<CrossPromotionResult> activateSmartChefLaunchPromo() async {
+    final firebaseUser = _firebaseAuth.currentUser;
+    if (firebaseUser == null || _currentUser == null) {
+      throw Exception('Devi essere autenticato per attivare la promo.');
+    }
+
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'activateSmartChefLaunchPromo',
+    );
+    final response = await callable.call(<String, dynamic>{});
+    final raw = response.data;
+    final data = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
+    final result = CrossPromotionResult.fromMap(data);
+
+    _currentUser = _currentUser!.copyWith(
+      role: AppUserRole.premium,
+      premiumUntil: result.premiumUntil,
+      premiumSource: 'cross_promo_savein_to_smartchef',
+    );
+    await _saveUserLocally(_currentUser!);
+    notifyListeners();
+    return result;
+  }
+
+  Future<PromotionBanner?> getActivePromotionBanner() async {
+    final firebaseUser = _firebaseAuth.currentUser;
+    if (firebaseUser == null) return null;
+
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'getActivePromotionBanner',
+    );
+    final response = await callable.call(<String, dynamic>{});
+    final raw = response.data;
+    final data = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
+    final bannerRaw = data['banner'];
+    if (bannerRaw is! Map) return null;
+    final banner = PromotionBanner.fromMap(
+      Map<String, dynamic>.from(bannerRaw),
+    );
+    return banner.id.trim().isEmpty ? null : banner;
+  }
+
+  Future<void> recordPromotionBannerEvent({
+    required String promotionId,
+    required String eventType,
+    String placement = '',
+  }) async {
+    final firebaseUser = _firebaseAuth.currentUser;
+    if (firebaseUser == null || promotionId.trim().isEmpty) return;
+
+    final key = '$promotionId|$eventType|$placement';
+    if (eventType == 'view' && _trackedPromotionEvents.contains(key)) return;
+    _trackedPromotionEvents.add(key);
+
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'recordPromotionBannerEvent',
+      );
+      await callable.call(<String, dynamic>{
+        'promotionId': promotionId,
+        'eventType': eventType,
+        'placement': placement,
+      });
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: errore tracking banner promo: $e');
+      }
+    }
+  }
+
+  Future<void> _claimPendingSmartChefLaunchPromoIfAvailable() async {
+    if (_currentUser == null || _currentUser!.isAdmin || !_currentUser!.isFree) {
+      return;
+    }
+
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'claimPendingSmartChefLaunchPromo',
+      );
+      final response = await callable.call(<String, dynamic>{});
+      final raw = response.data;
+      final data = raw is Map
+          ? Map<String, dynamic>.from(raw)
+          : <String, dynamic>{};
+      if (data['claimed'] != true || data['premiumUntil'] == null) {
+        return;
+      }
+
+      final result = CrossPromotionResult.fromMap({
+        ...data,
+        'status': 'claimed',
+        'claimBy': data['claimBy'] ?? DateTime.now().toIso8601String(),
+      });
+      _currentUser = _currentUser!.copyWith(
+        role: AppUserRole.premium,
+        premiumUntil: result.premiumUntil,
+        premiumSource: 'cross_promo_smartchef_to_savein',
+      );
+      _pendingCrossPromotionNotification = result;
+      await _saveUserLocally(_currentUser!);
+      notifyListeners();
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: Nessuna promo SmartChef pending o claim fallito: $e');
+      }
     }
   }
 
