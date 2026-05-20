@@ -152,5 +152,20 @@ service cloud.firestore {
       allow create: if isDashboardEditor();
       allow update, delete: if false;
     }
+
+    match /promotion_banners/{bannerId} {
+      allow read: if isDashboardViewer();
+      allow create, update, delete: if isDashboardAdmin();
+    }
+
+    match /promotion_banner_events/{eventId} {
+      allow read: if isDashboardViewer();
+      allow write: if false;
+    }
+
+    match /promotion_redemptions/{redemptionId} {
+      allow read: if isDashboardViewer();
+      allow write: if false;
+    }
   }
 }
