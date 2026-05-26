@@ -506,11 +506,17 @@ class FolderPreviewManager {
     print('🖼️ [PREVIEW] Generando anteprima per: ${folder.name}');
 
     final List<MockPost> postsWithImages = [];
+    bool hasPreview(MockPost post) =>
+        post.imageUrl?.trim().isNotEmpty == true ||
+        post.previewStorageUrl?.trim().isNotEmpty == true;
+    String previewUrl(MockPost post) =>
+        post.previewStorageUrl?.trim().isNotEmpty == true
+            ? post.previewStorageUrl!.trim()
+            : post.imageUrl!.trim();
 
     if (folder.isSpecial) {
       // Cartella "Tutti": mostra tutti i post con immagini
-      postsWithImages.addAll(allPosts
-          .where((post) => post.imageUrl != null && post.imageUrl!.isNotEmpty));
+      postsWithImages.addAll(allPosts.where(hasPreview));
     } else {
       // Cartella normale: raccogli post ricorsivamente
       _collectPostsRecursively(folder, allPosts, postsWithImages);
@@ -522,7 +528,7 @@ class FolderPreviewManager {
     // Estrai URL immagini
     final imageUrls = postsWithImages
         .take(maxImages)
-        .map((post) => post.imageUrl!)
+        .map(previewUrl)
         .where((url) => url.isNotEmpty)
         .toList();
 
@@ -546,8 +552,8 @@ class FolderPreviewManager {
     final directPosts = allPosts
         .where((post) =>
             post.sourceFolder == folder &&
-            post.imageUrl != null &&
-            post.imageUrl!.isNotEmpty)
+            (post.imageUrl?.trim().isNotEmpty == true ||
+                post.previewStorageUrl?.trim().isNotEmpty == true))
         .toList();
 
     result.addAll(directPosts);

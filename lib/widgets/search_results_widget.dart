@@ -177,6 +177,7 @@ class SearchResultsWidget extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           child: PostPreviewImage(
             postId: post.id,
+            postUrl: post.url,
             imageUrl: post.imageUrl,
             remoteImageUrl: post.previewStorageUrl,
             fit: BoxFit.cover,

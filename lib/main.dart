@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:app_links/app_links.dart';
 import 'firebase_options.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -29,9 +30,11 @@ import 'utils/dialog_helpers.dart';
 import 'utils/sync_utilities.dart';
 import 'pages/auth_wrapper.dart';
 import 'pages/shared_items_page.dart'; // NUOVO
+import 'pages/shared_link_page.dart';
 import 'data_service.dart';
 import 'services/app_notification_service.dart';
 import 'services/reminder_service.dart';
+import 'widgets/first_launch_tutorial_dialog.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -107,10 +110,6 @@ void main() async {
   );
 
   await AuthService().initialize();
-  await InterstitialAdService.instance.initialize();
-  await ReminderService.instance.initialize();
-  await ReminderService.instance.requestPermissions();
-  await ReminderService.instance.rescheduleAllReminders();
 
   ReminderService.onNotificationTapped = (postUrl, postTitle) async {
     await InterstitialAdService.instance.showReminderAd();
@@ -130,14 +129,44 @@ void main() async {
     // e il banner giornaliero mostrerà il reminder.
   };
 
+  runApp(const SaveInApp());
+
+  unawaited(_initializeNonBlockingStartupServices());
+
   // Test immagini solo in debug mode
   if (kDebugMode) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _testImagePreviewFunctionality();
     });
   }
+}
 
-  runApp(const SaveInApp());
+Future<void> _initializeNonBlockingStartupServices() async {
+  try {
+    await InterstitialAdService.instance.initialize().timeout(
+          const Duration(seconds: 5),
+        );
+  } catch (e) {
+    if (kDebugMode) {
+      print('DEBUG: inizializzazione AdMob non bloccante fallita: $e');
+    }
+  }
+
+  try {
+    await ReminderService.instance.initialize().timeout(
+          const Duration(seconds: 5),
+        );
+    await ReminderService.instance.requestPermissions().timeout(
+          const Duration(seconds: 5),
+        );
+    await ReminderService.instance.rescheduleAllReminders().timeout(
+          const Duration(seconds: 10),
+        );
+  } catch (e) {
+    if (kDebugMode) {
+      print('DEBUG: inizializzazione reminder non bloccante fallita: $e');
+    }
+  }
 }
 
 void _testImagePreviewFunctionality() {
@@ -169,6 +198,8 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
 
   final SimpleAnalyticsService _analytics = SimpleAnalyticsService();
   final SharingService _sharingService = SharingService.instance;
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _appLinkSubscription;
 
   bool get _isDarkTheme => _themeMode == ThemeMode.dark;
 
@@ -180,7 +211,55 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initServices();
+    _initAppLinks();
     _loadUserPreferences(); // âœ… AGGIUNGI QUESTA RIGA
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_maybeShowFirstLaunchTutorial());
+    });
+  }
+
+  Future<void> _maybeShowFirstLaunchTutorial() async {
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    final context = navigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    await SaveInFirstLaunchTutorial.showIfNeeded(context);
+  }
+
+  Future<void> _initAppLinks() async {
+    try {
+      final initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        _handleAppLink(initialUri);
+      }
+      _appLinkSubscription = _appLinks.uriLinkStream.listen(
+        _handleAppLink,
+        onError: (error) {
+          if (kDebugMode) DebugLogger.logError('App link SaveIn', error);
+        },
+      );
+    } catch (e) {
+      if (kDebugMode) DebugLogger.logError('Inizializzazione app links', e);
+    }
+  }
+
+  void _handleAppLink(Uri uri) {
+    if (uri.host != 'savein.eu' || uri.pathSegments.length < 2) return;
+    if (uri.pathSegments.first != 's') return;
+    final token = uri.pathSegments[1].trim();
+    if (token.isEmpty) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = navigatorKey.currentContext;
+      if (context == null || !context.mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SharedLinkPage(
+            token: token,
+            isDarkTheme: _isDarkTheme,
+          ),
+        ),
+      );
+    });
   }
 
   Future<void> _loadUserPreferences() async {
@@ -234,6 +313,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     }
 
     _sharingService.dispose();
+    _appLinkSubscription?.cancel();
     super.dispose();
   }
 
@@ -586,10 +666,11 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
   bool _isSearching = false;
   bool _isInitializing = false;
   bool _isRefreshing = false; // Previene loop
-  Future<PromotionBanner?>? _promotionBannerFuture;
+  StreamSubscription<firebase_auth.User?>? _authBannerSubscription;
 
   Timer? _searchDebounceTimer;
   Timer? _syncDebounce; // Debounce per sync
+  Timer? _promotionBannerDebounce;
   String _lastTrackedQuery = '';
 
   Key _gridKey = UniqueKey();
@@ -599,6 +680,9 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
   bool _wasInBackground = false;
   DateTime? _lastBackgroundTime;
   bool _dailyOpenAdChecked = false;
+  String? _promotionBannerUserId;
+  PromotionBanner? _activeBanner;
+  final Set<String> _trackedHomePromotionViews = {};
 
   @override
   void initState() {
@@ -607,7 +691,27 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     _searchController.addListener(_onSearchChanged);
-    _promotionBannerFuture = AuthService().getActivePromotionBanner();
+    AuthService().addListener(_schedulePromotionBannerRefresh);
+    _authBannerSubscription =
+        firebase_auth.FirebaseAuth.instance.authStateChanges().listen((user) {
+      final newUid = user?.uid;
+      if (newUid == _promotionBannerUserId) return;
+      _promotionBannerUserId = newUid;
+
+      if (newUid == null) {
+        if (mounted) setState(() => _activeBanner = null);
+        return;
+      }
+
+      unawaited(_loadActivePromotionBanner());
+    });
+
+    // Carica subito se utente già loggato
+    final currentUid = firebase_auth.FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid != null) {
+      _promotionBannerUserId = currentUid;
+      unawaited(_loadActivePromotionBanner());
+    }
     _initializeFolderService();
     _setupDataServiceCallback();
 
@@ -629,6 +733,9 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 🔥 FIX: Delegare il reload al root widget (SaveInApp)
     if (kDebugMode) print('DEBUG: WebHomePage - Lifecycle cambiato a: $state');
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadActivePromotionBanner());
+    }
   }
 
   @override
@@ -639,6 +746,8 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     // 🔥 FIX: Cancella i timer PRIMA di tutto per evitare che chiamino setState
     _searchDebounceTimer?.cancel();
     _syncDebounce?.cancel();
+    _promotionBannerDebounce?.cancel();
+    _authBannerSubscription?.cancel();
 
     // 🔥 FIX: Rimuovi i callback PRIMA di disporre i controller
     SharingService.setOnDataChangedCallback(null);
@@ -650,6 +759,7 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     }
 
     // Ora rimuovi i listener e disponi i controller
+    AuthService().removeListener(_schedulePromotionBannerRefresh);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
 
@@ -668,6 +778,45 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
       if (reminders.isEmpty || !mounted) return;
       _showRemindersBanner(reminders);
     } catch (_) {}
+  }
+
+  Future<void> _loadActivePromotionBanner() async {
+    try {
+      if (kDebugMode) print('DEBUG: Caricamento banner promozionale...');
+      final banner = await AuthService().getActivePromotionBanner();
+      if (!mounted) return;
+      final currentBannerId = _activeBanner?.id;
+      final newBannerId = banner?.id;
+      if (currentBannerId == newBannerId) {
+        if (kDebugMode) {
+          print(
+              'DEBUG: Banner promozionale invariato: ${newBannerId ?? "nessuno"}');
+        }
+        _trackHomePromotionBannerView(banner?.id);
+        return;
+      }
+      setState(() {
+        _activeBanner = banner;
+      });
+      if (kDebugMode) {
+        print(
+            'DEBUG: Banner promozionale caricato: ${banner?.id ?? "nessuno"}');
+      }
+      _trackHomePromotionBannerView(banner?.id);
+    } catch (e) {
+      if (kDebugMode) print('DEBUG: Errore caricamento banner: $e');
+    }
+  }
+
+  void _schedulePromotionBannerRefresh() {
+    final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (firebaseUser == null) return;
+
+    _promotionBannerDebounce?.cancel();
+    _promotionBannerDebounce = Timer(const Duration(milliseconds: 600), () {
+      if (!mounted) return;
+      unawaited(_loadActivePromotionBanner());
+    });
   }
 
   void _showRemindersBanner(List<Reminder> reminders) {
@@ -758,6 +907,9 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
           _forceRefresh();
         });
       }
+
+      // 🔥 NUOVO: Rinfresca anche il banner promozionale senza bloccare la lista
+      unawaited(_loadActivePromotionBanner());
 
       if (kDebugMode) DebugLogger.logSuccess('Pull-to-refresh completato');
     } catch (e) {
@@ -1022,146 +1174,194 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
   }
 
   Widget _buildPromotionBanner(ThemeColors themeColors) {
-    return FutureBuilder<PromotionBanner?>(
-      future: _promotionBannerFuture,
-      builder: (context, snapshot) {
-        final banner = snapshot.data;
-        if (snapshot.connectionState == ConnectionState.waiting ||
-            banner == null) {
-          return SizedBox.shrink();
-        }
-        AuthService().recordPromotionBannerEvent(
-          promotionId: banner.id,
-          eventType: 'view',
-          placement: 'savein_home_search',
-        );
+    final banner = _activeBanner;
+    if (banner == null) {
+      return const SizedBox.shrink();
+    }
 
-        final isCrossPromo = banner.isCrossPromo;
-        return Container(
-          width: double.infinity,
-          padding: EdgeInsets.all(14),
+    final isCrossPromo = banner.isCrossPromo;
+    if (!isCrossPromo) {
+      final imageUrl = banner.imageUrl.trim();
+      if (imageUrl.isEmpty) return const SizedBox.shrink();
+
+      return GestureDetector(
+        onTap: banner.actionUrl.trim().isEmpty
+            ? null
+            : () async {
+                await AuthService().recordPromotionBannerEvent(
+                  promotionId: banner.id,
+                  eventType: 'click',
+                  placement: 'savein_home_search',
+                );
+                await launchUrl(
+                  Uri.parse(banner.actionUrl),
+                  mode: LaunchMode.externalApplication,
+                );
+              },
+        child: DecoratedBox(
           decoration: BoxDecoration(
-            color: isCrossPromo ? Color(0xFFFFF7E6) : Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isCrossPromo ? Color(0xFFFFB020) : Colors.black12,
-              width: 1.2,
-            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 8,
-                offset: Offset(0, 3),
+                color: Colors.black.withOpacity(0.14),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: AspectRatio(
+              aspectRatio: 3,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isCrossPromo ? Color(0xFFFFF7E6) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isCrossPromo ? Color(0xFFFFB020) : Colors.black12,
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (banner.imageUrl.trim().isNotEmpty) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: AspectRatio(
+                      aspectRatio: 3,
+                      child: Image.network(
+                        banner.imageUrl.trim(),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: Colors.black12,
+                          alignment: Alignment.center,
+                          child: Icon(Icons.broken_image_outlined),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 10),
+                ],
+                Row(
                   children: [
-                    if (banner.imageUrl.trim().isNotEmpty) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: AspectRatio(
-                          aspectRatio: 3,
-                          child: Image.network(
-                            banner.imageUrl.trim(),
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: Colors.black12,
-                              alignment: Alignment.center,
-                              child: Icon(Icons.broken_image_outlined),
-                            ),
-                          ),
+                    Icon(
+                      isCrossPromo
+                          ? Icons.local_fire_department
+                          : Icons.campaign_outlined,
+                      color: isCrossPromo ? Color(0xFFD97706) : Colors.black87,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        banner.title,
+                        style: TextStyle(
+                          color: Colors.black87,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      SizedBox(height: 10),
-                    ],
-                    Row(
-                      children: [
-                        Icon(
-                          isCrossPromo
-                              ? Icons.local_fire_department
-                              : Icons.campaign_outlined,
-                          color: isCrossPromo ? Color(0xFFD97706) : Colors.black87,
-                        ),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            banner.title,
-                            style: TextStyle(
-                              color: Colors.black87,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      banner.message,
-                      style: TextStyle(
-                        color: Colors.black54,
-                        fontSize: 12.5,
-                        height: 1.25,
-                      ),
-                    ),
-                    SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (isCrossPromo)
-                          ElevatedButton(
-                            onPressed: () async {
-                              await AuthService().recordPromotionBannerEvent(
-                                promotionId: banner.id,
-                                eventType: 'click',
-                                placement: 'savein_home_search',
-                              );
-                              if (!context.mounted) return;
-                              await _activateSmartChefPromo(context);
-                            },
-                            child: Text(banner.ctaLabel),
-                          )
-                        else if (banner.actionUrl.trim().isNotEmpty)
-                          ElevatedButton(
-                            onPressed: () async {
-                              await AuthService().recordPromotionBannerEvent(
-                                promotionId: banner.id,
-                                eventType: 'click',
-                                placement: 'savein_home_search',
-                              );
-                              await launchUrl(
-                                Uri.parse(banner.actionUrl),
-                                mode: LaunchMode.externalApplication,
-                              );
-                            },
-                            child: Text(banner.ctaLabel),
-                          ),
-                        if (isCrossPromo)
-                          OutlinedButton(
-                            onPressed: _openSmartChefStore,
-                            child: Text(
-                              banner.secondaryCtaLabel.trim().isNotEmpty
-                                  ? banner.secondaryCtaLabel
-                                  : 'Apri SmartChef',
-                            ),
-                          ),
-                      ],
                     ),
                   ],
                 ),
-              ),
-            ],
+                SizedBox(height: 4),
+                Text(
+                  banner.message,
+                  style: TextStyle(
+                    color: Colors.black54,
+                    fontSize: 12.5,
+                    height: 1.25,
+                  ),
+                ),
+                SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (isCrossPromo)
+                      ElevatedButton(
+                        onPressed: () async {
+                          await AuthService().recordPromotionBannerEvent(
+                            promotionId: banner.id,
+                            eventType: 'click',
+                            placement: 'savein_home_search',
+                          );
+                          if (!context.mounted) return;
+                          await _activateSmartChefPromo(context);
+                        },
+                        child: Text(banner.ctaLabel),
+                      )
+                    else if (banner.actionUrl.trim().isNotEmpty)
+                      ElevatedButton(
+                        onPressed: () async {
+                          await AuthService().recordPromotionBannerEvent(
+                            promotionId: banner.id,
+                            eventType: 'click',
+                            placement: 'savein_home_search',
+                          );
+                          await launchUrl(
+                            Uri.parse(banner.actionUrl),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                        child: Text(banner.ctaLabel),
+                      ),
+                    if (isCrossPromo)
+                      OutlinedButton(
+                        onPressed: _openSmartChefStore,
+                        child: Text(
+                          banner.secondaryCtaLabel.trim().isNotEmpty
+                              ? banner.secondaryCtaLabel
+                              : 'Apri SmartChef',
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
+  }
+
+  void _trackHomePromotionBannerView(String? promotionId) {
+    if (promotionId == null ||
+        promotionId.trim().isEmpty ||
+        _trackedHomePromotionViews.contains(promotionId)) {
+      return;
+    }
+
+    _trackedHomePromotionViews.add(promotionId);
+    unawaited(AuthService().recordPromotionBannerEvent(
+      promotionId: promotionId,
+      eventType: 'view',
+      placement: 'savein_home_search',
+    ));
   }
 
   Future<void> _openSmartChefStore() async {
@@ -1202,9 +1402,13 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     try {
       final result = await AuthService().activateSmartChefLaunchPromo();
       if (!context.mounted) return;
-      setState(() {
-        _promotionBannerFuture = AuthService().getActivePromotionBanner();
-      });
+      unawaited(AuthService().getActivePromotionBanner().then((banner) {
+        if (mounted) {
+          setState(() {
+            _activeBanner = banner;
+          });
+        }
+      }));
 
       await showDialog<void>(
         context: context,
@@ -1290,7 +1494,8 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
     final List<Widget> rows = [];
     for (int i = 0; i < sortedFolders.length; i += 2) {
       final folder1 = sortedFolders[i];
-      final folder2 = i + 1 < sortedFolders.length ? sortedFolders[i + 1] : null;
+      final folder2 =
+          i + 1 < sortedFolders.length ? sortedFolders[i + 1] : null;
 
       rows.add(Row(
         children: [
@@ -1338,7 +1543,7 @@ class _WebHomePageState extends State<WebHomePage> with WidgetsBindingObserver {
         padding: const EdgeInsets.only(bottom: 100),
         children: [
           _buildPromotionBanner(themeColors),
-          if (sortedFolders.isNotEmpty) const SizedBox(height: 12),
+          if (_activeBanner != null) const SizedBox(height: 12),
           if (sortedFolders.isEmpty)
             SizedBox(
               height: 260,
@@ -1793,7 +1998,8 @@ class _RemindersBannerSheet extends StatelessWidget {
           const SizedBox(height: 16),
           Row(
             children: [
-              const Icon(Icons.notifications_active, color: Colors.orange, size: 22),
+              const Icon(Icons.notifications_active,
+                  color: Colors.orange, size: 22),
               const SizedBox(width: 8),
               Text(
                 'Reminder di oggi',
@@ -1825,7 +2031,8 @@ class _RemindersBannerSheet extends StatelessWidget {
                   } else {
                     try {
                       final uri = Uri.parse(reminder.postUrl);
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
                     } catch (_) {}
                   }
                 },

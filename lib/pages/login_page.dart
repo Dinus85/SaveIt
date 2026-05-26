@@ -602,6 +602,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         // AuthWrapper sta ascoltando AuthService e mostrerÃ  automaticamente WebHomePage
       } else {
         print('DEBUG: GOOGLE SIGN-IN FALLITO: ${result.message}');
+        final pendingGoogleEmail = AuthService().pendingGoogleEmail;
+        if (pendingGoogleEmail != null && pendingGoogleEmail.isNotEmpty) {
+          _emailController.text = pendingGoogleEmail;
+          _rememberMe = true;
+        }
         _showErrorDialog(
             result.message ?? 'Errore durante il login con Google');
       }

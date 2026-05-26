@@ -1,6 +1,6 @@
 const functions = require("firebase-functions");
 const functionsV1 = require("firebase-functions/v1");
-const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
@@ -9,6 +9,23 @@ const crypto = require("crypto");
 admin.initializeApp();
 
 const db = admin.firestore();
+const SHARED_LINKS_COLLECTION = "shared_links";
+const SHARE_LINK_BASE_URL = (process.env.SHARE_LINK_BASE_URL || "https://savein.eu").replace(/\/$/, "");
+const PLAY_STORE_URL = process.env.PLAY_STORE_URL || "https://play.google.com/store/apps/details?id=eu.savein.app";
+const APP_STORE_URL = process.env.APP_STORE_URL || "";
+const ASSET_LINKS = [
+  {
+    relation: ["delegate_permission/common.handle_all_urls"],
+    target: {
+      namespace: "android_app",
+      package_name: "eu.savein.app",
+      sha256_cert_fingerprints: [
+        "48:39:0D:D5:FF:B3:8F:35:68:64:AC:75:56:AD:FD:68:B7:5B:FE:F5:79:57:F2:A8:DC:78:CD:B6:49:8D:69:F6",
+        "89:09:D4:4A:58:D6:7C:FC:53:0B:1B:F7:7E:4D:85:36:14:BD:CA:4F:BB:0F:48:46:31:4A:3E:30:FC:A8:64:D2",
+      ],
+    },
+  },
+];
 
 const requireDashboardAdmin = async (auth, actionLabel) => {
   if (!auth) {
@@ -874,6 +891,11 @@ exports.getActivePromotionBanner = onCall(async (request) => {
   const email = normalizeEmail(auth.token?.email);
   if (!email) return {banner: null};
 
+  const userSnap = await db.collection("users").doc(auth.uid).get();
+  const userData = userSnap.exists ? userSnap.data() || {} : {};
+  const role = (userData.role || "").toString().toLowerCase().trim();
+  if (role === "admin") return {banner: null};
+
   const snap = await db.collection(PROMOTION_BANNERS_COLLECTION)
       .where("active", "==", true)
       .limit(30)
@@ -1450,6 +1472,112 @@ const callerCanSendDashboardNotification = async (auth) => {
   return role === "admin" || role === "editor";
 };
 
+const DASHBOARD_ACCESS_ROLES = new Set(["none", "author", "editor", "admin"]);
+
+const countDashboardAdminsAfterEmailChange = async (targetEmail, newRole) => {
+  const snap = await db.collection("dashboard_accesses").get();
+  let count = 0;
+  let targetExists = false;
+  snap.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const email = normalizeEmail(data.normalizedEmail || doc.id);
+    if (email === targetEmail) targetExists = true;
+    const role = email === targetEmail ?
+      newRole :
+      (data.dashboardRole || "none").toString().trim();
+    if (role === "admin") count += 1;
+  });
+  if (!targetExists && newRole === "admin") count += 1;
+  return count;
+};
+
+exports.upsertDashboardLoginAccess = onCall(
+    {region: "us-central1", timeoutSeconds: 30, memory: "256MiB"},
+    async (request) => {
+      await requireDashboardAdmin(request.auth, "gestire accessi dashboard");
+
+      const data = request.data || {};
+      const email = normalizeEmail(data.email);
+      const dashboardRole = (data.dashboardRole || "").toString().trim();
+      const password = (data.password || "").toString();
+
+      if (!email || !email.includes("@")) {
+        throw new HttpsError("invalid-argument", "Email accesso dashboard non valida.");
+      }
+      if (!DASHBOARD_ACCESS_ROLES.has(dashboardRole)) {
+        throw new HttpsError("invalid-argument", "Ruolo dashboard non valido.");
+      }
+      if (password && password.length < 6) {
+        throw new HttpsError(
+            "invalid-argument",
+            "La password deve avere almeno 6 caratteri."
+        );
+      }
+
+      const adminCountAfterChange =
+        await countDashboardAdminsAfterEmailChange(email, dashboardRole);
+      if (adminCountAfterChange < 1) {
+        throw new HttpsError(
+            "failed-precondition",
+            "Deve rimanere almeno un admin dashboard."
+        );
+      }
+
+      let authUser = null;
+      if (dashboardRole !== "none") {
+        try {
+          authUser = await admin.auth().getUserByEmail(email);
+          if (password) {
+            authUser = await admin.auth().updateUser(authUser.uid, {password});
+          }
+        } catch (error) {
+          if (error.code !== "auth/user-not-found") throw error;
+          if (!password) {
+            throw new HttpsError(
+                "failed-precondition",
+                "Password obbligatoria per creare un nuovo utente."
+            );
+          }
+          authUser = await admin.auth().createUser({
+            email,
+            password,
+            emailVerified: true,
+          });
+        }
+      }
+
+      const ref = db.collection("dashboard_accesses").doc(email);
+      if (dashboardRole === "none") {
+        await ref.delete();
+      } else {
+        const existing = await ref.get();
+        await ref.set({
+          email,
+          normalizedEmail: email,
+          uid: authUser?.uid || null,
+          dashboardRole,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedBy: request.auth.uid,
+          updatedByEmail: normalizeEmail(request.auth.token?.email),
+          createdAt: existing.exists ?
+            existing.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp() :
+            admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+
+      await db.collection("admin_logs").add({
+        action: "dashboard_access_upserted",
+        actorId: request.auth.uid,
+        actorEmail: normalizeEmail(request.auth.token?.email),
+        targetEmail: email,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        details: {dashboardRole},
+      });
+
+      return {ok: true};
+    }
+);
+
 exports.sendDashboardNotification = onCall(
     async (request) => {
       const data = request.data || {};
@@ -1793,5 +1921,443 @@ exports.sendBulkEmail = onCall(
         totalRequested: emailAddresses.length,
         failedEmails: failedEmails.slice(0, 10), // max 10 in risposta
       };
+    }
+);
+
+const createShareToken = () => crypto.randomBytes(18).toString("base64url");
+
+const sanitizeSharePayload = (type, payload) => {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const title = (source.title || source.name || "").toString().trim();
+  if (!["post", "folder"].includes(type)) {
+    throw new HttpsError("invalid-argument", "Tipo condivisione non valido");
+  }
+  if (!title) {
+    throw new HttpsError("invalid-argument", "Titolo condivisione mancante");
+  }
+  return source;
+};
+
+exports.createShareLink = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 60,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+      const type = (request.data?.type || "").toString().trim();
+      const payload = sanitizeSharePayload(type, request.data?.payload);
+      const title = (payload.title || payload.name || "contenuto SaveIn").toString();
+      const token = createShareToken();
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const expiresAt = admin.firestore.Timestamp.fromDate(
+          new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+      );
+
+      await db.collection(SHARED_LINKS_COLLECTION).doc(token).set({
+        token,
+        type,
+        title,
+        payload,
+        ownerId: request.auth.uid,
+        ownerEmail: request.auth.token.email || "",
+        ownerName: request.auth.token.name || request.auth.token.email || "Utente SaveIn",
+        createdAt: now,
+        updatedAt: now,
+        expiresAt,
+        status: "active",
+        viewCount: 0,
+        openCount: 0,
+        importCount: 0,
+      });
+
+      return {
+        token,
+        url: `${SHARE_LINK_BASE_URL}/s/${token}`,
+        type,
+        title,
+      };
+    }
+);
+
+exports.getShareLink = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      const token = (request.data?.token || "").toString().trim();
+      if (!token) {
+        throw new HttpsError("invalid-argument", "Token mancante");
+      }
+      const doc = await db.collection(SHARED_LINKS_COLLECTION).doc(token).get();
+      if (!doc.exists) {
+        throw new HttpsError("not-found", "Condivisione non trovata");
+      }
+      const data = doc.data() || {};
+      const expiresAt = data.expiresAt?.toDate?.();
+      if (data.status !== "active" || (expiresAt && expiresAt < new Date())) {
+        throw new HttpsError("failed-precondition", "Condivisione non disponibile");
+      }
+      await doc.ref.set({
+        openCount: admin.firestore.FieldValue.increment(1),
+        lastOpenedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return {
+        token: doc.id,
+        type: data.type,
+        title: data.title,
+        ownerName: data.ownerName || "Utente SaveIn",
+        payload: data.payload || {},
+      };
+    }
+);
+
+exports.trackShareLinkImport = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      const token = (request.data?.token || "").toString().trim();
+      if (!token) {
+        throw new HttpsError("invalid-argument", "Token mancante");
+      }
+      await db.collection(SHARED_LINKS_COLLECTION).doc(token).set({
+        importCount: admin.firestore.FieldValue.increment(1),
+        lastImportedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return {ok: true};
+    }
+);
+
+const shareFallbackMessage = (type) => type === "folder" ?
+  "Hai ricevuto una cartella SaveIn! Scarica l'app gratis per importarla all'istante e avere tutte le nuove idee organizzate in un clic." :
+  "C'è un contenuto SaveIn che ti aspetta! Scarica l'app gratis per aprirlo e salvarlo. Organizza le tue idee in un clic.";
+
+const escapeHtml = (value) => value.toString().replace(/[<>&"]/g, (c) => ({
+  "<": "&lt;",
+  ">": "&gt;",
+  "&": "&amp;",
+  "\"": "&quot;",
+}[c]));
+
+exports.openShareLink = onRequest(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (req, res) => {
+      const token = (req.path || "").split("/").filter(Boolean).pop() ||
+        (req.query.token || "").toString();
+      let type = "post";
+      let title = "SaveIn";
+      if (token) {
+        try {
+          const doc = await db.collection(SHARED_LINKS_COLLECTION).doc(token).get();
+          if (doc.exists) {
+            const data = doc.data() || {};
+            type = data.type === "folder" ? "folder" : "post";
+            title = data.title || title;
+            await doc.ref.set({
+              viewCount: admin.firestore.FieldValue.increment(1),
+              lastViewedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, {merge: true});
+          }
+        } catch (error) {
+          console.error("Errore fallback share link", error);
+        }
+      }
+
+      const message = shareFallbackMessage(type);
+      res.set("Cache-Control", "no-cache,no-store,must-revalidate");
+      res.status(200).send(`<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apri con SaveIn</title>
+  <meta property="og:title" content="${escapeHtml(title)}">
+  <meta property="og:description" content="${escapeHtml(message)}">
+  <script>
+    setTimeout(function(){ window.location.href = ${JSON.stringify(PLAY_STORE_URL)}; }, 1200);
+  </script>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#D4FFEC;color:#10231a;display:grid;place-items:center;min-height:100vh;padding:24px}
+    .card{max-width:520px;background:rgba(255,255,255,.92);border-radius:24px;padding:28px;box-shadow:0 18px 60px rgba(0,0,0,.14);text-align:center}
+    h1{margin:0 0 12px;font-size:28px}
+    p{font-size:17px;line-height:1.45;margin:0 0 22px}
+    a{display:inline-block;background:#22c55e;color:#fff;text-decoration:none;font-weight:800;border-radius:14px;padding:14px 20px;margin:6px}
+    small{display:block;margin-top:16px;color:#4b5563}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Apri con SaveIn!</h1>
+    <p>${escapeHtml(message)}</p>
+    <a href="${PLAY_STORE_URL}">Installa SaveIn gratis</a>
+    ${APP_STORE_URL ? `<a href="${APP_STORE_URL}">Scarica su App Store</a>` : ""}
+    <small>Dopo l'installazione, riapri lo stesso link dalla chat per importare il contenuto.</small>
+  </main>
+</body>
+</html>`);
+    }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN DASHBOARD
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DASH_COOKIE = "__savein_dash";
+const DASH_SESSION_MS = 14 * 24 * 60 * 60 * 1000; // 14 giorni
+const FIREBASE_WEB_API_KEY = "AIzaSyDgHK8zKBpFy1dQZQ0_z0iNZ6Nr3j7ksPU";
+const FIREBASE_AUTH_DOMAIN = "saveit-app-1784d.firebaseapp.com";
+const FIREBASE_PROJECT_ID = "saveit-app-1784d";
+
+const parseCookies = (header) => {
+  if (!header) return {};
+  return Object.fromEntries(
+      (header.split(";") || []).map((c) => {
+        const idx = c.indexOf("=");
+        return [c.slice(0, idx).trim(), decodeURIComponent(c.slice(idx + 1).trim())];
+      }),
+  );
+};
+
+const dashVerifySession = async (sessionCookie) => {
+  if (!sessionCookie) return null;
+  try {
+    const decoded = await admin.auth().verifySessionCookie(sessionCookie, true);
+    const email = normalizeEmail(decoded.email || "");
+    if (!email) return null;
+    const doc = await db.collection("dashboard_accesses").doc(email).get();
+    if (!doc.exists) return null;
+    const data = doc.data();
+    if (data.active === false) return null;
+    if (!data.dashboardRole || data.dashboardRole === "none") return null;
+    return {uid: decoded.uid, email, role: data.dashboardRole};
+  } catch (_) {
+    return null;
+  }
+};
+
+const dashHtmlHead = (title) => `<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>${title}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📌</text></svg>">
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f0f4f8;color:#1a202c}
+    a{color:#2C7A7B;text-decoration:none}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:700;border:none;cursor:pointer;transition:opacity .15s}
+    .btn:hover{opacity:.88}
+    .btn-primary{background:#2C7A7B;color:#fff}
+    .card{background:#fff;border-radius:14px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+    input{width:100%;padding:10px 12px;border:1.5px solid #E2E8F0;border-radius:8px;font-size:14px;outline:none;transition:border-color .2s}
+    input:focus{border-color:#2C7A7B}
+    label{display:block;font-size:13px;font-weight:600;color:#4A5568;margin-bottom:5px}
+  </style>
+</head>`;
+
+const dashLoginPage = (err = "") => `${dashHtmlHead("SaveIn! Admin · Login")}
+<body style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
+  <div class="card" style="width:100%;max-width:380px;">
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="font-size:44px;margin-bottom:8px;">📌</div>
+      <h1 style="margin:0;font-size:22px;font-weight:800;">SaveIn! Admin</h1>
+      <p style="margin:6px 0 0;color:#718096;font-size:14px;">Accesso riservato agli amministratori</p>
+    </div>
+    ${err ? `<div style="background:#FFF5F5;border:1px solid #FC8181;border-radius:8px;padding:10px 14px;color:#C53030;font-size:13px;margin-bottom:16px;">${err}</div>` : ""}
+    <form id="frm">
+      <div style="margin-bottom:14px;">
+        <label>Email</label>
+        <input id="em" type="email" required placeholder="admin@savein.eu"/>
+      </div>
+      <div style="margin-bottom:20px;">
+        <label>Password</label>
+        <input id="pw" type="password" required placeholder="••••••••"/>
+      </div>
+      <button type="submit" id="btn" class="btn btn-primary" style="width:100%;justify-content:center;">Accedi</button>
+    </form>
+    <p id="err" style="color:#C53030;font-size:13px;margin-top:12px;display:none;text-align:center;"></p>
+  </div>
+  <script type="module">
+    import{initializeApp}from"https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import{getAuth,signInWithEmailAndPassword}from"https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    const app=initializeApp({apiKey:"${FIREBASE_WEB_API_KEY}",authDomain:"${FIREBASE_AUTH_DOMAIN}",projectId:"${FIREBASE_PROJECT_ID}"});
+    const auth=getAuth(app);
+    document.getElementById("frm").addEventListener("submit",async(e)=>{
+      e.preventDefault();
+      const btn=document.getElementById("btn");
+      const errEl=document.getElementById("err");
+      btn.disabled=true;btn.textContent="Accesso in corso…";errEl.style.display="none";
+      try{
+        const cred=await signInWithEmailAndPassword(auth,document.getElementById("em").value.trim(),document.getElementById("pw").value);
+        const idToken=await cred.user.getIdToken();
+        const r=await fetch("/dashboard/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken})});
+        if(r.ok){window.location.href="/dashboard";}
+        else{const b=await r.json().catch(()=>({}));throw new Error(b.error||"Accesso negato");}
+      }catch(ex){
+        errEl.textContent=ex.code==="auth/invalid-credential"||ex.message?.includes("invalid-credential")?"Email o password non corretti.":(ex.message||"Errore durante il login.");
+        errEl.style.display="block";btn.disabled=false;btn.textContent="Accedi";
+      }
+    });
+  </script>
+</body></html>`;
+
+const dashPage = (user, stats, admins) => `${dashHtmlHead("SaveIn! Admin · Dashboard")}
+<body>
+  <nav style="background:#2C7A7B;color:#fff;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15);">
+    <div style="font-weight:800;font-size:17px;display:flex;align-items:center;gap:10px;"><span>📌</span> SaveIn! Admin</div>
+    <div style="display:flex;align-items:center;gap:16px;font-size:13px;">
+      <span style="opacity:.85;">${escapeHtml(user.email)}</span>
+      <a href="/dashboard/logout" style="background:rgba(255,255,255,.2);color:#fff;padding:5px 14px;border-radius:6px;font-weight:600;">Esci</a>
+    </div>
+  </nav>
+  <div style="max-width:1100px;margin:32px auto;padding:0 20px;">
+    <h2 style="margin:0 0 24px;font-size:24px;font-weight:800;">Panoramica</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px;">
+      ${[["👤","Utenti totali",stats.users],["⭐","Premium",stats.premium],["🆓","Free",stats.free],["📁","Cartelle",stats.folders]].map(([ic,lb,v])=>`
+        <div class="card" style="display:flex;flex-direction:column;gap:4px;">
+          <span style="font-size:26px;">${ic}</span>
+          <span style="font-size:30px;font-weight:800;color:#2C7A7B;">${v!=null?v:"…"}</span>
+          <span style="font-size:13px;color:#718096;font-weight:600;">${lb}</span>
+        </div>`).join("")}
+    </div>
+    <div class="card" style="margin-bottom:24px;">
+      <h3 style="margin:0 0 16px;font-size:16px;font-weight:800;">Amministratori Dashboard</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <thead><tr style="border-bottom:2px solid #E2E8F0;">
+          <th style="text-align:left;padding:8px 12px;color:#4A5568;">Email</th>
+          <th style="text-align:left;padding:8px 12px;color:#4A5568;">Ruolo</th>
+          <th style="text-align:left;padding:8px 12px;color:#4A5568;">Stato</th>
+        </tr></thead>
+        <tbody>
+          ${admins.map((a)=>`<tr style="border-bottom:1px solid #EDF2F7;">
+            <td style="padding:10px 12px;">${escapeHtml(a.email||a.id)}</td>
+            <td style="padding:10px 12px;"><span style="background:#E6FFFA;color:#2C7A7B;padding:2px 8px;border-radius:20px;font-size:12px;font-weight:700;">${escapeHtml(a.role)}</span></td>
+            <td style="padding:10px 12px;"><span style="color:${a.active===false?"#E53E3E":"#38A169"};font-size:13px;font-weight:600;">${a.active===false?"Disabilitato":"Attivo"}</span></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      <p style="margin-top:14px;font-size:13px;color:#718096;">Per aggiungere nuovi admin: crea un documento in Firestore nella collezione <code>dashboard_accesses</code> con ID = email, campo <code>dashboardRole: "admin"</code>.</p>
+    </div>
+  </div>
+</body></html>`;
+
+exports.adminDashboard = onRequest(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (req, res) => {
+      const rawPath = (req.path || "/").replace(/\/+$/, "") || "/";
+      const seg = rawPath.startsWith("/dashboard") ?
+        rawPath.slice("/dashboard".length) || "/" :
+        rawPath;
+      const method = req.method.toUpperCase();
+      const cookies = parseCookies(req.headers.cookie);
+
+      // POST /session → verifica idToken, crea session cookie
+      if (seg === "/session" && method === "POST") {
+        try {
+          const body = req.body || {};
+          const idToken = body.idToken;
+          if (!idToken) {
+            res.status(400).json({error: "idToken mancante"});
+            return;
+          }
+          const decoded = await admin.auth().verifyIdToken(idToken);
+          const email = normalizeEmail(decoded.email || "");
+          const doc = await db.collection("dashboard_accesses").doc(email).get();
+          if (!doc.exists || doc.data().active === false || !doc.data().dashboardRole || doc.data().dashboardRole === "none") {
+            res.status(403).json({error: "Accesso non autorizzato per questo account"});
+            return;
+          }
+          const sessionCookie = await admin.auth().createSessionCookie(idToken, {expiresIn: DASH_SESSION_MS});
+          res.setHeader("Set-Cookie", `${DASH_COOKIE}=${sessionCookie}; HttpOnly; Secure; SameSite=Strict; Max-Age=${DASH_SESSION_MS / 1000}; Path=/dashboard`);
+          res.json({ok: true});
+        } catch (e) {
+          res.status(401).json({error: "Token non valido"});
+        }
+        return;
+      }
+
+      // GET /logout
+      if (seg === "/logout" && method === "GET") {
+        res.setHeader("Set-Cookie", `${DASH_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Max-Age=0; Path=/dashboard`);
+        res.redirect(302, "/dashboard/login");
+        return;
+      }
+
+      // GET /login
+      if (seg === "/login" && method === "GET") {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.send(dashLoginPage());
+        return;
+      }
+
+      // Tutte le altre route: verifica sessione
+      const user = await dashVerifySession(cookies[DASH_COOKIE]);
+      if (!user) {
+        res.redirect(302, "/dashboard/login");
+        return;
+      }
+
+      // GET / → dashboard home
+      if ((seg === "/" || seg === "") && method === "GET") {
+        try {
+          const [usersSnap, premiumSnap, foldersSnap, adminsSnap] = await Promise.all([
+            db.collection("users").count().get(),
+            db.collection("users").where("role", "==", "premium").count().get(),
+            db.collection("folders").count().get(),
+            db.collection("dashboard_accesses").get(),
+          ]);
+          const total = usersSnap.data().count;
+          const prem = premiumSnap.data().count;
+          const stats = {
+            users: total,
+            premium: prem,
+            free: total - prem,
+            folders: foldersSnap.data().count,
+          };
+          const admins = adminsSnap.docs.map((d) => ({
+            id: d.id,
+            email: d.data().email || d.id,
+            role: d.data().dashboardRole || "admin",
+            active: d.data().active,
+          }));
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.send(dashPage(user, stats, admins));
+        } catch (e) {
+          res.status(500).send("Errore interno: " + e.message);
+        }
+        return;
+      }
+
+      res.status(404).send("Pagina non trovata");
+    }
+);
+
+exports.assetLinks = onRequest(
+    {
+      region: "us-central1",
+      timeoutSeconds: 10,
+      memory: "128MiB",
+    },
+    (req, res) => {
+      res.set("Content-Type", "application/json");
+      res.set("Cache-Control", "public,max-age=3600");
+      res.status(200).send(JSON.stringify(ASSET_LINKS));
     }
 );

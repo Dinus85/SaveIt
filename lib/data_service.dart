@@ -994,11 +994,12 @@ class DataService {
     required String title,
     required String description,
     String? imageUrl,
+    String? previewStorageUrl,
     String? creatorName,
     String? creatorUsername,
     required List<String> tags,
     required String folderId,
-    bool isShared = false, // 🆕 NUOVO
+    bool isShared = false,
   }) async {
     return await _executeWithOptimizedCache<SavedPost>(
       () async {
@@ -1011,6 +1012,7 @@ class DataService {
           title: title,
           description: description,
           imageUrl: imageUrl,
+          previewStorageUrl: previewStorageUrl,
           creatorName: creatorName,
           creatorUsername: creatorUsername,
           tags: tags,
@@ -1112,6 +1114,7 @@ class DataService {
                 userId: userId,
                 postId: post.id,
                 localPath: localPath,
+                sourceUrl: post.url,
               );
               if (uploadedRemoteUrl == null ||
                   uploadedRemoteUrl.trim().isEmpty) {

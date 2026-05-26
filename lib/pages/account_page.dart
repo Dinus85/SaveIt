@@ -9,10 +9,12 @@ import '../pages/terms_conditions_page.dart';
 import '../pages/marketing_communications_page.dart';
 import '../services/access_control_service.dart';
 import '../services/auth_service.dart';
+import '../services/promo_popup_service.dart';
 import '../pages/login_page.dart';
 import 'help_center_page.dart';
 import 'contact_page.dart';
 import '../widgets/custom_bottom_nav.dart';
+import '../widgets/first_launch_tutorial_dialog.dart';
 import '../data_service.dart';
 
 // Helper class per validazione password
@@ -434,6 +436,10 @@ class AccountPage extends StatelessWidget {
             MarketingCommunicationsPage(isDarkTheme: isDarkTheme),
       ),
     );
+  }
+
+  Future<void> _showTutorial(BuildContext context) async {
+    await SaveInFirstLaunchTutorial.show(context);
   }
 
   void _showVersionInfo(BuildContext context) {
@@ -990,6 +996,12 @@ class AccountPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Launcher popup promo (invisibile, triggered al mount)
+                _PromoLauncher(
+                  onActivateCrossPromo: (ctx) => _activateSmartChefPromo(ctx),
+                  onOpenOtherApp: _openSmartChefStore,
+                ),
+
                 // Profilo utente
                 Container(
                   width: double.infinity,
@@ -1032,13 +1044,6 @@ class AccountPage extends StatelessWidget {
 
                 SizedBox(height: 24),
                 _buildPlanCard(
-                  context,
-                  currentUser,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                ),
-                _buildSmartChefPromoCard(
                   context,
                   currentUser,
                   cardColor,
@@ -1165,6 +1170,16 @@ class AccountPage extends StatelessWidget {
                   cardTextColor,
                   cardSubtitleColor,
                   () => _openHelpCenterPage(context),
+                ),
+
+                _buildOptionCard(
+                  'Rivedi tutorial',
+                  'Guarda di nuovo i 3 passaggi iniziali',
+                  Icons.slideshow_outlined,
+                  cardColor,
+                  cardTextColor,
+                  cardSubtitleColor,
+                  () => _showTutorial(context),
                 ),
 
                 _buildOptionCard(
@@ -1786,152 +1801,40 @@ class AccountPage extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildSmartChefPromoCard(
-    BuildContext context,
-    User? currentUser,
-    Color cardColor,
-    Color textColor,
-    Color subtitleColor,
-  ) {
-    if (currentUser == null || currentUser.isAdmin) {
-      return SizedBox.shrink();
-    }
+// ── Launcher popup promo ──────────────────────────────────────────────────────
 
-    return FutureBuilder<PromotionBanner?>(
-      future: AuthService().getActivePromotionBanner(),
-      builder: (context, snapshot) {
-        final banner = snapshot.data;
-        if (snapshot.connectionState == ConnectionState.waiting ||
-            banner == null) {
-          return SizedBox.shrink();
-        }
-        AuthService().recordPromotionBannerEvent(
-          promotionId: banner.id,
-          eventType: 'view',
-          placement: 'savein_account',
+class _PromoLauncher extends StatefulWidget {
+  final Future<void> Function(BuildContext context) onActivateCrossPromo;
+  final Future<void> Function() onOpenOtherApp;
+
+  const _PromoLauncher({
+    required this.onActivateCrossPromo,
+    required this.onOpenOtherApp,
+  });
+
+  @override
+  State<_PromoLauncher> createState() => _PromoLauncherState();
+}
+
+class _PromoLauncherState extends State<_PromoLauncher> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        PromoPopupService.showIfNeeded(
+          context,
+          onActivateCrossPromo: widget.onActivateCrossPromo,
+          onOpenOtherApp: widget.onOpenOtherApp,
         );
-
-        final isCrossPromo = banner.isCrossPromo;
-        final bgColor = isCrossPromo ? Color(0xFFFFF7E6) : cardColor;
-        final borderColor =
-            isCrossPromo ? Color(0xFFFFB020) : textColor.withOpacity(0.12);
-        final icon = isCrossPromo
-            ? Icons.local_fire_department
-            : Icons.campaign_outlined;
-        final iconColor = isCrossPromo ? Color(0xFFD97706) : textColor;
-
-        return Container(
-          width: double.infinity,
-          padding: EdgeInsets.all(16),
-          margin: EdgeInsets.only(bottom: 24),
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor, width: 1.2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 2,
-                offset: Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (banner.imageUrl.trim().isNotEmpty) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: AspectRatio(
-                    aspectRatio: 3,
-                    child: Image.network(
-                      banner.imageUrl.trim(),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: Colors.black12,
-                        alignment: Alignment.center,
-                        child: Icon(Icons.broken_image_outlined),
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 12),
-              ],
-              Row(
-                children: [
-                  Icon(icon, color: iconColor),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      banner.title,
-                      style: TextStyle(
-                        color: textColor,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 8),
-              Text(
-                banner.message,
-                style: TextStyle(color: subtitleColor, fontSize: 14),
-              ),
-              SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (isCrossPromo)
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        await AuthService().recordPromotionBannerEvent(
-                          promotionId: banner.id,
-                          eventType: 'click',
-                          placement: 'savein_account',
-                        );
-                        if (!context.mounted) return;
-                        await _activateSmartChefPromo(context);
-                      },
-                      icon: Icon(Icons.card_giftcard),
-                      label: Text(banner.ctaLabel),
-                    )
-                  else if (banner.actionUrl.trim().isNotEmpty)
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        await AuthService().recordPromotionBannerEvent(
-                          promotionId: banner.id,
-                          eventType: 'click',
-                          placement: 'savein_account',
-                        );
-                        await launchUrl(
-                          Uri.parse(banner.actionUrl),
-                          mode: LaunchMode.externalApplication,
-                        );
-                      },
-                      icon: Icon(Icons.open_in_new),
-                      label: Text(banner.ctaLabel),
-                    ),
-                  if (isCrossPromo)
-                    OutlinedButton.icon(
-                      onPressed: _openSmartChefStore,
-                      icon: Icon(Icons.open_in_new),
-                      label: Text(
-                        banner.secondaryCtaLabel.trim().isNotEmpty
-                            ? banner.secondaryCtaLabel
-                            : 'Apri SmartChef',
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
+      }
+    });
   }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 // NUOVA PAGINA: Modifica Profilo

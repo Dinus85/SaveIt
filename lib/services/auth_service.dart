@@ -313,6 +313,8 @@ class AuthService extends ChangeNotifier {
   Completer<void>? _initializationCompleter;
   Completer<void>? _consentLoadingCompleter;
   CrossPromotionResult? _pendingCrossPromotionNotification;
+  firebase_auth.AuthCredential? _pendingGoogleCredential;
+  String? _pendingGoogleEmail;
   final Set<String> _trackedPromotionEvents = <String>{};
   DateTime? _lastConsentSyncAt;
   String? _lastConsentSyncUserId;
@@ -323,6 +325,7 @@ class AuthService extends ChangeNotifier {
   User? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
+  String? get pendingGoogleEmail => _pendingGoogleEmail;
   CrossPromotionResult? consumeCrossPromotionNotification() {
     final result = _pendingCrossPromotionNotification;
     _pendingCrossPromotionNotification = null;
@@ -499,6 +502,11 @@ class AuthService extends ChangeNotifier {
           await _saveRememberedEmail(email);
         }
 
+        await _linkPendingGoogleCredentialIfNeeded(
+          credential.user!,
+          email,
+        );
+
         if (kDebugMode) {
           print(
               'DEBUG: ✔ Login Firebase completato - Il listener aggiornerà lo stato');
@@ -536,6 +544,72 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  Future<void> _linkPendingGoogleCredentialIfNeeded(
+    firebase_auth.User firebaseUser,
+    String email,
+  ) async {
+    final pendingCredential = _pendingGoogleCredential;
+    final pendingEmail = _pendingGoogleEmail;
+    if (pendingCredential == null || pendingEmail == null) return;
+    if (_normalizeEmail(pendingEmail) != _normalizeEmail(email)) return;
+
+    try {
+      await firebaseUser.linkWithCredential(pendingCredential);
+      if (kDebugMode) print('DEBUG: Google collegato all account esistente');
+    } on firebase_auth.FirebaseAuthException catch (e) {
+      if (e.code == 'provider-already-linked') {
+        if (kDebugMode) {
+          print('DEBUG: Google già collegato: ${e.code}');
+        }
+        return;
+      }
+      if (e.code == 'credential-already-in-use') {
+        await _firebaseAuth.signOut();
+        try {
+          await _googleSignIn.signOut();
+        } catch (_) {}
+        _currentUser = null;
+        notifyListeners();
+        throw Exception(
+          'Questo account Google risulta già collegato a un altro profilo. '
+          'Per sicurezza sei stato disconnesso: accedi con email e password.',
+        );
+      }
+      rethrow;
+    } finally {
+      _pendingGoogleCredential = null;
+      _pendingGoogleEmail = null;
+    }
+  }
+
+  Future<String?> _findExistingUserIdByEmail(String email) async {
+    final normalizedEmail = _normalizeEmail(email);
+    if (normalizedEmail.isEmpty) return null;
+
+    try {
+      var query = await _firestore
+          .collection('users')
+          .where('normalizedEmail', isEqualTo: normalizedEmail)
+          .limit(1)
+          .get();
+      if (query.docs.isEmpty) {
+        query = await _firestore
+            .collection('users')
+            .where('email', isEqualTo: email.trim())
+            .limit(1)
+            .get();
+      }
+      if (query.docs.isEmpty) return null;
+      final data = query.docs.first.data();
+      return (data['userId'] as String?)?.trim().isNotEmpty == true
+          ? (data['userId'] as String).trim()
+          : query.docs.first.id;
+    } catch (e) {
+      if (kDebugMode) print('ERRORE lookup utente per email: $e');
+      return null;
+    }
+  }
+
   Future<AuthResult> loginWithGoogle() async {
     try {
       if (kDebugMode) print('DEBUG: 🔥 Google Sign-In...');
@@ -561,11 +635,31 @@ class AuthService extends ChangeNotifier {
           await _firebaseAuth.signInWithCredential(credential);
 
       if (userCredential.user != null) {
+        final firebaseUser = userCredential.user!;
+        final googleEmail = firebaseUser.email ?? googleUser.email;
+        final existingUserId = await _findExistingUserIdByEmail(googleEmail);
+        if (existingUserId != null && existingUserId != firebaseUser.uid) {
+          _pendingGoogleCredential = credential;
+          _pendingGoogleEmail = googleEmail;
+          await _firebaseAuth.signOut();
+          try {
+            await _googleSignIn.signOut();
+          } catch (_) {}
+          _currentUser = null;
+          notifyListeners();
+          return AuthResult(
+            success: false,
+            message: 'Questa email è già registrata con un altro metodo. '
+                'Per proteggere i tuoi dati, accedi con email e password: '
+                'collegheremo Google allo stesso account.',
+          );
+        }
+
         if (kDebugMode) {
           print(
               'DEBUG: ✔ Google Sign-In Firebase completato - Aspettando sincronizzazione...');
         }
-        await _waitForUserSync(userCredential.user!.email!);
+        await _waitForUserSync(firebaseUser.email!);
 
         if (_currentUser?.isBlocked == true) {
           final blockedReason = _currentUser?.blockedReason;
@@ -582,6 +676,25 @@ class AuthService extends ChangeNotifier {
       }
 
       return AuthResult(success: false, message: 'Errore Google Sign-In');
+    } on firebase_auth.FirebaseAuthException catch (e) {
+      if (kDebugMode) print('ERRORE Google Sign-In Firebase: ${e.code} - $e');
+      if (e.code == 'account-exists-with-different-credential') {
+        _pendingGoogleCredential = e.credential;
+        _pendingGoogleEmail = e.email;
+        try {
+          await _googleSignIn.signOut();
+        } catch (_) {}
+        return AuthResult(
+          success: false,
+          message: 'Questa email è già registrata con password. '
+              'Inserisci la password e premi Accedi: collegheremo Google '
+              'allo stesso account, poi potrai usare il login Google.',
+        );
+      }
+      return AuthResult(
+        success: false,
+        message: _getFirebaseErrorMessage(e),
+      );
     } catch (e) {
       if (kDebugMode) print('ERRORE Google Sign-In: $e');
       return AuthResult(
@@ -654,6 +767,7 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> _waitForUserSync(String expectedEmail) async {
+    final normalizedExpectedEmail = _normalizeEmail(expectedEmail);
     if (kDebugMode)
       print('DEBUG: 🔄 Aspettando sincronizzazione utente: $expectedEmail');
 
@@ -661,7 +775,9 @@ class AuthService extends ChangeNotifier {
     const maxAttempts = 50;
 
     while (attempts < maxAttempts) {
-      if (_currentUser != null && _currentUser!.email == expectedEmail) {
+      if (_currentUser != null &&
+          _currentUser!.id == _firebaseAuth.currentUser?.uid &&
+          _normalizeEmail(_currentUser!.email) == normalizedExpectedEmail) {
         if (kDebugMode) {
           print(
               'DEBUG: ✔ Sincronizzazione completata per: ${_currentUser!.email}');
@@ -691,7 +807,8 @@ class AuthService extends ChangeNotifier {
     }
 
     final firebaseUser = _firebaseAuth.currentUser;
-    if (firebaseUser != null && firebaseUser.email == expectedEmail) {
+    if (firebaseUser != null &&
+        _normalizeEmail(firebaseUser.email ?? '') == normalizedExpectedEmail) {
       if (kDebugMode) {
         print(
             'DEBUG: 🔧 Tentativo recupero: Firebase ha l\'utente, forzo il caricamento...');
@@ -1071,8 +1188,7 @@ class AuthService extends ChangeNotifier {
     if (_currentUser == null) return;
     final dashboardRole =
         await _loadDashboardAccessRoleForEmail(_currentUser!.email);
-    if (dashboardRole == DashboardAccessRole.none ||
-        _currentUser!.dashboardRole == dashboardRole) {
+    if (_currentUser!.dashboardRole == dashboardRole) {
       return;
     }
 
@@ -1091,11 +1207,42 @@ class AuthService extends ChangeNotifier {
 
       final prefs = await SharedPreferences.getInstance();
       final userData = prefs.getString('user_${firebaseUser.uid}');
+      final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
 
       if (userData != null) {
-        _currentUser = User.fromJson(jsonDecode(userData));
-        print('DEBUG: ✅ Dati utente caricati da storage locale');
+        final cachedUser = User.fromJson(jsonDecode(userData));
+        if (cachedUser.id == firebaseUser.uid &&
+            _normalizeEmail(cachedUser.email) == firebaseEmail) {
+          _currentUser = cachedUser;
+          print('DEBUG: ✅ Dati utente caricati da storage locale');
+        } else {
+          await prefs.remove('user_${firebaseUser.uid}');
+          _currentUser = null;
+          print('DEBUG: ⚠️ Cache utente scartata: UID/email non coerenti');
+        }
+      }
+
+      if (_currentUser == null) {
+        final doc =
+            await _firestore.collection('users').doc(firebaseUser.uid).get();
+        final data = doc.data();
+        if (doc.exists && data != null) {
+          _currentUser = User.fromJson({
+            ...data,
+            'id': data['userId'] ?? doc.id,
+            'email': data['email'] ?? firebaseUser.email ?? '',
+            'createdAt': data['createdAt'] is Timestamp
+                ? (data['createdAt'] as Timestamp).toDate().toIso8601String()
+                : data['createdAt'],
+          });
+          await _saveUserLocally(_currentUser!);
+          print('DEBUG: ✅ Dati utente caricati da Firestore');
+        }
       } else {
+        // no-op, kept for readability of the cache/firestore/local fallback flow
+      }
+
+      if (_currentUser == null) {
         _currentUser = User(
           id: firebaseUser.uid,
           name: firebaseUser.displayName ?? 'Utente',
@@ -1114,9 +1261,21 @@ class AuthService extends ChangeNotifier {
         print('DEBUG: ✅ Nuovo profilo locale creato');
       }
 
+      if (_currentUser?.id != firebaseUser.uid ||
+          _normalizeEmail(_currentUser?.email ?? '') != firebaseEmail) {
+        await _firebaseAuth.signOut();
+        try {
+          await _googleSignIn.signOut();
+        } catch (_) {}
+        _currentUser = null;
+        notifyListeners();
+        throw StateError('Utente autenticato non coerente con i dati locali');
+      }
+
       // Sincronizza da Firestore per aggiornare ruolo, blocco, consenso marketing.
       // Essenziale per utenti il cui ruolo è stato cambiato dall'admin dashboard.
       await _loadMarketingConsentFromFirestore();
+      await _syncDashboardAccessRoleFromFirestore();
       await _claimPendingSmartChefLaunchPromoIfAvailable();
     } catch (e) {
       print('ERRORE caricamento dati utente: $e');
@@ -1217,9 +1376,8 @@ class AuthService extends ChangeNotifier {
     );
     final response = await callable.call(<String, dynamic>{});
     final raw = response.data;
-    final data = raw is Map
-        ? Map<String, dynamic>.from(raw)
-        : <String, dynamic>{};
+    final data =
+        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
     final result = CrossPromotionResult.fromMap(data);
 
     _currentUser = _currentUser!.copyWith(
@@ -1234,18 +1392,29 @@ class AuthService extends ChangeNotifier {
 
   Future<PromotionBanner?> getActivePromotionBanner() async {
     final firebaseUser = _firebaseAuth.currentUser;
-    if (firebaseUser == null) return null;
+    if (firebaseUser == null) {
+      if (kDebugMode)
+        print('DEBUG: banner promo non caricato: utente Firebase nullo');
+      return null;
+    }
+    if (_currentUser?.isAdmin == true) {
+      if (kDebugMode) print('DEBUG: banner promo nascosto per utente admin');
+      return null;
+    }
 
     final callable = FirebaseFunctions.instance.httpsCallable(
       'getActivePromotionBanner',
     );
     final response = await callable.call(<String, dynamic>{});
     final raw = response.data;
-    final data = raw is Map
-        ? Map<String, dynamic>.from(raw)
-        : <String, dynamic>{};
+    if (kDebugMode) print('DEBUG: risposta getActivePromotionBanner: $raw');
+    final data =
+        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
     final bannerRaw = data['banner'];
-    if (bannerRaw is! Map) return null;
+    if (bannerRaw is! Map) {
+      if (kDebugMode) print('DEBUG: nessun banner promo attivo ricevuto');
+      return null;
+    }
     final banner = PromotionBanner.fromMap(
       Map<String, dynamic>.from(bannerRaw),
     );
@@ -1281,7 +1450,9 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> _claimPendingSmartChefLaunchPromoIfAvailable() async {
-    if (_currentUser == null || _currentUser!.isAdmin || !_currentUser!.isFree) {
+    if (_currentUser == null ||
+        _currentUser!.isAdmin ||
+        !_currentUser!.isFree) {
       return;
     }
 
@@ -1291,9 +1462,8 @@ class AuthService extends ChangeNotifier {
       );
       final response = await callable.call(<String, dynamic>{});
       final raw = response.data;
-      final data = raw is Map
-          ? Map<String, dynamic>.from(raw)
-          : <String, dynamic>{};
+      final data =
+          raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
       if (data['claimed'] != true || data['premiumUntil'] == null) {
         return;
       }
@@ -1427,6 +1597,7 @@ class AuthService extends ChangeNotifier {
   Future<bool> upsertDashboardAccess({
     required String email,
     required DashboardAccessRole dashboardRole,
+    String? password,
   }) async {
     if (_currentUser == null || !_currentUser!.canManageDashboardAccess) {
       throw Exception('Solo un admin dashboard può gestire gli accessi.');
@@ -1441,20 +1612,16 @@ class AuthService extends ChangeNotifier {
           'Scegli Autore, Editore o Admin per aggiungere un accesso.');
     }
 
-    await _ensureDashboardAccessWillStillHaveAdmin(
-      targetEmail: normalizedEmail,
-      newDashboardRole: dashboardRole,
+    final callable =
+        FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable(
+      'upsertDashboardLoginAccess',
+      options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
     );
-
-    await _firestore.collection('dashboard_accesses').doc(normalizedEmail).set({
-      'email': email.trim(),
-      'normalizedEmail': normalizedEmail,
+    await callable.call(<String, dynamic>{
+      'email': normalizedEmail,
       'dashboardRole': dashboardRole.value,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'updatedBy': _currentUser!.id,
-      'updatedByEmail': _currentUser!.email,
-      'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+      if (password != null && password.isNotEmpty) 'password': password,
+    });
 
     await _writeAdminLog(
       action: 'dashboard_access_upserted',
@@ -1464,6 +1631,23 @@ class AuthService extends ChangeNotifier {
         'newDashboardRole': dashboardRole.value,
       },
     );
+
+    return true;
+  }
+
+  Future<bool> _upsertDashboardAccessRoleOnly({
+    required String email,
+    required DashboardAccessRole dashboardRole,
+  }) async {
+    final callable =
+        FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable(
+      'upsertDashboardLoginAccess',
+      options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
+    );
+    await callable.call(<String, dynamic>{
+      'email': email,
+      'dashboardRole': dashboardRole.value,
+    });
 
     return true;
   }
@@ -1481,30 +1665,10 @@ class AuthService extends ChangeNotifier {
       throw Exception('Email accesso dashboard non valida.');
     }
 
-    if (dashboardRole == DashboardAccessRole.none) {
-      await _ensureDashboardAccessWillStillHaveAdmin(
-        targetEmail: normalizedEmail,
-        newDashboardRole: dashboardRole,
-      );
-      await _firestore
-          .collection('dashboard_accesses')
-          .doc(normalizedEmail)
-          .delete();
-    } else {
-      await _ensureDashboardAccessWillStillHaveAdmin(
-        targetEmail: normalizedEmail,
-        newDashboardRole: dashboardRole,
-      );
-      await _firestore
-          .collection('dashboard_accesses')
-          .doc(normalizedEmail)
-          .set({
-        'dashboardRole': dashboardRole.value,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'updatedBy': _currentUser!.id,
-        'updatedByEmail': _currentUser!.email,
-      }, SetOptions(merge: true));
-    }
+    await _upsertDashboardAccessRoleOnly(
+      email: normalizedEmail,
+      dashboardRole: dashboardRole,
+    );
 
     await _writeAdminLog(
       action: 'dashboard_access_email_changed',
@@ -1783,7 +1947,8 @@ class AuthService extends ChangeNotifier {
         'sendPasswordResetEmail',
         options: HttpsCallableOptions(timeout: const Duration(seconds: 30)),
       );
-      await callable.call(<String, dynamic>{'email': email.trim().toLowerCase()});
+      await callable
+          .call(<String, dynamic>{'email': email.trim().toLowerCase()});
       if (kDebugMode) print('DEBUG: Email reset password inviata a: $email');
       return true;
     } catch (e) {

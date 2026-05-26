@@ -59,6 +59,20 @@
     ],
     "rewrites": [
       {
+        "source": "/.well-known/assetlinks.json",
+        "function": {
+          "functionId": "assetLinks",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/s/**",
+        "function": {
+          "functionId": "openShareLink",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

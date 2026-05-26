@@ -589,12 +589,18 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
             children: [
               Icon(Icons.bookmark, color: _iconColor, size: 20),
               SizedBox(width: 8),
-              Image.asset(
-                'assets/icon/SaveIn!.png',
-                height: 48,
-                fit: BoxFit.contain,
+              Expanded(
+                child: Text(
+                  'Seleziona cartella',
+                  style: TextStyle(
+                    color: _textColor,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              Spacer(),
               IconButton(
                 onPressed: () {
                   _handleCancelWithCleanup();
@@ -752,12 +758,28 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
     final hasChildren = folder.children.isNotEmpty;
     final isTemporary = _isTemporaryFolder(folder);
 
+    // Per utenti Free, le cartelle oltre il limite di profondità non sono selezionabili
+    final bool isLockedForFree = !folder.isSpecial &&
+        _accessService.isFree &&
+        folder.level > AppAccessService.freeMaxFolderLevel;
+
     return GestureDetector(
       onTap: () async {
         if (folder.isSpecial) {
           setState(() {
             _selectedFolderPath = '';
           });
+        } else if (isLockedForFree) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Passa a Premium per salvare in cartelle di profondità maggiore.',
+              ),
+              backgroundColor: Colors.orange.shade700,
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+            ),
+          );
         } else {
           await _navigateToFolder(folder);
         }
@@ -767,103 +789,133 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
           setState(() {
             _selectedFolderPath = '';
           });
-        } else {
+        } else if (!isLockedForFree) {
           _selectFolder(folder);
         }
       },
-      child: Container(
-        decoration: BoxDecoration(
-          color: folder.color,
-          borderRadius: BorderRadius.circular(12),
-          border: isSelected ? Border.all(color: Colors.green, width: 3) : null,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Padding(
-              padding: EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(8),
+      child: Opacity(
+        opacity: isLockedForFree ? 0.45 : 1.0,
+        child: Container(
+          decoration: BoxDecoration(
+            color: folder.color,
+            borderRadius: BorderRadius.circular(12),
+            border: isSelected ? Border.all(color: Colors.green, width: 3) : null,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        folder.isSpecial
+                            ? Icons.bookmark
+                            : (hasChildren
+                                ? Icons.folder
+                                : Icons.folder_outlined),
+                        color: Colors.black87,
+                        size: 20,
+                      ),
+                    ),
+                    Spacer(),
+                    Text(
+                      folder.name,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      folder.count,
+                      style: TextStyle(
+                        color: Colors.black54,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isLockedForFree)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.amber.shade700,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.workspace_premium, color: Colors.white, size: 10),
+                        SizedBox(width: 3),
+                        Text(
+                          'Premium',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (isSelected)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      Icons.check,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ),
+                ),
+              if (hasChildren && !folder.isSpecial && !isLockedForFree)
+                Positioned(
+                  bottom: 8,
+                  right: 8,
+                  child: Container(
+                    padding: EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
-                      folder.isSpecial
-                          ? Icons.bookmark
-                          : (hasChildren
-                              ? Icons.folder
-                              : Icons.folder_outlined),
-                      color: Colors.black87,
-                      size: 20,
+                      Icons.arrow_forward_ios,
+                      color: Colors.white,
+                      size: 10,
                     ),
-                  ),
-                  Spacer(),
-                  Text(
-                    folder.name,
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    folder.count,
-                    style: TextStyle(
-                      color: Colors.black54,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (isSelected)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: Colors.green,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(
-                    Icons.check,
-                    color: Colors.white,
-                    size: 14,
                   ),
                 ),
-              ),
-            if (hasChildren && !folder.isSpecial)
-              Positioned(
-                bottom: 8,
-                right: 8,
-                child: Container(
-                  padding: EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.arrow_forward_ios,
-                    color: Colors.white,
-                    size: 10,
-                  ),
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

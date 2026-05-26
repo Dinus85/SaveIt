@@ -41,14 +41,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       TextEditingController(text: '15');
   final TextEditingController _dashboardAccessEmailController =
       TextEditingController();
+  final TextEditingController _dashboardAccessPasswordController =
+      TextEditingController();
   final TextEditingController _notificationTitleController =
       TextEditingController();
   final TextEditingController _notificationBodyController =
       TextEditingController();
-  final TextEditingController _emailSubjectController =
-      TextEditingController();
-  final TextEditingController _emailBodyController =
-      TextEditingController();
+  final TextEditingController _emailSubjectController = TextEditingController();
+  final TextEditingController _emailBodyController = TextEditingController();
 
   String _searchQuery = '';
   AppUserRole? _roleFilter;
@@ -108,6 +108,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     _freeAdRevenueController.dispose();
     _paymentFeePercentController.dispose();
     _dashboardAccessEmailController.dispose();
+    _dashboardAccessPasswordController.dispose();
     _notificationTitleController.dispose();
     _notificationBodyController.dispose();
     _emailSubjectController.dispose();
@@ -223,6 +224,60 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     final month = date.month.toString().padLeft(2, '0');
     final year = date.year.toString();
     return '$day/$month/$year';
+  }
+
+  String _formatDateInput(DateTime? date) {
+    if (date == null) return '';
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    return '$day/$month/${date.year}';
+  }
+
+  DateTime? _parseDateInput(String value, {bool endOfDay = false}) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final italianParts = trimmed.split('/');
+    if (italianParts.length == 3) {
+      final day = int.tryParse(italianParts[0]);
+      final month = int.tryParse(italianParts[1]);
+      final year = int.tryParse(italianParts[2]);
+      if (year == null || month == null || day == null) return null;
+      return endOfDay
+          ? DateTime(year, month, day, 23, 59, 59)
+          : DateTime(year, month, day);
+    }
+    final parts = trimmed.split('-');
+    if (parts.length != 3) return DateTime.tryParse(trimmed);
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (year == null || month == null || day == null) return null;
+    return endOfDay
+        ? DateTime(year, month, day, 23, 59, 59)
+        : DateTime(year, month, day);
+  }
+
+  Future<void> _pickPromotionDate({
+    required TextEditingController controller,
+    required BuildContext dialogContext,
+    required StateSetter setDialogState,
+  }) async {
+    final initialDate =
+        _parseDateInput(controller.text.trim()) ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: dialogContext,
+      initialDate: initialDate,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2035),
+      helpText: 'Seleziona data',
+      cancelText: 'Annulla',
+      confirmText: 'Conferma',
+      fieldLabelText: 'Data',
+      fieldHintText: 'gg/mm/aaaa',
+    );
+    if (picked == null) return;
+    controller.text = _formatDateInput(picked);
+    setDialogState(() {});
   }
 
   String _statsPeriodLabel(_AdminStatsPeriod period) {
@@ -360,16 +415,19 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   Future<void> _addDashboardAccess() async {
     final email = _dashboardAccessEmailController.text.trim();
+    final password = _dashboardAccessPasswordController.text.trim();
     await _runUserAction(
       email.toLowerCase(),
       () => AuthService().upsertDashboardAccess(
         email: email,
         dashboardRole: _newDashboardAccessRole,
+        password: password.isEmpty ? null : password,
       ),
       'Accesso dashboard aggiunto per $email',
     );
     if (!mounted) return;
     _dashboardAccessEmailController.clear();
+    _dashboardAccessPasswordController.clear();
     setState(() {
       _newDashboardAccessRole = DashboardAccessRole.author;
       _accessesPage = 0;
@@ -705,8 +763,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     setLocalState(() => _sendingEmail = true);
 
     try {
-      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-          .httpsCallable(
+      final callable =
+          FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable(
         'sendBulkEmail',
         options: HttpsCallableOptions(timeout: const Duration(seconds: 300)),
       );
@@ -1290,146 +1348,156 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             : _activeSection == _AdminDashboardSection.accesses
                                 ? _buildDashboardAccessPage()
                                 : StreamBuilder<
-                                QuerySnapshot<Map<String, dynamic>>>(
-                                stream:
-                                    _firestore.collection('users').snapshots(),
-                                builder: (context, snapshot) {
-                                  if (snapshot.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return const Center(
-                                        child: CircularProgressIndicator());
-                                  }
+                                    QuerySnapshot<Map<String, dynamic>>>(
+                                    stream: _firestore
+                                        .collection('users')
+                                        .snapshots(),
+                                    builder: (context, snapshot) {
+                                      if (snapshot.connectionState ==
+                                          ConnectionState.waiting) {
+                                        return const Center(
+                                            child: CircularProgressIndicator());
+                                      }
 
-                                  if (snapshot.hasError) {
-                                    return Center(
-                                      child: Text(
-                                        'Errore caricamento utenti: ${snapshot.error}',
-                                        style:
-                                            const TextStyle(color: adminText),
-                                      ),
-                                    );
-                                  }
+                                      if (snapshot.hasError) {
+                                        return Center(
+                                          child: Text(
+                                            'Errore caricamento utenti: ${snapshot.error}',
+                                            style: const TextStyle(
+                                                color: adminText),
+                                          ),
+                                        );
+                                      }
 
-                                  final docs = snapshot.data?.docs ??
-                                      <QueryDocumentSnapshot<
-                                          Map<String, dynamic>>>[];
-                                  final users = docs
-                                      .map(_AdminUserRecord.fromDoc)
-                                      .toList()
-                                    ..sort((a, b) => a.email
-                                        .toLowerCase()
-                                        .compareTo(b.email.toLowerCase()));
-                                  final filteredUsers =
-                                      users.where(_matchesFilters).toList();
+                                      final docs = snapshot.data?.docs ??
+                                          <QueryDocumentSnapshot<
+                                              Map<String, dynamic>>>[];
+                                      final users = docs
+                                          .map(_AdminUserRecord.fromDoc)
+                                          .toList()
+                                        ..sort((a, b) => a.email
+                                            .toLowerCase()
+                                            .compareTo(b.email.toLowerCase()));
+                                      final filteredUsers =
+                                          users.where(_matchesFilters).toList();
 
-                                  final selectedUser = filteredUsers
-                                      .cast<_AdminUserRecord?>()
-                                      .firstWhere(
-                                        (user) => user?.id == _selectedUserId,
-                                        orElse: () => null,
-                                      );
+                                      final selectedUser = filteredUsers
+                                          .cast<_AdminUserRecord?>()
+                                          .firstWhere(
+                                            (user) =>
+                                                user?.id == _selectedUserId,
+                                            orElse: () => null,
+                                          );
 
-                                  final totalUsers = users.length;
-                                  final freeUsers = users
-                                      .where((user) =>
-                                          user.role == AppUserRole.free)
-                                      .length;
-                                  final premiumUsers = users
-                                      .where((user) =>
-                                          user.role == AppUserRole.premium)
-                                      .length;
-                                  final adminUsers = users
-                                      .where((user) =>
-                                          user.role == AppUserRole.admin)
-                                      .length;
-                                  final blockedUsers = users
-                                      .where((user) => user.isBlocked)
-                                      .length;
-                                  final marketingAcceptedUsers = users
-                                      .where((user) => user.acceptedMarketing)
-                                      .length;
-                                  final marketingRejectedUsers =
-                                      totalUsers - marketingAcceptedUsers;
+                                      final totalUsers = users.length;
+                                      final freeUsers = users
+                                          .where((user) =>
+                                              user.role == AppUserRole.free)
+                                          .length;
+                                      final premiumUsers = users
+                                          .where((user) =>
+                                              user.role == AppUserRole.premium)
+                                          .length;
+                                      final adminUsers = users
+                                          .where((user) =>
+                                              user.role == AppUserRole.admin)
+                                          .length;
+                                      final blockedUsers = users
+                                          .where((user) => user.isBlocked)
+                                          .length;
+                                      final marketingAcceptedUsers = users
+                                          .where(
+                                              (user) => user.acceptedMarketing)
+                                          .length;
+                                      final marketingRejectedUsers =
+                                          totalUsers - marketingAcceptedUsers;
 
-                                  if (_activeSection ==
-                                      _AdminDashboardSection.userDetail) {
-                                    return _buildUserDetailPage(selectedUser);
-                                  }
-                                  if (_activeSection ==
-                                      _AdminDashboardSection.userPosts) {
-                                    return _buildUserPostsPage(selectedUser);
-                                  }
-                                  if (_activeSection ==
-                                      _AdminDashboardSection.userFolders) {
-                                    return _buildUserFoldersPage(selectedUser);
-                                  }
+                                      if (_activeSection ==
+                                          _AdminDashboardSection.userDetail) {
+                                        return _buildUserDetailPage(
+                                            selectedUser);
+                                      }
+                                      if (_activeSection ==
+                                          _AdminDashboardSection.userPosts) {
+                                        return _buildUserPostsPage(
+                                            selectedUser);
+                                      }
+                                      if (_activeSection ==
+                                          _AdminDashboardSection.userFolders) {
+                                        return _buildUserFoldersPage(
+                                            selectedUser);
+                                      }
 
-                                  return SingleChildScrollView(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Center(
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                            maxWidth: 1400),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            _buildStatCardsRow(
-                                              cards: [
-                                                _StatCard(
-                                                  label: 'Utenti totali',
-                                                  value: '$totalUsers',
-                                                  color: Colors.black87,
+                                      return SingleChildScrollView(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Center(
+                                          child: ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                                maxWidth: 1400),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                _buildStatCardsRow(
+                                                  cards: [
+                                                    _StatCard(
+                                                      label: 'Utenti totali',
+                                                      value: '$totalUsers',
+                                                      color: Colors.black87,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Free',
+                                                      value: '$freeUsers',
+                                                      color:
+                                                          Colors.grey.shade700,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Premium',
+                                                      value: '$premiumUsers',
+                                                      color:
+                                                          Colors.blue.shade700,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Admin',
+                                                      value: '$adminUsers',
+                                                      color: Colors
+                                                          .deepPurple.shade700,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Bloccati',
+                                                      value: '$blockedUsers',
+                                                      color:
+                                                          Colors.red.shade700,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Marketing SI',
+                                                      value:
+                                                          '$marketingAcceptedUsers',
+                                                      color:
+                                                          Colors.green.shade700,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Marketing NO',
+                                                      value:
+                                                          '$marketingRejectedUsers',
+                                                      color: Colors
+                                                          .orange.shade800,
+                                                    ),
+                                                  ],
                                                 ),
-                                                _StatCard(
-                                                  label: 'Free',
-                                                  value: '$freeUsers',
-                                                  color: Colors.grey.shade700,
-                                                ),
-                                                _StatCard(
-                                                  label: 'Premium',
-                                                  value: '$premiumUsers',
-                                                  color: Colors.blue.shade700,
-                                                ),
-                                                _StatCard(
-                                                  label: 'Admin',
-                                                  value: '$adminUsers',
-                                                  color: Colors
-                                                      .deepPurple.shade700,
-                                                ),
-                                                _StatCard(
-                                                  label: 'Bloccati',
-                                                  value: '$blockedUsers',
-                                                  color: Colors.red.shade700,
-                                                ),
-                                                _StatCard(
-                                                  label: 'Marketing SI',
-                                                  value:
-                                                      '$marketingAcceptedUsers',
-                                                  color:
-                                                      Colors.green.shade700,
-                                                ),
-                                                _StatCard(
-                                                  label: 'Marketing NO',
-                                                  value:
-                                                      '$marketingRejectedUsers',
-                                                  color: Colors.orange.shade800,
-                                                ),
+                                                const SizedBox(height: 16),
+                                                _buildUserFilters(currentAdmin),
+                                                const SizedBox(height: 16),
+                                                _buildUsersTable(filteredUsers),
+                                                const SizedBox(height: 16),
+                                                _buildRecentLogsPanel(),
                                               ],
                                             ),
-                                            const SizedBox(height: 16),
-                                            _buildUserFilters(currentAdmin),
-                                            const SizedBox(height: 16),
-                                            _buildUsersTable(filteredUsers),
-                                            const SizedBox(height: 16),
-                                            _buildRecentLogsPanel(),
-                                          ],
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
+                                      );
+                                    },
+                                  ),
       ),
     );
   }
@@ -2090,41 +2158,45 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     {
       'label': 'Novita SaveIn!',
       'subject': 'Novita su SaveIn!',
-      'body': 'Ciao,\n\nabbiamo preparato alcune novita che speriamo ti piaceranno!\n\n'
-          '**Cosa c\'e di nuovo:**\n'
-          '- [Descrivi novita 1]\n'
-          '- [Descrivi novita 2]\n'
-          '- [Descrivi novita 3]\n\n'
-          'Apri l\'app per scoprire tutto.\n\n'
-          'A presto,\nIl team SaveIn!',
+      'body':
+          'Ciao,\n\nabbiamo preparato alcune novita che speriamo ti piaceranno!\n\n'
+              '**Cosa c\'e di nuovo:**\n'
+              '- [Descrivi novita 1]\n'
+              '- [Descrivi novita 2]\n'
+              '- [Descrivi novita 3]\n\n'
+              'Apri l\'app per scoprire tutto.\n\n'
+              'A presto,\nIl team SaveIn!',
     },
     {
       'label': 'Promo Premium',
       'subject': 'Passa a Premium',
-      'body': 'Ciao,\n\nvuoi toglierti i limiti e dire addio alla pubblicita?\n\n'
-          '**Con SaveIn! Premium ottieni:**\n'
-          '- Cartelle illimitate\n'
-          '- Sottocartelle senza limiti\n'
-          '- Hashtag manuali\n'
-          '- Nessuna pubblicita\n\n'
-          'Passa a Premium dall\'app nella sezione Account.\n\n'
-          'A presto,\nIl team SaveIn!',
+      'body':
+          'Ciao,\n\nvuoi toglierti i limiti e dire addio alla pubblicita?\n\n'
+              '**Con SaveIn! Premium ottieni:**\n'
+              '- Cartelle illimitate\n'
+              '- Sottocartelle senza limiti\n'
+              '- Hashtag manuali\n'
+              '- Nessuna pubblicita\n\n'
+              'Passa a Premium dall\'app nella sezione Account.\n\n'
+              'A presto,\nIl team SaveIn!',
     },
     {
       'label': 'Comunicazione',
       'subject': 'Comunicazione importante da SaveIn!',
-      'body': 'Ciao,\n\nvolevamo aggiornarti su una novita importante riguardo SaveIn!.\n\n'
-          '[Scrivi qui il testo della comunicazione]\n\n'
-          'Per domande scrivi a support@savein.eu.\n\n'
-          'Grazie,\nIl team SaveIn!',
+      'body':
+          'Ciao,\n\nvolevamo aggiornarti su una novita importante riguardo SaveIn!.\n\n'
+              '[Scrivi qui il testo della comunicazione]\n\n'
+              'Per domande scrivi a support@savein.eu.\n\n'
+              'Grazie,\nIl team SaveIn!',
     },
     {
       'label': 'Manutenzione',
       'subject': 'Manutenzione programmata - SaveIn!',
-      'body': 'Ciao,\n\nti informiamo che SaveIn! sara temporaneamente non disponibile per manutenzione.\n\n'
-          'Data: [inserisci data]\n'
-          'Orario: [inserisci orario]\n\n'
-          'Ci scusiamo per il disagio.\nIl team SaveIn!',
+      'body':
+          'Ciao,\n\nti informiamo che SaveIn! sara temporaneamente non disponibile per manutenzione.\n\n'
+              'Data: [inserisci data]\n'
+              'Orario: [inserisci orario]\n\n'
+              'Ci scusiamo per il disagio.\nIl team SaveIn!',
     },
   ];
 
@@ -2177,7 +2249,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         avatar: const Icon(Icons.notifications_outlined),
                         onSelected: _sendingNotification
                             ? null
-                            : (v) => setLocalState(() => _sendInAppNotification = v),
+                            : (v) =>
+                                setLocalState(() => _sendInAppNotification = v),
                       ),
                       FilterChip(
                         selected: _sendPushNotification,
@@ -2185,7 +2258,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         avatar: const Icon(Icons.phone_android),
                         onSelected: _sendingNotification
                             ? null
-                            : (v) => setLocalState(() => _sendPushNotification = v),
+                            : (v) =>
+                                setLocalState(() => _sendPushNotification = v),
                       ),
                       Chip(
                         avatar: const Icon(Icons.people_alt_outlined),
@@ -2230,14 +2304,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.send),
-                    label: Text(_sendingNotification ? 'Invio in corso...' : 'Invia notifica'),
+                    label: Text(_sendingNotification
+                        ? 'Invio in corso...'
+                        : 'Invia notifica'),
                   ),
                 ],
               ),
             ),
-
             const SizedBox(height: 16),
-
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -2250,7 +2324,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.email_outlined, color: Colors.blue, size: 22),
+                      const Icon(Icons.email_outlined,
+                          color: Colors.blue, size: 22),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text(
@@ -2276,7 +2351,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
                   ),
                   const SizedBox(height: 16),
-                  const Text('Template:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const Text('Template:',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -2286,7 +2363,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       (i) => ChoiceChip(
                         label: Text(_emailTemplates[i]['label']!),
                         selected: _emailTemplateIndex == i,
-                        onSelected: _sendingEmail ? null : (_) => applyTemplate(i),
+                        onSelected:
+                            _sendingEmail ? null : (_) => applyTemplate(i),
                         selectedColor: const Color(0xFFBFDBFE),
                       ),
                     ),
@@ -2309,22 +2387,27 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     maxLength: 3000,
                     decoration: const InputDecoration(
                       labelText: 'Corpo email',
-                      hintText: 'Scrivi il testo.\nUsa **parola** per il grassetto.',
+                      hintText:
+                          'Scrivi il testo.\nUsa **parola** per il grassetto.',
                       alignLabelWithHint: true,
                       prefixIcon: Icon(Icons.text_snippet_outlined),
                     ),
                   ),
                   const SizedBox(height: 16),
                   FilledButton.icon(
-                    onPressed: !_canSendNotifications || _sendingEmail || selectedCount == 0
+                    onPressed: !_canSendNotifications ||
+                            _sendingEmail ||
+                            selectedCount == 0
                         ? null
                         : () => _sendEmailToSelected(setLocalState),
-                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1D4ED8)),
+                    style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF1D4ED8)),
                     icon: _sendingEmail
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.send),
                     label: Text(_sendingEmail
@@ -2339,7 +2422,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       },
     );
   }
-
 
   Widget _buildNotificationRecipientsPanel({
     required AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
@@ -2487,14 +2569,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                               DataCell(Text(user.name)),
                               DataCell(Text(user.email)),
                               DataCell(_StatusChip(
-                                label:
-                                    user.acceptedMarketing ? 'SI' : 'NO',
+                                label: user.acceptedMarketing ? 'SI' : 'NO',
                                 color: user.acceptedMarketing
                                     ? Colors.green.shade700
                                     : Colors.red.shade700,
                               )),
-                              DataCell(Text(
-                                  _formatDate(user.marketingConsentDate))),
+                              DataCell(
+                                  Text(_formatDate(user.marketingConsentDate))),
                               DataCell(_RoleChip(
                                 role: user.role,
                                 color: _roleColor(user.role),
@@ -2740,6 +2821,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               border: OutlineInputBorder(),
             ),
           );
+          final passwordField = TextField(
+            controller: _dashboardAccessPasswordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Password',
+              hintText: 'Obbligatoria se l’utente non esiste',
+              prefixIcon: Icon(Icons.lock_outline),
+              border: OutlineInputBorder(),
+            ),
+          );
           final roleField = DropdownButtonFormField<DashboardAccessRole>(
             value: _newDashboardAccessRole,
             decoration: const InputDecoration(
@@ -2785,6 +2876,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 const SizedBox(height: 12),
                 emailField,
                 const SizedBox(height: 12),
+                passwordField,
+                const SizedBox(height: 12),
                 roleField,
                 const SizedBox(height: 12),
                 addButton,
@@ -2809,6 +2902,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 children: [
                   Expanded(flex: 3, child: emailField),
                   const SizedBox(width: 12),
+                  Expanded(flex: 2, child: passwordField),
+                  const SizedBox(width: 12),
                   Expanded(flex: 2, child: roleField),
                   const SizedBox(width: 12),
                   SizedBox(height: 56, child: addButton),
@@ -2829,7 +2924,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
-          return Center(child: Text('Errore caricamento banner: ${snapshot.error}'));
+          return Center(
+              child: Text('Errore caricamento banner: ${snapshot.error}'));
         }
 
         final banners = (snapshot.data?.docs ?? [])
@@ -2874,116 +2970,182 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 ],
               ),
               const SizedBox(height: 16),
-              if (banners.isEmpty)
-                const _AdminEmptyState(message: 'Nessun banner configurato.')
-              else
-                ...banners.map(
-                  (banner) => Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                banner.active
-                                    ? Icons.visibility
-                                    : Icons.visibility_off,
-                                color: banner.active
-                                    ? Colors.green.shade700
-                                    : Colors.grey.shade600,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  banner.title.isEmpty ? banner.id : banner.title,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              Switch(
-                                value: banner.active,
-                                onChanged: (value) =>
-                                    _togglePromotionBanner(banner, value),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            banner.message,
-                            style: const TextStyle(color: Color(0xFF4B5563)),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              Chip(label: Text('ID: ${banner.id}')),
-                              Chip(label: Text('Tipo: ${banner.type}')),
-                              Chip(label: Text('App: ${banner.app}')),
-                              Chip(label: Text('Priorita: ${banner.priority}')),
-                              if (banner.imageUrl.isNotEmpty)
-                                const Chip(label: Text('Immagine presente')),
-                              Chip(
-                                label: Text(
-                                  banner.oncePerUser
-                                      ? 'Una volta per utente'
-                                      : 'Ripetibile',
-                                ),
-                              ),
-                            ],
-                          ),
-                          FutureBuilder<_PromotionBannerStats>(
-                            future: _loadPromotionBannerStats(banner.id),
-                            builder: (context, statsSnapshot) {
-                              final stats = statsSnapshot.data;
-                              if (stats == null) {
-                                return const SizedBox.shrink();
-                              }
-                              return Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    Chip(label: Text('Viste: ${stats.views}')),
-                                    Chip(label: Text('Click: ${stats.clicks}')),
-                                    Chip(label: Text('Utilizzi: ${stats.redemptions}')),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            children: [
-                              OutlinedButton.icon(
-                                onPressed: () =>
-                                    _showPromotionBannerDialog(existing: banner),
-                                icon: const Icon(Icons.edit),
-                                label: const Text('Modifica'),
-                              ),
-                              TextButton.icon(
-                                onPressed: () => _deletePromotionBanner(banner),
-                                icon: const Icon(Icons.delete_outline),
-                                label: const Text('Elimina'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+              _buildPromotionBannerSimpleList(banners),
+              const SizedBox(height: 22),
+              _buildPromotionBannerHistoryList(banners),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPromotionBannerSimpleList(
+    List<_PromotionBannerRecord> banners,
+  ) {
+    final now = DateTime.now();
+    final activeBanners = banners.where((banner) {
+      final ended = banner.endsAt != null && banner.endsAt!.isBefore(now);
+      return banner.active && !ended;
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Promo configurabili',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text(
+              '${activeBanners.length} attive',
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _buildPromotionQuickSetupCards(),
+        const SizedBox(height: 12),
+        if (activeBanners.isEmpty)
+          const _AdminEmptyState(
+            message:
+                'Nessuna promo attiva. Le promo spente o scadute sono nello storico sotto.',
+          )
+        else
+          for (final banner in activeBanners) ...[
+            _PromotionBannerListRow(
+              banner: banner,
+              loadStats: _loadPromotionBannerStats,
+              onToggle: (value) => _togglePromotionBanner(banner, value),
+              onEdit: () => _showPromotionBannerDialog(existing: banner),
+              onDelete: () => _deletePromotionBanner(banner),
+            ),
+            const SizedBox(height: 10),
+          ],
+      ],
+    );
+  }
+
+  Widget _buildPromotionQuickSetupCards() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _PromotionSetupCard(
+            title: 'Promo SaveIn + SmartChef',
+            description:
+                'Banner per attivare 30 giorni Premium e collegare le due app.',
+            icon: Icons.local_fire_department,
+            color: const Color(0xFFEA580C),
+            onTap: () => _showPromotionBannerDialog(
+              defaultId: 'savein_smartchef_launch',
+              defaultType: 'cross_promo',
+              defaultApp: 'both',
+              defaultTitle: 'Promo lancio: SaveIn e SmartChef',
+              defaultMessage:
+                  'Attiva 30 giorni gratis di Premium e sblocca lo stesso vantaggio nell altra app usando la stessa email.',
+              defaultCtaLabel: 'Attiva promo',
+              defaultSecondaryCtaLabel: 'Apri altra app',
+              defaultPriority: 100,
+              defaultOncePerUser: true,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _PromotionSetupCard(
+            title: 'Promo generica SaveIn',
+            description:
+                'Banner con immagine, testo e link per offerte, inviti o campagne diverse.',
+            icon: Icons.campaign_outlined,
+            color: const Color(0xFF6D28D9),
+            onTap: () => _showPromotionBannerDialog(
+              defaultId: 'savein_generic_offer',
+              defaultType: 'generic_promo',
+              defaultApp: 'savein',
+              defaultTitle: 'Promo disponibile',
+              defaultMessage:
+                  'Configura qui il testo della proposta mostrata agli utenti.',
+              defaultCtaLabel: 'Scopri',
+              defaultPriority: 10,
+              defaultOncePerUser: false,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPromotionBannerHistoryList(
+    List<_PromotionBannerRecord> banners,
+  ) {
+    final now = DateTime.now();
+    final pastBanners = banners.where((banner) {
+      final ended = banner.endsAt != null && banner.endsAt!.isBefore(now);
+      return !banner.active || ended;
+    }).toList()
+      ..sort((a, b) {
+        final aDate = a.endsAt ?? a.updatedAt ?? a.createdAt;
+        final bDate = b.endsAt ?? b.updatedAt ?? b.createdAt;
+        return (bDate ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(aDate ?? DateTime.fromMillisecondsSinceEpoch(0));
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Storico promo passate',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text(
+              '${pastBanners.length} promo',
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Qui trovi le promo spente o scadute. Aprile per vedere periodo, dati e performance.',
+          style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+        ),
+        const SizedBox(height: 10),
+        if (pastBanners.isEmpty)
+          const _AdminEmptyState(
+              message: 'Nessuna promo passata ancora presente.')
+        else
+          for (final banner in pastBanners) ...[
+            _PromotionBannerHistoryTile(
+              banner: banner,
+              loadStats: _loadPromotionBannerStats,
+              onReactivate: () => _reactivatePromotionBanner(banner),
+              onEdit: () => _showPromotionBannerDialog(existing: banner),
+              onDelete: () => _deletePromotionBanner(banner),
+            ),
+            const SizedBox(height: 10),
+          ],
+      ],
     );
   }
 
@@ -3023,6 +3185,23 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     }, SetOptions(merge: true));
   }
 
+  Future<void> _reactivatePromotionBanner(_PromotionBannerRecord banner) async {
+    final now = DateTime.now();
+    final data = <String, dynamic>{
+      'active': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedBy': AuthService().currentUser?.email,
+    };
+    if (banner.endsAt != null && banner.endsAt!.isBefore(now)) {
+      data['startsAt'] = FieldValue.serverTimestamp();
+      data['endsAt'] = FieldValue.delete();
+    }
+    await _firestore
+        .collection('promotion_banners')
+        .doc(banner.id)
+        .set(data, SetOptions(merge: true));
+  }
+
   Future<void> _deletePromotionBanner(_PromotionBannerRecord banner) async {
     final confirmed = await showDialog<bool>(
           context: context,
@@ -3048,31 +3227,48 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   Future<void> _showPromotionBannerDialog({
     _PromotionBannerRecord? existing,
+    String defaultId = '',
+    String defaultType = 'generic_promo',
+    String defaultApp = 'savein',
+    String defaultTitle = '',
+    String defaultMessage = '',
+    String defaultCtaLabel = 'Scopri',
+    String defaultSecondaryCtaLabel = '',
+    String defaultActionUrl = '',
+    int defaultPriority = 10,
+    bool defaultOncePerUser = true,
   }) async {
-    final idController = TextEditingController(text: existing?.id ?? '');
-    final titleController = TextEditingController(text: existing?.title ?? '');
+    final idController = TextEditingController(text: existing?.id ?? defaultId);
+    final titleController =
+        TextEditingController(text: existing?.title ?? defaultTitle);
     final messageController =
-        TextEditingController(text: existing?.message ?? '');
+        TextEditingController(text: existing?.message ?? defaultMessage);
     final ctaController =
-        TextEditingController(text: existing?.ctaLabel ?? 'Scopri');
-    final secondaryController =
-        TextEditingController(text: existing?.secondaryCtaLabel ?? '');
-    final urlController = TextEditingController(text: existing?.actionUrl ?? '');
+        TextEditingController(text: existing?.ctaLabel ?? defaultCtaLabel);
+    final secondaryController = TextEditingController(
+        text: existing?.secondaryCtaLabel ?? defaultSecondaryCtaLabel);
+    final urlController =
+        TextEditingController(text: existing?.actionUrl ?? defaultActionUrl);
     final imageUrlController =
         TextEditingController(text: existing?.imageUrl ?? '');
-    final priorityController =
-        TextEditingController(text: (existing?.priority ?? 10).toString());
+    final priorityController = TextEditingController(
+        text: (existing?.priority ?? defaultPriority).toString());
+    final startsAtController =
+        TextEditingController(text: _formatDateInput(existing?.startsAt));
+    final endsAtController =
+        TextEditingController(text: _formatDateInput(existing?.endsAt));
     var active = existing?.active ?? false;
-    var oncePerUser = existing?.oncePerUser ?? true;
-    var type = existing?.type ?? 'generic_promo';
-    var app = existing?.app ?? 'savein';
+    var oncePerUser = existing?.oncePerUser ?? defaultOncePerUser;
+    var type = existing?.type ?? defaultType;
+    var app = existing?.app ?? defaultApp;
     var uploadingImage = false;
 
     final saved = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => StatefulBuilder(
             builder: (context, setDialogState) => AlertDialog(
-              title: Text(existing == null ? 'Nuovo banner' : 'Modifica banner'),
+              title:
+                  Text(existing == null ? 'Nuovo banner' : 'Modifica banner'),
               content: SizedBox(
                 width: 620,
                 child: SingleChildScrollView(
@@ -3110,8 +3306,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         decoration:
                             const InputDecoration(labelText: 'App visibile'),
                         items: const [
-                          DropdownMenuItem(value: 'savein', child: Text('SaveIn')),
-                          DropdownMenuItem(value: 'both', child: Text('Entrambe')),
+                          DropdownMenuItem(
+                              value: 'savein', child: Text('SaveIn')),
+                          DropdownMenuItem(
+                              value: 'both', child: Text('Entrambe')),
                         ],
                         onChanged: (value) =>
                             setDialogState(() => app = value ?? app),
@@ -3125,18 +3323,23 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       TextField(
                         controller: messageController,
                         maxLines: 3,
-                        decoration: const InputDecoration(labelText: 'Testo banner'),
+                        decoration:
+                            const InputDecoration(labelText: 'Testo banner'),
                       ),
                       const SizedBox(height: 10),
                       TextField(
                         controller: ctaController,
-                        decoration: const InputDecoration(labelText: 'Testo CTA'),
+                        decoration: const InputDecoration(
+                          labelText: 'Testo pulsante principale',
+                          hintText: 'Es. Scopri, Attiva promo, Avvia',
+                        ),
                       ),
                       const SizedBox(height: 10),
                       TextField(
                         controller: secondaryController,
                         decoration: const InputDecoration(
-                          labelText: 'CTA secondaria',
+                          labelText: 'Testo pulsante secondario',
+                          hintText: 'Opzionale',
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -3170,7 +3373,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                           idController.text.trim().isEmpty
                                               ? 'new_banner'
                                               : idController.text.trim();
-                                      setDialogState(() => uploadingImage = true);
+                                      setDialogState(
+                                          () => uploadingImage = true);
                                       final uploadedUrl =
                                           await _pickAndUploadPromotionBannerImage(
                                         docId: docId,
@@ -3178,7 +3382,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                       if (uploadedUrl != null) {
                                         imageUrlController.text = uploadedUrl;
                                       }
-                                      setDialogState(() => uploadingImage = false);
+                                      setDialogState(
+                                          () => uploadingImage = false);
                                     },
                               icon: uploadingImage
                                   ? const SizedBox(
@@ -3244,7 +3449,46 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       TextField(
                         controller: priorityController,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Priorita'),
+                        decoration:
+                            const InputDecoration(labelText: 'Priorita'),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: startsAtController,
+                              readOnly: true,
+                              onTap: () => _pickPromotionDate(
+                                controller: startsAtController,
+                                dialogContext: dialogContext,
+                                setDialogState: setDialogState,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'Inizio validita',
+                                hintText: 'gg/mm/aaaa',
+                                suffixIcon: Icon(Icons.calendar_month_outlined),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: endsAtController,
+                              readOnly: true,
+                              onTap: () => _pickPromotionDate(
+                                controller: endsAtController,
+                                dialogContext: dialogContext,
+                                setDialogState: setDialogState,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'Fine validita',
+                                hintText: 'gg/mm/aaaa',
+                                suffixIcon: Icon(Icons.calendar_month_outlined),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
@@ -3285,6 +3529,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       _showAdminSnackBar('ID banner obbligatorio', isError: true);
       return;
     }
+    final startsAt = _parseDateInput(startsAtController.text.trim());
+    final endsAt =
+        _parseDateInput(endsAtController.text.trim(), endOfDay: true);
 
     await _firestore.collection('promotion_banners').doc(id).set({
       'active': active,
@@ -3302,6 +3549,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       'direction': type == 'cross_promo' ? 'savein_to_smartchef' : '',
       'priority': int.tryParse(priorityController.text.trim()) ?? 10,
       'oncePerUser': oncePerUser,
+      'startsAt': startsAt == null ? null : Timestamp.fromDate(startsAt),
+      'endsAt': endsAt == null ? null : Timestamp.fromDate(endsAt),
       'updatedAt': FieldValue.serverTimestamp(),
       'updatedBy': AuthService().currentUser?.email,
       if (existing == null) 'createdAt': FieldValue.serverTimestamp(),
@@ -3388,7 +3637,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final images = snapshot.data ?? const <_PromotionBannerImageAsset>[];
+              final images =
+                  snapshot.data ?? const <_PromotionBannerImageAsset>[];
               if (images.isEmpty) {
                 return const Center(
                   child: Text('Nessuna immagine caricata nello storico.'),
@@ -3445,19 +3695,22 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                   final confirmed = await showDialog<bool>(
                                         context: context,
                                         builder: (context) => AlertDialog(
-                                          title: const Text('Eliminare immagine?'),
+                                          title:
+                                              const Text('Eliminare immagine?'),
                                           content: const Text(
                                             'Il file verra eliminato definitivamente dallo Storage. Se un banner la usa ancora, non sara piu visibile.',
                                           ),
                                           actions: [
                                             TextButton(
                                               onPressed: () =>
-                                                  Navigator.of(context).pop(false),
+                                                  Navigator.of(context)
+                                                      .pop(false),
                                               child: const Text('Annulla'),
                                             ),
                                             ElevatedButton(
                                               onPressed: () =>
-                                                  Navigator.of(context).pop(true),
+                                                  Navigator.of(context)
+                                                      .pop(true),
                                               child: const Text('Elimina'),
                                             ),
                                           ],
@@ -3465,7 +3718,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                       ) ??
                                       false;
                                   if (!confirmed) return;
-                                  await _deletePromotionBannerImage(image.filePath);
+                                  await _deletePromotionBannerImage(
+                                      image.filePath);
                                   if (!dialogContext.mounted) return;
                                   Navigator.of(dialogContext).pop();
                                 },
@@ -4377,7 +4631,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 _InfoRow(
                   label: 'Ricezione comunicazioni',
                   value: user.acceptedMarketing ? 'ACCETTATO' : 'NON ACCETTATO',
-                  valueColor: user.acceptedMarketing ? Colors.green : Colors.red,
+                  valueColor:
+                      user.acceptedMarketing ? Colors.green : Colors.red,
                 ),
                 _InfoRow(
                   label: 'Data conferma/disdetta',
@@ -6061,6 +6316,653 @@ enum _AdminDashboardSection {
   accesses,
 }
 
+class _PromotionBannerListRow extends StatelessWidget {
+  final _PromotionBannerRecord banner;
+  final Future<_PromotionBannerStats> Function(String id) loadStats;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _PromotionBannerListRow({
+    required this.banner,
+    required this.loadStats,
+    required this.onToggle,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final activeColor =
+        banner.active ? const Color(0xFF166534) : const Color(0xFF6B7280);
+    final activeBg =
+        banner.active ? const Color(0xFFDCFCE7) : const Color(0xFFF3F4F6);
+    final title = banner.title.trim().isEmpty ? banner.id : banner.title.trim();
+    final hasImage = banner.imageUrl.trim().isNotEmpty;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 190,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: AspectRatio(
+                  aspectRatio: 3,
+                  child: hasImage
+                      ? Image.network(
+                          banner.imageUrl.trim(),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: const Color(0xFFF3F4F6),
+                            alignment: Alignment.center,
+                            child: const Icon(Icons.broken_image_outlined),
+                          ),
+                        )
+                      : Container(
+                          color: const Color(0xFFF3F4F6),
+                          alignment: Alignment.center,
+                          child: const Text(
+                            'Nessuna immagine',
+                            style: TextStyle(
+                              color: Color(0xFF6B7280),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: activeBg,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          banner.active ? 'ATTIVO' : 'SPENTO',
+                          style: TextStyle(
+                            color: activeColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        'Priorita ${banner.priority}',
+                        style: const TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        banner.type,
+                        style: const TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'App: ${banner.app}',
+                        style: const TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    banner.message.trim().isEmpty ? banner.id : banner.message,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF4B5563),
+                      fontSize: 13,
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  FutureBuilder<_PromotionBannerStats>(
+                    future: loadStats(banner.id),
+                    builder: (context, snapshot) {
+                      final stats = snapshot.data;
+                      if (stats == null) {
+                        return const Text(
+                          'Statistiche in caricamento...',
+                          style: TextStyle(
+                            color: Color(0xFF9CA3AF),
+                            fontSize: 12,
+                          ),
+                        );
+                      }
+                      return Text(
+                        'Viste ${stats.views} · Click ${stats.clicks} · Utilizzi ${stats.redemptions}',
+                        style: const TextStyle(
+                          color: Color(0xFF374151),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 180,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text(
+                      'Attivo',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    value: banner.active,
+                    onChanged: onToggle,
+                    controlAffinity: ListTileControlAffinity.trailing,
+                  ),
+                  const SizedBox(height: 4),
+                  OutlinedButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text('Modifica'),
+                  ),
+                  IconButton(
+                    tooltip: 'Elimina',
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PromotionSetupCard extends StatelessWidget {
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _PromotionSetupCard({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.22)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 12,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.add_circle_outline, color: Color(0xFF6D28D9)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PromotionBannerHistoryTile extends StatelessWidget {
+  final _PromotionBannerRecord banner;
+  final Future<_PromotionBannerStats> Function(String id) loadStats;
+  final VoidCallback onReactivate;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _PromotionBannerHistoryTile({
+    required this.banner,
+    required this.loadStats,
+    required this.onReactivate,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final title = banner.title.trim().isEmpty ? banner.id : banner.title.trim();
+    final hasImage = banner.imageUrl.trim().isNotEmpty;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        leading: SizedBox(
+          width: 120,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: AspectRatio(
+              aspectRatio: 3,
+              child: hasImage
+                  ? Image.network(
+                      banner.imageUrl.trim(),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: const Color(0xFFF3F4F6),
+                        alignment: Alignment.center,
+                        child:
+                            const Icon(Icons.broken_image_outlined, size: 18),
+                      ),
+                    )
+                  : Container(
+                      color: const Color(0xFFF3F4F6),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'No img',
+                        style: TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        ),
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF111827),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _PromotionDateBadge(
+                    label: 'INIZIO',
+                    value: _formatDateOnly(banner.startsAt ?? banner.createdAt),
+                  ),
+                  _PromotionDateBadge(
+                    label: 'FINE',
+                    value: _formatDateOnly(banner.endsAt),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${banner.active ? 'attiva ma scaduta' : 'spenta'} · ${banner.type}',
+                style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        trailing: FutureBuilder<_PromotionBannerStats>(
+          future: loadStats(banner.id),
+          builder: (context, snapshot) {
+            final stats = snapshot.data;
+            if (stats == null) {
+              return const SizedBox(
+                width: 88,
+                child: LinearProgressIndicator(minHeight: 3),
+              );
+            }
+            return SizedBox(
+              width: 190,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: onReactivate,
+                    icon: const Icon(Icons.play_arrow, size: 16),
+                    label: const Text('Riattiva'),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${stats.clicks} click · CTR ${_formatCtr(stats)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      color: Color(0xFF374151),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        children: [
+          FutureBuilder<_PromotionBannerStats>(
+            future: loadStats(banner.id),
+            builder: (context, snapshot) {
+              final stats = snapshot.data;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      _PromotionMetricChip(
+                        label: 'Viste',
+                        value: stats == null ? '...' : stats.views.toString(),
+                      ),
+                      _PromotionMetricChip(
+                        label: 'Click',
+                        value: stats == null ? '...' : stats.clicks.toString(),
+                      ),
+                      _PromotionMetricChip(
+                        label: 'CTR',
+                        value: stats == null ? '...' : _formatCtr(stats),
+                      ),
+                      _PromotionMetricChip(
+                        label: 'Utilizzi',
+                        value: stats == null
+                            ? '...'
+                            : stats.redemptions.toString(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  _PromotionDetailLine(label: 'ID', value: banner.id),
+                  _PromotionDetailLine(
+                      label: 'Periodo', value: _formatPeriod(banner)),
+                  _PromotionDetailLine(label: 'App', value: banner.app),
+                  _PromotionDetailLine(label: 'Tipo', value: banner.type),
+                  _PromotionDetailLine(
+                    label: 'Priorita',
+                    value: banner.priority.toString(),
+                  ),
+                  _PromotionDetailLine(
+                    label: 'Una volta per utente',
+                    value: banner.oncePerUser ? 'Si' : 'No',
+                  ),
+                  _PromotionDetailLine(
+                    label: 'URL azione',
+                    value: banner.actionUrl.trim().isEmpty
+                        ? '-'
+                        : banner.actionUrl,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    banner.message.trim().isEmpty ? '-' : banner.message,
+                    style: const TextStyle(
+                      color: Color(0xFF374151),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit, size: 16),
+                          label: const Text('Riapri / modifica'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onDelete,
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          label: const Text('Elimina dal DB'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatPeriod(_PromotionBannerRecord banner) {
+    final start = _formatDateOnly(banner.startsAt ?? banner.createdAt);
+    final end = _formatDateOnly(banner.endsAt);
+    if (start == '-' && end == '-') return 'Periodo non impostato';
+    if (end == '-') return 'Dal $start';
+    if (start == '-') return 'Fino al $end';
+    return '$start - $end';
+  }
+
+  static String _formatDateOnly(DateTime? date) {
+    if (date == null) return '-';
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    return '$day/$month/${date.year}';
+  }
+
+  static String _formatCtr(_PromotionBannerStats stats) {
+    if (stats.views <= 0) return '0%';
+    final value = (stats.clicks / stats.views) * 100;
+    return '${value.toStringAsFixed(value >= 10 ? 0 : 1)}%';
+  }
+}
+
+class _PromotionDateBadge extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _PromotionDateBadge({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFB923C), width: 1.2),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(
+            color: Color(0xFF9A3412),
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+          ),
+          children: [
+            TextSpan(text: '$label: '),
+            TextSpan(
+              text: value,
+              style: const TextStyle(color: Color(0xFF111827)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PromotionMetricChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _PromotionMetricChip({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 120,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PromotionDetailLine extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _PromotionDetailLine({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Color(0xFF111827),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PromotionBannerRecord {
   final String id;
   final bool active;
@@ -6074,6 +6976,10 @@ class _PromotionBannerRecord {
   final String imageUrl;
   final int priority;
   final bool oncePerUser;
+  final DateTime? startsAt;
+  final DateTime? endsAt;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   const _PromotionBannerRecord({
     required this.id,
@@ -6088,12 +6994,22 @@ class _PromotionBannerRecord {
     required this.imageUrl,
     required this.priority,
     required this.oncePerUser,
+    required this.startsAt,
+    required this.endsAt,
+    required this.createdAt,
+    required this.updatedAt,
   });
 
   factory _PromotionBannerRecord.fromDoc(
     QueryDocumentSnapshot<Map<String, dynamic>> doc,
   ) {
     final data = doc.data();
+    DateTime? parseDate(dynamic value) {
+      if (value is Timestamp) return value.toDate();
+      if (value is String && value.isNotEmpty) return DateTime.tryParse(value);
+      return null;
+    }
+
     return _PromotionBannerRecord(
       id: doc.id,
       active: data['active'] == true,
@@ -6107,6 +7023,10 @@ class _PromotionBannerRecord {
       imageUrl: (data['imageUrl'] ?? '').toString(),
       priority: (data['priority'] as num?)?.toInt() ?? 0,
       oncePerUser: data['oncePerUser'] != false,
+      startsAt: parseDate(data['startsAt']),
+      endsAt: parseDate(data['endsAt']),
+      createdAt: parseDate(data['createdAt']),
+      updatedAt: parseDate(data['updatedAt']),
     );
   }
 }
@@ -6475,8 +7395,8 @@ class _AdminUserRecord {
       createdAt: parseDate(data['createdAt']),
       lastLogin: parseDate(data['lastLogin']),
       acceptedMarketing: marketing?['accepted'] ?? false,
-      marketingConsentDate:
-          parseDate(marketing?['lastModified']) ?? parseDate(marketing?['consentDate']),
+      marketingConsentDate: parseDate(marketing?['lastModified']) ??
+          parseDate(marketing?['consentDate']),
     );
   }
 
@@ -6542,4 +7462,3 @@ class _AdminLogRecord {
     return 'Target: $targetUserId';
   }
 }
-

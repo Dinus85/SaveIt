@@ -11,6 +11,7 @@ import '../widgets/multi_select_post_manager.dart'; // 🆕 NUOVO: Import per se
 import '../services/access_control_service.dart';
 import '../services/folder_service.dart';
 import '../services/sharing_service.dart'; // AGGIUNTO: Import per apertura reale
+import '../services/share_link_service.dart';
 import '../utils/theme_helpers.dart';
 import '../utils/dialog_helpers.dart';
 import '../pages/account_page.dart';
@@ -40,23 +41,24 @@ class FolderDetailPage extends StatefulWidget {
   _FolderDetailPageState createState() => _FolderDetailPageState();
 }
 
-class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBindingObserver {
+class _FolderDetailPageState extends State<FolderDetailPage>
+    with WidgetsBindingObserver {
   final AppAccessService _accessService = AppAccessService();
   final FolderService _folderService = FolderService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _contentScrollController = ScrollController();
   bool _showScrollToTopButton = false;
-  
+
   // Copia locale aggiornabile del folder
   late MockFolder _currentFolder;
-  
+
   List<MockPost> _posts = [];
   List<SearchResult> _searchResults = [];
   bool _isSearching = false;
-  
+
   Timer? _searchDebounceTimer;
   String _lastTrackedQuery = '';
-  
+
   // 🔥 FIX: Traccia i timer per cancellarli nel dispose
   Timer? _firstRefreshTimer;
   Timer? _secondRefreshTimer;
@@ -68,28 +70,29 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   String? get _subfolderCreationError =>
       _accessService.validateSubfolderCreation(_currentFolder);
-  
+
   @override
   void initState() {
     super.initState();
-    
+
     // 🔥 NUOVO: Registra observer per lifecycle
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Inizializza la copia locale
     _currentFolder = widget.folder;
-    
-    print('DEBUG: FolderDetailPage inizializzato per cartella: ${_currentFolder.name}');
-    
+
+    print(
+        'DEBUG: FolderDetailPage inizializzato per cartella: ${_currentFolder.name}');
+
     _searchController.addListener(_onSearchChanged);
     _contentScrollController.addListener(_onContentScroll);
-    
+
     _folderService.trackFolderOpened(_currentFolder);
-    
+
     // 🔥 FIX FINALE: Disabilito il callback automatico per evitare aggiornamenti non richiesti
     // L'aggiornamento avviene SOLO con pull-to-refresh manuale
     _folderService.setOnDataChangedCallback(null);
-    
+
     // 🔥 FIX: Carica i post DOPO aver impostato il callback, assicurando la sync
     _loadPostsEnsuringSync();
   }
@@ -98,14 +101,15 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   void dispose() {
     // 🔥 NUOVO: Rimuovi observer per lifecycle
     WidgetsBinding.instance.removeObserver(this);
-    
+
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _searchDebounceTimer?.cancel();
     // 🔥 FIX: Cancella i timer di refresh per evitare setState dopo dispose
     _firstRefreshTimer?.cancel();
     _secondRefreshTimer?.cancel();
-    _folderService.setOnDataChangedCallback(null); // 🔥 NUOVO: Rimuovi il callback
+    _folderService
+        .setOnDataChangedCallback(null); // 🔥 NUOVO: Rimuovi il callback
     _contentScrollController.removeListener(_onContentScroll);
     _contentScrollController.dispose();
     super.dispose();
@@ -114,32 +118,35 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     print('DEBUG: FolderDetailPage - Lifecycle cambiato a: $state');
-    
+
     if (state == AppLifecycleState.resumed) {
       // 🔥 FIX: Al resume NON facciamo nulla di visibile.
       // Il refresh dei dati avverrà in background tramite SaveInApp -> FolderService
       // Quando i dati saranno pronti, verrà chiamato il callback che invocherà _updateUISafely().
       // Questo previene flash, sparizioni e cambi di cartella indesiderati.
-      print('DEBUG: App resumed - Attendo aggiornamenti silenziosi dal servizio...');
+      print(
+          'DEBUG: App resumed - Attendo aggiornamenti silenziosi dal servizio...');
     }
   }
 
   // ✅ NUOVO: Metodo per trovare e aggiornare il folder corrente
   void _updateCurrentFolder() {
     MockFolder? updatedFolder = _findFolderInServiceHierarchy(_currentFolder);
-    
+
     if (updatedFolder != null) {
       if (mounted) {
         setState(() {
           _currentFolder = updatedFolder;
         });
-        print('DEBUG: Folder corrente aggiornato: ${_currentFolder.name}, children: ${_currentFolder.children.length}');
+        print(
+            'DEBUG: Folder corrente aggiornato: ${_currentFolder.name}, children: ${_currentFolder.children.length}');
       }
     } else {
       // 🔥 FIX: Se la cartella non viene trovata (es. durante reload parziale),
       // NON aggiornare _currentFolder e NON chiamare setState.
       // Questo mantiene i vecchi dati visibili finché non arriva un update valido.
-      print('WARNING: Folder corrente non trovato in FolderService - Ignoro update per evitare sparizione UI');
+      print(
+          'WARNING: Folder corrente non trovato in FolderService - Ignoro update per evitare sparizione UI');
     }
   }
 
@@ -163,7 +170,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     final found = _folderService.findFolderByCompletePath(pathSegments);
     return found;
   }
-  
+
   // Helper per confrontare liste di post
   bool _arePostListsEqual(List<MockPost> oldList, List<MockPost> newList) {
     if (oldList.length != newList.length) return false;
@@ -178,35 +185,39 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   // 🔥 FIX: Aggiorna UI solo se i dati sono validi E diversi per evitare flash
   void _updateUISafely() {
     final updatedFolder = _findFolderInServiceHierarchy(_currentFolder);
-    
+
     if (updatedFolder == null) {
-      print('WARNING: Cartella corrente sparita dal servizio, mantengo vecchia UI');
+      print(
+          'WARNING: Cartella corrente sparita dal servizio, mantengo vecchia UI');
       return;
     }
-    
+
     final newPosts = _folderService.getPostsForFolder(updatedFolder);
-    
+
     // 1. Controllo validità: Se il servizio è vuoto (reload in corso), ignoriamo
     if (newPosts.isEmpty && _posts.isNotEmpty) {
       if (_folderService.allPosts.isEmpty) {
-        print('DEBUG: Rilevato possibile reload in corso (0 post totali), ignoro update vuoto');
+        print(
+            'DEBUG: Rilevato possibile reload in corso (0 post totali), ignoro update vuoto');
         return;
       }
     }
-    
+
     // 2. Controllo differenze: Aggiorniamo solo se c'è un cambiamento reale
-    if (_arePostListsEqual(_posts, newPosts) && _currentFolder == updatedFolder) {
+    if (_arePostListsEqual(_posts, newPosts) &&
+        _currentFolder == updatedFolder) {
       print('DEBUG: Nessun cambiamento rilevante nei dati. Skip update UI.');
       return;
     }
-    
+
     if (mounted) {
       setState(() {
         _currentFolder = updatedFolder;
         _posts = newPosts;
         _resetVisiblePostsLimit();
       });
-      print('DEBUG: UI aggiornata: ${_currentFolder.name}, ${_posts.length} post');
+      print(
+          'DEBUG: UI aggiornata: ${_currentFolder.name}, ${_posts.length} post');
     }
   }
 
@@ -228,10 +239,11 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         _posts = _folderService.getPostsForFolder(_currentFolder);
         _resetVisiblePostsLimit();
       });
-      print('DEBUG: Caricati ${_posts.length} post per cartella: ${_currentFolder.name}');
+      print(
+          'DEBUG: Caricati ${_posts.length} post per cartella: ${_currentFolder.name}');
     }
   }
-  
+
   // 🔥 FIX FINALE: Caricamento semplificato SENZA sync/update automatici
   // I dati vengono caricati SOLO una volta all'apertura, poi rimangono statici
   // L'aggiornamento avviene SOLO con pull-to-refresh manuale
@@ -242,7 +254,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         _posts = _folderService.getPostsForFolder(_currentFolder);
         _resetVisiblePostsLimit();
       });
-      print('DEBUG: Caricati ${_posts.length} post per cartella: ${_currentFolder.name} (path: ${buildFullPathForFolder(_currentFolder)})');
+      print(
+          'DEBUG: Caricati ${_posts.length} post per cartella: ${_currentFolder.name} (path: ${buildFullPathForFolder(_currentFolder)})');
     }
   }
 
@@ -293,36 +306,38 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     Future.microtask(() {
       if (!mounted) return;
       setState(() {
-        _visiblePostsLimit = math.min(_visiblePostsLimit + _postsPageSize, _posts.length);
+        _visiblePostsLimit =
+            math.min(_visiblePostsLimit + _postsPageSize, _posts.length);
         _isLoadingMorePosts = false;
       });
     });
   }
-  
+
   // Helper per costruire il path completo della cartella (per debug)
   String buildFullPathForFolder(MockFolder folder) {
     if (folder.isSpecial) return folder.name;
-    
+
     List<String> pathParts = [];
     MockFolder? current = folder;
-    
+
     while (current != null && !current.isSpecial) {
       pathParts.insert(0, current.name);
       current = current.parent;
     }
-    
+
     return pathParts.join(' › ');
   }
-  
+
   // 🔥 NUOVO: Metodo per forzare il refresh automatico con retry
   Future<void> _forceRefreshPosts() async {
     try {
-      print('DEBUG: Forzando refresh automatico per cartella: ${_currentFolder.name}');
-      
+      print(
+          'DEBUG: Forzando refresh automatico per cartella: ${_currentFolder.name}');
+
       // STEP 1: Sync completo con retry
       int retryCount = 0;
       final maxRetries = 3;
-      
+
       while (retryCount < maxRetries) {
         try {
           // Sincronizza con il database
@@ -336,71 +351,70 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
             await Future.delayed(Duration(milliseconds: 500));
           } else {
             print('DEBUG: Sync fallito dopo $maxRetries tentativi: $e');
+          }
         }
       }
-      }
-      
+
       // STEP 2: Aggiorna il folder corrente
       _updateCurrentFolder();
-      
+
       // STEP 3: Ricarica i post
       if (mounted) {
         _loadPosts();
       }
-      
+
       print('DEBUG: ✅ Refresh automatico completato');
-      
     } catch (e) {
       print('ERRORE: Refresh automatico fallito: $e');
     }
   }
-  
+
   // 🔥 NUOVO: Ordina alfabeticamente le sottocartelle
   List<MockFolder> _getSortedSubfolders() {
     final children = List<MockFolder>.from(_currentFolder.children);
-    children.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    children
+        .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return children;
   }
 
   Future<void> _onPullToRefreshFolder() async {
     try {
       print('DEBUG: ========== PULL TO REFRESH FOLDER ==========');
-      
+
       // 🔥 STEP 1: Feedback tattile
       HapticFeedback.lightImpact();
-      
+
       // 🔥 STEP 2: Invalida cache posts per forzare reload
       DataService.instance.invalidateCache(folders: false, posts: true);
-      
+
       // 🔥 STEP 3: Aspetta un attimo per propagazione
       await Future.delayed(Duration(milliseconds: 200));
-      
+
       // 🔥 STEP 4: Ricarica dati
       await _folderService.syncWithDataService();
-      
+
       // 🔥 STEP 5: Aggiorna il folder corrente
       _updateCurrentFolder();
-      
+
       // 🔥 STEP 6: Ricarica i post
       _loadPosts();
-      
+
       // 🔥 STEP 7: Aggiorna UI
       if (mounted) {
         setState(() {
           // Forza rebuild
         });
       }
-      
+
       // 🔥 STEP 8: Notifica parent
       if (mounted) {
         widget.onFolderUpdated();
       }
-      
+
       print('DEBUG: ✅ Pull-to-refresh cartella completato');
-      
     } catch (e) {
       print('ERRORE: Pull-to-refresh cartella fallito: $e');
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -416,7 +430,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   void _onSearchChanged() {
     // 🔥 FIX: Controlla se il widget è ancora montato
     if (!mounted) return;
-    
+
     final query = _searchController.text.trim();
     if (query.isEmpty) {
       if (mounted) {
@@ -431,7 +445,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     if (mounted) {
       setState(() {
         _isSearching = true;
-        _searchResults = _folderService.searchUnified(query, trackSearch: false);
+        _searchResults =
+            _folderService.searchUnified(query, trackSearch: false);
       });
     }
 
@@ -442,28 +457,30 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
       if (query != _lastTrackedQuery && query.length >= 2) {
         _folderService.searchUnified(query, trackSearch: true);
         _lastTrackedQuery = query;
-        print('DEBUG: Ricerca tracciata: "$query" con ${_searchResults.length} risultati');
+        print(
+            'DEBUG: Ricerca tracciata: "$query" con ${_searchResults.length} risultati');
       }
     });
 
-    print('DEBUG: Ricerca nella cartella ${_currentFolder.name} per "$query" ha restituito ${_searchResults.length} risultati');
+    print(
+        'DEBUG: Ricerca nella cartella ${_currentFolder.name} per "$query" ha restituito ${_searchResults.length} risultati');
   }
 
   String _buildBreadcrumb(MockFolder folder) {
     List<String> path = [];
     MockFolder? current = folder.parent;
-    
+
     while (current != null) {
       if (!current.isSpecial) {
         path.insert(0, current.name);
       }
       current = current.parent;
     }
-    
+
     if (path.isEmpty) {
       return 'Cartella principale';
     }
-    
+
     return path.join(' > ');
   }
 
@@ -471,57 +488,58 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     if (sourceFolder == null) {
       return 'Tutti';
     }
-    
+
     List<String> path = [];
     MockFolder? current = sourceFolder;
-    
+
     while (current != null) {
       if (!current.isSpecial) {
         path.insert(0, current.name);
       }
       current = current.parent;
     }
-    
+
     if (path.isEmpty) {
       return 'Home';
     }
-    
+
     return 'Home > ${path.join(' > ')}';
   }
 
   @override
   Widget build(BuildContext context) {
     final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
-    
+
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
             _buildHeaderWithSearch(themeColors),
-            
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: _isSearching ? _buildSearchResults(themeColors) : _buildFolderContent(themeColors),
+                child: _isSearching
+                    ? _buildSearchResults(themeColors)
+                    : _buildFolderContent(themeColors),
               ),
             ),
           ],
         ),
       ),
-      
       bottomNavigationBar: CustomBottomNavigationBar(
         isDarkTheme: widget.isDarkTheme,
         onHomeTap: () => Navigator.popUntil(context, (route) => route.isFirst),
         onAddTap: () => _showCreateFolderDialog(themeColors),
         onAccountTap: _openAccountPage,
       ),
-
       floatingActionButton: (!_isSearching && _showScrollToTopButton)
           ? FloatingActionButton.small(
               onPressed: _scrollToTop,
-              backgroundColor: widget.isDarkTheme ? Colors.black87 : Colors.white,
-              foregroundColor: widget.isDarkTheme ? Colors.white : Colors.black87,
+              backgroundColor:
+                  widget.isDarkTheme ? Colors.black87 : Colors.white,
+              foregroundColor:
+                  widget.isDarkTheme ? Colors.white : Colors.black87,
               child: const Icon(Icons.keyboard_arrow_up),
             )
           : null,
@@ -536,7 +554,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         color: themeColors.mainBackgroundColor,
         border: Border(
           bottom: BorderSide(
-            color: widget.isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade200,
+            color: widget.isDarkTheme
+                ? Colors.grey.shade800
+                : Colors.grey.shade200,
             width: 1,
           ),
         ),
@@ -547,7 +567,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
           Row(
             children: [
               IconButton(
-                icon: Icon(Icons.arrow_back, color: themeColors.iconColor, size: 28),
+                icon: Icon(Icons.arrow_back,
+                    color: themeColors.iconColor, size: 28),
                 onPressed: () {
                   if (_isSearching) {
                     // Se in modalità ricerca, torna alla vista normale della cartella
@@ -570,65 +591,64 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
               ),
               SizedBox(width: 12),
               Expanded(
-                child: _isSearching 
-                  ? Text(
-                      'Ricerca per',
-                      style: TextStyle(
-                        color: themeColors.titleColor,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _currentFolder.name,
-                          style: TextStyle(
-                            color: themeColors.titleColor,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
+                child: _isSearching
+                    ? Text(
+                        'Ricerca per',
+                        style: TextStyle(
+                          color: themeColors.titleColor,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
                         ),
-                        if (_currentFolder.level > 0) ...[
-                          SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.folder_outlined,
-                                color: themeColors.iconColor,
-                                size: 14,
-                              ),
-                              SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  _buildBreadcrumb(_currentFolder),
-                                  style: TextStyle(
-                                    color: themeColors.textColor.withOpacity(0.8),
-                                    fontSize: 12,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _currentFolder.name,
+                            style: TextStyle(
+                              color: themeColors.titleColor,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
+                          if (_currentFolder.level > 0) ...[
+                            SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.folder_outlined,
+                                  color: themeColors.iconColor,
+                                  size: 14,
+                                ),
+                                SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    _buildBreadcrumb(_currentFolder),
+                                    style: TextStyle(
+                                      color: themeColors.textColor
+                                          .withOpacity(0.8),
+                                      fontSize: 12,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
+                      ),
               ),
             ],
           ),
-          
           SizedBox(height: 16),
-          
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(25),
-              border: _isSearching 
-                ? Border.all(color: Colors.black, width: 1) 
-                : Border.all(color: Colors.black, width: 1),
+              border: _isSearching
+                  ? Border.all(color: Colors.black, width: 1)
+                  : Border.all(color: Colors.black, width: 1),
             ),
             child: TextField(
               controller: _searchController,
@@ -637,14 +657,16 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 hintText: 'Cerca cartelle e #hashtags...',
                 hintStyle: TextStyle(color: Colors.grey.shade600),
                 border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_isSearching && _searchResults.isNotEmpty)
                       Container(
                         margin: EdgeInsets.only(right: 8),
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: const Color.fromARGB(255, 206, 208, 210),
                           borderRadius: BorderRadius.circular(12),
@@ -660,7 +682,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                       ),
                     _searchController.text.isNotEmpty
                         ? IconButton(
-                            icon: Icon(Icons.clear, color: Colors.grey.shade600),
+                            icon:
+                                Icon(Icons.clear, color: Colors.grey.shade600),
                             onPressed: () {
                               _searchController.clear();
                               FocusScope.of(context).unfocus();
@@ -688,7 +711,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   void _openAccountPage() {
     print('DEBUG: Tentativo di aprire AccountPage');
-    
+
     try {
       Navigator.push(
         context,
@@ -760,14 +783,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   // ✅ CORRETTO: Usa il vero metodo di apertura URL
   void _openPostDirectly(MockPost post) async {
     _folderService.trackPostViewed(post);
-    
+
     try {
       print('DEBUG: Apertura reale del post: ${post.title}');
       print('DEBUG: URL: ${post.url}');
-      
+
       // USA IL METODO REALE DI APERTURA
       await SharingService.openPostDirectly(context, post.url);
-      
     } catch (e) {
       print('ERRORE: Apertura post fallita: $e');
     }
@@ -776,7 +798,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   Widget _buildFolderContent(ThemeColors themeColors) {
     final hasSubfolders = _currentFolder.children.isNotEmpty;
     final hasPosts = _posts.isNotEmpty;
-    
+
     if (!hasSubfolders && !hasPosts) {
       // Per stato vuoto, usa RefreshIndicator con contenuto non scrollabile
       return RefreshIndicator(
@@ -786,7 +808,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         child: SingleChildScrollView(
           physics: AlwaysScrollableScrollPhysics(),
           child: Container(
-            height: MediaQuery.of(context).size.height - 200, // Altezza minima per permettere scroll
+            height: MediaQuery.of(context).size.height -
+                200, // Altezza minima per permettere scroll
             child: _buildEmptyState(themeColors),
           ),
         ),
@@ -812,7 +835,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 _buildSubfoldersSection(themeColors),
                 if (hasPosts) SizedBox(height: 32),
               ],
-              
               if (hasPosts) ...[
                 _buildPostsSection(themeColors),
               ],
@@ -835,9 +857,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
           ),
           SizedBox(height: 16),
           Text(
-            _currentFolder.isSpecial 
-                ? 'Nessun post salvato'
-                : 'Cartella vuota',
+            _currentFolder.isSpecial ? 'Nessun post salvato' : 'Cartella vuota',
             style: TextStyle(color: themeColors.subtitleColor, fontSize: 18),
           ),
           SizedBox(height: 8),
@@ -864,7 +884,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
             Icon(Icons.bookmark, color: themeColors.iconColor, size: 20),
             SizedBox(width: 8),
             Text(
-              _currentFolder.isSpecial ? 'Tutti i Post Salvati' : 'Post in questa cartella',
+              _currentFolder.isSpecial
+                  ? 'Tutti i Post Salvati'
+                  : 'Post in questa cartella',
               style: ThemeHelpers.getSectionTitleStyle(widget.isDarkTheme),
             ),
             Spacer(),
@@ -908,10 +930,12 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     return Container(
       margin: EdgeInsets.only(bottom: 12),
       decoration: ThemeHelpers.getCardDecoration(widget.isDarkTheme).copyWith(
-        color: post.isShared 
-            ? (widget.isDarkTheme ? Colors.blue.withOpacity(0.15) : Colors.blue.withOpacity(0.05))
+        color: post.isShared
+            ? (widget.isDarkTheme
+                ? Colors.blue.withOpacity(0.15)
+                : Colors.blue.withOpacity(0.05))
             : null,
-        border: post.isShared 
+        border: post.isShared
             ? Border.all(color: Colors.blue.withOpacity(0.5), width: 1.5)
             : null,
       ),
@@ -946,7 +970,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                     SizedBox(height: 8),
 
                     Text(
-                      post.description.isNotEmpty ? post.description : 'Nessuna descrizione disponibile',
+                      post.description.isNotEmpty
+                          ? post.description
+                          : 'Nessuna descrizione disponibile',
                       style: TextStyle(
                         color: themeColors.subtitleColor,
                         fontSize: 14,
@@ -962,19 +988,23 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                     // Data e percorso cartella
                     Row(
                       children: [
-                        Icon(Icons.schedule, color: themeColors.hintColor, size: 14),
+                        Icon(Icons.schedule,
+                            color: themeColors.hintColor, size: 14),
                         SizedBox(width: 4),
                         Text(
                           _formatDate(post.savedDate),
-                          style: TextStyle(color: themeColors.hintColor, fontSize: 12),
+                          style: TextStyle(
+                              color: themeColors.hintColor, fontSize: 12),
                         ),
                         SizedBox(width: 12),
-                        Icon(Icons.folder_outlined, color: themeColors.hintColor, size: 14),
+                        Icon(Icons.folder_outlined,
+                            color: themeColors.hintColor, size: 14),
                         SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             _buildPostBreadcrumb(post.sourceFolder),
-                            style: TextStyle(color: themeColors.hintColor, fontSize: 12),
+                            style: TextStyle(
+                                color: themeColors.hintColor, fontSize: 12),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -987,18 +1017,56 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                     // Dominio sorgente
                     Row(
                       children: [
-                        Icon(Icons.language, color: themeColors.hintColor, size: 14),
+                        Icon(Icons.language,
+                            color: themeColors.hintColor, size: 14),
                         SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             _extractDomain(post.url),
-                            style: TextStyle(color: themeColors.hintColor, fontSize: 12),
+                            style: TextStyle(
+                                color: themeColors.hintColor, fontSize: 12),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
+
+                    // Badge "post importato"
+                    if (post.isShared) ...[
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade700.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: Colors.blue.shade400, width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.download_rounded,
+                                    color: Colors.blue.shade600, size: 11),
+                                SizedBox(width: 4),
+                                Text(
+                                  'post importato',
+                                  style: TextStyle(
+                                    color: Colors.blue.shade600,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1015,10 +1083,18 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: widget.isDarkTheme ? Colors.grey.shade800 : Colors.white,
+                        color: widget.isDarkTheme
+                            ? Colors.grey.shade800
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.withOpacity(0.5), width: 1.5),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: Offset(0, 2))],
+                        border: Border.all(
+                            color: Colors.blue.withOpacity(0.5), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 4,
+                              offset: Offset(0, 2))
+                        ],
                       ),
                       child: Icon(Icons.tag, color: Colors.blue, size: 16),
                     ),
@@ -1029,12 +1105,21 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: widget.isDarkTheme ? Colors.grey.shade800 : Colors.white,
+                        color: widget.isDarkTheme
+                            ? Colors.grey.shade800
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.withOpacity(0.5), width: 1.5),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: Offset(0, 2))],
+                        border: Border.all(
+                            color: Colors.blue.withOpacity(0.5), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 4,
+                              offset: Offset(0, 2))
+                        ],
                       ),
-                      child: Icon(Icons.more_vert, color: Colors.blue, size: 16),
+                      child:
+                          Icon(Icons.more_vert, color: Colors.blue, size: 16),
                     ),
                   ),
                   GestureDetector(
@@ -1045,8 +1130,17 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                       decoration: BoxDecoration(
                         color: Colors.blue.shade600,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: widget.isDarkTheme ? Colors.white70 : Colors.white, width: 1),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: Offset(0, 1))],
+                        border: Border.all(
+                            color: widget.isDarkTheme
+                                ? Colors.white70
+                                : Colors.white,
+                            width: 1),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 4,
+                              offset: Offset(0, 1))
+                        ],
                       ),
                       child: Icon(Icons.share, color: Colors.white, size: 14),
                     ),
@@ -1057,12 +1151,21 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: widget.isDarkTheme ? Colors.grey.shade800 : Colors.white,
+                        color: widget.isDarkTheme
+                            ? Colors.grey.shade800
+                            : Colors.white,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.orange.withOpacity(0.7), width: 1.5),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: Offset(0, 2))],
+                        border: Border.all(
+                            color: Colors.orange.withOpacity(0.7), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 4,
+                              offset: Offset(0, 2))
+                        ],
                       ),
-                      child: Icon(Icons.notifications_none, color: Colors.orange, size: 16),
+                      child: Icon(Icons.notifications_none,
+                          color: Colors.orange, size: 16),
                     ),
                   ),
                 ],
@@ -1089,21 +1192,25 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   // ✅ DIALOG SENZA PULSANTI: Salvataggio immediato e fix overflow
   void _showEditHashtagsDialog(MockPost post, ThemeColors themeColors) {
     final TextEditingController hashtagController = TextEditingController();
-    List<String> currentTags = List.from(post.tags); // Copia modificabile dei tag
-    
+    List<String> currentTags =
+        List.from(post.tags); // Copia modificabile dei tag
+
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => Dialog(
-          backgroundColor: widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
+          backgroundColor:
+              widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          insetPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 40), // Padding dal bordo schermo
+          insetPadding: EdgeInsets.symmetric(
+              horizontal: 20, vertical: 40), // Padding dal bordo schermo
           child: Container(
             width: double.maxFinite,
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.7, // Max 70% altezza schermo
+              maxHeight: MediaQuery.of(context).size.height *
+                  0.7, // Max 70% altezza schermo
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1114,8 +1221,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                   decoration: BoxDecoration(
                     border: Border(
                       bottom: BorderSide(
-                        color: widget.isDarkTheme 
-                            ? Colors.grey.shade800 
+                        color: widget.isDarkTheme
+                            ? Colors.grey.shade800
                             : Colors.grey.shade200,
                         width: 1,
                       ),
@@ -1151,7 +1258,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                     ],
                   ),
                 ),
-                
+
                 // CONTENUTO scrollabile
                 Flexible(
                   child: SingleChildScrollView(
@@ -1174,7 +1281,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                               ),
                               SizedBox(width: 8),
                               Container(
-                                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.blue.withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(10),
@@ -1194,52 +1302,59 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                           Wrap(
                             spacing: 6,
                             runSpacing: 6,
-                            children: currentTags.map((tag) => Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(16),
-                                onTap: () async {
-                                  setDialogState(() {
-                                    currentTags.remove(tag);
-                                  });
-                                  // Salva immediatamente
-                                  await _folderService.updatePostTags(post.id, currentTags);
-                                  // Aggiorna UI
-                                  if (mounted) {
-                                    setState(() {
-                                      _loadPosts();
-                                    });
-                                  }
-                                },
-                                child: Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '#$tag',
-                                        style: TextStyle(
-                                          color: Colors.blue,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
+                            children: currentTags
+                                .map((tag) => Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(16),
+                                        onTap: () async {
+                                          setDialogState(() {
+                                            currentTags.remove(tag);
+                                          });
+                                          // Salva immediatamente
+                                          await _folderService.updatePostTags(
+                                              post.id, currentTags);
+                                          // Aggiorna UI
+                                          if (mounted) {
+                                            setState(() {
+                                              _loadPosts();
+                                            });
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withOpacity(0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                            border: Border.all(
+                                                color: Colors.blue
+                                                    .withOpacity(0.3)),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                '#$tag',
+                                                style: TextStyle(
+                                                  color: Colors.blue,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                              SizedBox(width: 6),
+                                              Icon(
+                                                Icons.close,
+                                                color: Colors.blue.shade700,
+                                                size: 14,
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                      SizedBox(width: 6),
-                                      Icon(
-                                        Icons.close,
-                                        color: Colors.blue.shade700,
-                                        size: 14,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            )).toList(),
+                                    ))
+                                .toList(),
                           ),
                           SizedBox(height: 20),
                         ] else ...[
@@ -1247,8 +1362,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                             padding: EdgeInsets.all(12),
                             margin: EdgeInsets.only(bottom: 16),
                             decoration: BoxDecoration(
-                              color: widget.isDarkTheme 
-                                  ? Colors.grey.shade800 
+                              color: widget.isDarkTheme
+                                  ? Colors.grey.shade800
                                   : Colors.grey.shade100,
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -1273,7 +1388,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                             ),
                           ),
                         ],
-                        
+
                         // Campo per aggiungere nuovi hashtag
                         Text(
                           'Aggiungi hashtag:',
@@ -1289,32 +1404,39 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                             Expanded(
                               child: TextField(
                                 controller: hashtagController,
-                                style: TextStyle(color: themeColors.textColor, fontSize: 14),
+                                style: TextStyle(
+                                    color: themeColors.textColor, fontSize: 14),
                                 decoration: InputDecoration(
                                   hintText: 'Nuovo hashtag',
-                                  hintStyle: TextStyle(color: themeColors.hintColor, fontSize: 14),
+                                  hintStyle: TextStyle(
+                                      color: themeColors.hintColor,
+                                      fontSize: 14),
                                   filled: true,
-                                  fillColor: widget.isDarkTheme 
-                                      ? Colors.grey.shade800 
+                                  fillColor: widget.isDarkTheme
+                                      ? Colors.grey.shade800
                                       : Colors.grey.shade100,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(8),
                                     borderSide: BorderSide.none,
                                   ),
-                                  prefixIcon: Icon(Icons.tag, color: Colors.blue, size: 18),
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  prefixIcon: Icon(Icons.tag,
+                                      color: Colors.blue, size: 18),
+                                  contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 10),
                                   isDense: true,
                                 ),
                                 onSubmitted: (value) async {
                                   if (value.trim().isNotEmpty) {
-                                    final newTag = value.replaceAll('#', '').trim();
+                                    final newTag =
+                                        value.replaceAll('#', '').trim();
                                     if (!currentTags.contains(newTag)) {
                                       setDialogState(() {
                                         currentTags.add(newTag);
                                         hashtagController.clear();
                                       });
                                       // Salva immediatamente
-                                      await _folderService.updatePostTags(post.id, currentTags);
+                                      await _folderService.updatePostTags(
+                                          post.id, currentTags);
                                       // Aggiorna UI
                                       if (mounted) {
                                         setState(() {
@@ -1335,14 +1457,16 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                                 onTap: () async {
                                   final value = hashtagController.text;
                                   if (value.trim().isNotEmpty) {
-                                    final newTag = value.replaceAll('#', '').trim();
+                                    final newTag =
+                                        value.replaceAll('#', '').trim();
                                     if (!currentTags.contains(newTag)) {
                                       setDialogState(() {
                                         currentTags.add(newTag);
                                         hashtagController.clear();
                                       });
                                       // Salva immediatamente
-                                      await _folderService.updatePostTags(post.id, currentTags);
+                                      await _folderService.updatePostTags(
+                                          post.id, currentTags);
                                       // Aggiorna UI
                                       if (mounted) {
                                         setState(() {
@@ -1364,18 +1488,20 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                             ),
                           ],
                         ),
-                        
+
                         SizedBox(height: 12),
                         Container(
                           padding: EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             color: Colors.green.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green.withOpacity(0.3)),
+                            border: Border.all(
+                                color: Colors.green.withOpacity(0.3)),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.check_circle_outline, color: Colors.green, size: 14),
+                              Icon(Icons.check_circle_outline,
+                                  color: Colors.green, size: 14),
                               SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -1404,15 +1530,20 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   // ENHANCED: Widget per immagine del post con Open Graph + fallback
   Widget _buildPostImage(MockPost post, ThemeColors themeColors) {
-    // Se il post ha un'immagine Open Graph, usala
-    if (post.imageUrl != null && post.imageUrl!.isNotEmpty) {
+    final hasPreview = post.imageUrl?.trim().isNotEmpty == true ||
+        post.previewStorageUrl?.trim().isNotEmpty == true;
+
+    // Se il post ha un'immagine Open Graph o un backup remoto/cache, usala
+    if (hasPreview) {
       return Container(
         width: 80,
         height: 80,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: widget.isDarkTheme ? Colors.grey.shade700 : Colors.grey.shade300,
+            color: widget.isDarkTheme
+                ? Colors.grey.shade700
+                : Colors.grey.shade300,
             width: 1,
           ),
         ),
@@ -1420,6 +1551,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
           borderRadius: BorderRadius.circular(8),
           child: PostPreviewImage(
             postId: post.id,
+            postUrl: post.url,
             imageUrl: post.imageUrl,
             remoteImageUrl: post.previewStorageUrl,
             fit: BoxFit.cover,
@@ -1427,7 +1559,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         ),
       );
     }
-    
+
     // Fallback alla thumbnail generata
     return _buildFallbackThumbnail(post, themeColors);
   }
@@ -1441,10 +1573,10 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     } catch (e) {
       domain = '';
     }
-    
+
     Color thumbnailColor;
     IconData thumbnailIcon;
-    
+
     if (domain.contains('youtube.com') || domain.contains('youtu.be')) {
       thumbnailColor = Color(0xFFFF0000);
       thumbnailIcon = Icons.play_circle_filled;
@@ -1463,7 +1595,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     } else if (domain.contains('donnamoderna.com')) {
       thumbnailColor = Color(0xFFE91E63);
       thumbnailIcon = Icons.menu_book;
-    } else if (domain.contains('venetoinfo.it') || domain.contains('veneziaunica.it')) {
+    } else if (domain.contains('venetoinfo.it') ||
+        domain.contains('veneziaunica.it')) {
       thumbnailColor = Color(0xFF006A94);
       thumbnailIcon = Icons.location_city;
     } else if (domain.contains('veneto.info')) {
@@ -1476,7 +1609,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
       thumbnailColor = _getColorFromDomain(domain);
       thumbnailIcon = Icons.language;
     }
-    
+
     return Container(
       width: 80,
       height: 80,
@@ -1484,7 +1617,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         color: thumbnailColor,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: widget.isDarkTheme ? Colors.grey.shade700 : Colors.grey.shade300,
+          color:
+              widget.isDarkTheme ? Colors.grey.shade700 : Colors.grey.shade300,
           width: 1,
         ),
       ),
@@ -1531,12 +1665,11 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     if (_currentFolder.children.isEmpty) {
       return SizedBox.shrink();
     }
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(height: 16),
-        
         GridView.builder(
           shrinkWrap: true,
           physics: NeverScrollableScrollPhysics(),
@@ -1574,7 +1707,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
-    
+
     if (difference.inDays == 0) {
       return 'Oggi';
     } else if (difference.inDays == 1) {
@@ -1594,12 +1727,12 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     try {
       final uri = Uri.parse(url);
       String domain = uri.host.toLowerCase();
-      
+
       // Rimuovi 'www.' se presente
       if (domain.startsWith('www.')) {
         domain = domain.substring(4);
       }
-      
+
       return domain;
     } catch (e) {
       print('DEBUG: Errore parsing URL per dominio: $e');
@@ -1642,17 +1775,19 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   // 🔥 CORRETTO: Dialog di creazione sottocartella con async/await
   void _showCreateFolderDialog(ThemeColors themeColors) {
     final TextEditingController controller = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
+        backgroundColor:
+            widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
           'Nuova sottocartella',
-          style: TextStyle(color: themeColors.textColor, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: themeColors.textColor, fontWeight: FontWeight.bold),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1706,45 +1841,50 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
+            child:
+                Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
           ),
           TextButton(
-            onPressed: _subfolderCreationError == null ? () async { // 🔥 AGGIUNTO async
-              if (controller.text.trim().isNotEmpty) {
-                print('DEBUG: Creando sottocartella "${controller.text.trim()}" in "${_currentFolder.name}"');
-                
-                try {
-                  // 🔥 AGGIUNTO await - Ora aspetta che la sottocartella sia salvata
-                  await _folderService.createSubfolderInFolder(_currentFolder, controller.text.trim());
-                  
-                  // ✅ AGGIORNA UI DOPO che la sottocartella è stata salvata
-                  _updateCurrentFolder();
-                  
-                  // 🔥 FIX: Controlla mounted prima di setState
-                  if (mounted) {
-                    setState(() {
-                      _loadPosts();
-                    });
-                  }
-                  
-                  if (mounted) {
-                    widget.onFolderUpdated();
-                  }
-                  Navigator.pop(context);
+            onPressed: _subfolderCreationError == null
+                ? () async {
+                    // 🔥 AGGIUNTO async
+                    if (controller.text.trim().isNotEmpty) {
+                      print(
+                          'DEBUG: Creando sottocartella "${controller.text.trim()}" in "${_currentFolder.name}"');
 
-                } catch (e) { // 🔥 AGGIUNTO gestione errori
-                  print('ERRORE: Creazione sottocartella fallita: $e');
-                  Navigator.pop(context);
-                }
-              }
-            } : null,
-            child: Text(
-              'Crea', 
-              style: TextStyle(
-                color: _subfolderCreationError == null ? Colors.blue : Colors.grey[600], 
-                fontWeight: FontWeight.bold
-              )
-            ),
+                      try {
+                        // 🔥 AGGIUNTO await - Ora aspetta che la sottocartella sia salvata
+                        await _folderService.createSubfolderInFolder(
+                            _currentFolder, controller.text.trim());
+
+                        // ✅ AGGIORNA UI DOPO che la sottocartella è stata salvata
+                        _updateCurrentFolder();
+
+                        // 🔥 FIX: Controlla mounted prima di setState
+                        if (mounted) {
+                          setState(() {
+                            _loadPosts();
+                          });
+                        }
+
+                        if (mounted) {
+                          widget.onFolderUpdated();
+                        }
+                        Navigator.pop(context);
+                      } catch (e) {
+                        // 🔥 AGGIUNTO gestione errori
+                        print('ERRORE: Creazione sottocartella fallita: $e');
+                        Navigator.pop(context);
+                      }
+                    }
+                  }
+                : null,
+            child: Text('Crea',
+                style: TextStyle(
+                    color: _subfolderCreationError == null
+                        ? Colors.blue
+                        : Colors.grey[600],
+                    fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1753,18 +1893,21 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   void _showRenameSubfolderDialog(MockFolder subfolder) {
     final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
-    final TextEditingController controller = TextEditingController(text: subfolder.name);
-    
+    final TextEditingController controller =
+        TextEditingController(text: subfolder.name);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
+        backgroundColor:
+            widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
           'Rinomina sottocartella',
-          style: TextStyle(color: themeColors.textColor, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: themeColors.textColor, fontWeight: FontWeight.bold),
         ),
         content: TextField(
           controller: controller,
@@ -1785,27 +1928,30 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
+            child:
+                Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
           ),
           TextButton(
             onPressed: () async {
               if (controller.text.trim().isNotEmpty) {
-                print('DEBUG: Rinominando sottocartella da "${subfolder.name}" a "${controller.text.trim()}"');
-                
+                print(
+                    'DEBUG: Rinominando sottocartella da "${subfolder.name}" a "${controller.text.trim()}"');
+
                 Navigator.pop(context); // Chiudi dialog rinomina
-                
+
                 try {
                   // 🔥 FIX: Rimosso loading dialog bloccante per UX istantanea
                   // Esegui operazione asincrona
-                  await _folderService.renameFolder(subfolder, controller.text.trim());
-                  
+                  await _folderService.renameFolder(
+                      subfolder, controller.text.trim());
+
                   if (mounted) {
                     setState(() {
                       _loadPosts();
                     });
-                    
+
                     widget.onFolderUpdated();
-                    
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Cartella rinominata'),
@@ -1827,7 +1973,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 }
               }
             },
-            child: Text('Salva', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+            child: Text('Salva',
+                style:
+                    TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1836,17 +1984,19 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   void _showDeleteSubfolderDialog(MockFolder subfolder) {
     final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
+        backgroundColor:
+            widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
           'Elimina sottocartella',
-          style: TextStyle(color: themeColors.textColor, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: themeColors.textColor, fontWeight: FontWeight.bold),
         ),
         content: Text(
           'Sei sicuro di voler eliminare la sottocartella "${subfolder.name}"?\n\nTutte le sue sottocartelle e contenuti verranno eliminati.',
@@ -1855,41 +2005,43 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
+            child:
+                Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
           ),
           TextButton(
             onPressed: () async {
               print('DEBUG: Eliminando sottocartella: ${subfolder.name}');
-              
+
               Navigator.pop(context);
-              
+
               try {
                 // ✅ STEP 1: Elimina dal database
                 await _folderService.deleteFolder(subfolder);
-                
+
                 // ✅ STEP 2: Notifica il parent
                 if (mounted) {
                   widget.onFolderUpdated();
                 }
-                
+
                 // ✅ STEP 3: Forza sincronizzazione completa
                 await _folderService.syncWithDataService();
-                
+
                 // ✅ STEP 4: CRITICO - Aggiorna il riferimento locale
                 _updateCurrentFolder();
-                
+
                 // ✅ STEP 5: Ricarica i post e forza refresh UI
                 if (mounted) {
                   setState(() {
                     _loadPosts();
                   });
                 }
-                
               } catch (e) {
                 print('ERRORE: Eliminazione sottocartella fallita: $e');
               }
             },
-            child: Text('Elimina', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: Text('Elimina',
+                style:
+                    TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1897,20 +2049,22 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   }
 
   void _showMoveSubfolderDialog(MockFolder folderToMove) {
-    print('DEBUG: FOLDER DETAIL - Avviando spostamento per sottocartella: ${folderToMove.name}');
-    
+    print(
+        'DEBUG: FOLDER DETAIL - Avviando spostamento per sottocartella: ${folderToMove.name}');
+
     DialogHelpers.showMoveFolderDialog(
       context,
       widget.isDarkTheme,
       folderToMove,
       _folderService.folders,
       (destination) async {
-        print('DEBUG: FOLDER DETAIL - Destinazione selezionata: ${destination?.name ?? "Home"}');
-        
+        print(
+            'DEBUG: FOLDER DETAIL - Destinazione selezionata: ${destination?.name ?? "Home"}');
+
         try {
           // Attendi completamento operazione (che include salvataggio DB)
           await _folderService.moveFolder(folderToMove, destination);
-          
+
           if (mounted) {
             setState(() {
               _loadPosts();
@@ -1921,11 +2075,13 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
           print('ERRORE: Spostamento fallito nella pagina dettaglio: $e');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Errore spostamento: $e'), backgroundColor: Colors.red),
+              SnackBar(
+                  content: Text('Errore spostamento: $e'),
+                  backgroundColor: Colors.red),
             );
           }
         }
-        
+
         final destinationPath = _buildDestinationPath(destination);
       },
     );
@@ -1940,27 +2096,27 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     if (destination == null) {
       return 'Home';
     }
-    
+
     List<String> path = [];
     MockFolder? current = destination;
-    
+
     while (current != null) {
       if (!current.isSpecial) {
         path.insert(0, current.name);
       }
       current = current.parent;
     }
-    
+
     if (path.isEmpty) {
       return 'Home';
     }
-    
+
     return 'Home > ${path.join(' > ')}';
   }
 
   Color _getColorFromDomain(String domain) {
     if (domain.isEmpty) return Colors.grey;
-    
+
     final colors = [
       Colors.blue.shade500,
       Colors.green.shade500,
@@ -1971,7 +2127,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
       Colors.indigo.shade500,
       Colors.pink.shade500,
     ];
-    
+
     final hash = domain.hashCode;
     return colors[hash.abs() % colors.length];
   }
@@ -1983,11 +2139,19 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   bool _isKnownSite(String domain) {
     final knownSites = [
-      'youtube.com', 'youtu.be', 'github.com', 'flutter.dev',
-      'giallozafferano.it', 'cookaround.com', 'donnamoderna.com',
-      'venetoinfo.it', 'veneziaunica.it', 'veneto.info', 'villepalladiane.it',
+      'youtube.com',
+      'youtu.be',
+      'github.com',
+      'flutter.dev',
+      'giallozafferano.it',
+      'cookaround.com',
+      'donnamoderna.com',
+      'venetoinfo.it',
+      'veneziaunica.it',
+      'veneto.info',
+      'villepalladiane.it',
     ];
-    
+
     return knownSites.any((site) => domain.contains(site));
   }
 
@@ -1996,7 +2160,8 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        margin: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
+        margin: EdgeInsets.fromLTRB(
+            16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
         decoration: BoxDecoration(
           color: widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -2009,7 +2174,9 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
               decoration: BoxDecoration(
                 border: Border(
                   bottom: BorderSide(
-                    color: widget.isDarkTheme ? Colors.grey.shade700 : Colors.grey.shade200,
+                    color: widget.isDarkTheme
+                        ? Colors.grey.shade700
+                        : Colors.grey.shade200,
                   ),
                 ),
               ),
@@ -2055,7 +2222,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 ],
               ),
             ),
-            
+
             _buildActionOption(
               Icons.drive_file_move_outline,
               'Sposta Post',
@@ -2065,7 +2232,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 _showMovePostDialog(post, themeColors);
               },
             ),
-            
+
             _buildActionOption(
               Icons.share,
               'Condividi Post',
@@ -2075,7 +2242,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 _sharePost(post);
               },
             ),
-            
+
             _buildActionOption(
               Icons.delete_outline,
               'Elimina Post',
@@ -2085,7 +2252,7 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 _showDeletePostDialog(post, themeColors);
               },
             ),
-            
+
             _buildActionOption(
               Icons.launch,
               'Apri Link',
@@ -2095,20 +2262,22 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
                 _openPost(post);
               },
             ),
-            
+
             SizedBox(height: 16),
-            
+
             // 🔥 FIX: Aggiungi padding extra per evitare sovrapposizione con navigazione
-            SizedBox(height: MediaQuery.of(context).padding.bottom > 0 ? 8 : 16),
+            SizedBox(
+                height: MediaQuery.of(context).padding.bottom > 0 ? 8 : 16),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildActionOption(IconData icon, String title, Color color, VoidCallback onTap) {
+  Widget _buildActionOption(
+      IconData icon, String title, Color color, VoidCallback onTap) {
     final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
-    
+
     return ListTile(
       leading: Container(
         width: 40,
@@ -2132,32 +2301,32 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
 
   void _showMovePostDialog(MockPost post, ThemeColors themeColors) {
     print('DEBUG: Avviando spostamento per post: ${post.title}');
-    
+
     DialogHelpers.showMovePostDialog(
       context,
       widget.isDarkTheme,
       post,
       _folderService.folders,
       (destination) async {
-        print('DEBUG: Destinazione selezionata per post: ${destination?.name ?? "Tutti"}');
-        
+        print(
+            'DEBUG: Destinazione selezionata per post: ${destination?.name ?? "Tutti"}');
+
         // Sposta il post
         await _folderService.movePost(post, destination);
-        
+
         // Aggiorna localmente subito, la sync globale avverrà in background
         if (mounted) {
           setState(() {
             _loadPosts();
           });
         }
-        
+
         if (mounted) {
           widget.onFolderUpdated();
         }
-        
-        final destinationPath = destination != null 
-            ? _buildDestinationPath(destination)
-            : 'Tutti';
+
+        final destinationPath =
+            destination != null ? _buildDestinationPath(destination) : 'Tutti';
       },
     );
   }
@@ -2167,13 +2336,15 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
+        backgroundColor:
+            widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
           'Elimina Post',
-          style: TextStyle(color: themeColors.textColor, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: themeColors.textColor, fontWeight: FontWeight.bold),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2214,43 +2385,46 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
+            child:
+                Text('Annulla', style: TextStyle(color: themeColors.hintColor)),
           ),
           TextButton(
-            onPressed: () async { // 🔥 AGGIUNTO async
+            onPressed: () async {
+              // 🔥 AGGIUNTO async
               print('DEBUG: Eliminando post: ${post.title}');
-              
+
               try {
                 // 🔥 FIX CRITICO: Await dell'eliminazione persistente
                 await _folderService.deletePost(post.id);
-                
+
                 Navigator.pop(context);
-                
+
                 // 🔥 FIX MESSAGGIO: Limita lunghezza titolo e mostra messaggio pulito
                 String displayTitle = post.title;
                 if (displayTitle.length > 30) {
                   displayTitle = '${displayTitle.substring(0, 30)}...';
                 }
-                
+
                 // 🔥 FIX: Controlla mounted prima di setState
                 if (mounted) {
                   setState(() {
                     _loadPosts();
                   });
                 }
-                
+
                 if (mounted) {
                   widget.onFolderUpdated();
                 }
-                
               } catch (e) {
                 // 🔥 GESTIONE ERRORI: Mostra errore se eliminazione fallisce
                 print('ERRORE: Eliminazione post fallita: $e');
-                
+
                 Navigator.pop(context);
               }
             },
-            child: Text('Elimina', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: Text('Elimina',
+                style:
+                    TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -2258,8 +2432,6 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
   }
 
   void _sharePost(MockPost post) {
-    String shareContent = 'Guarda questo post su SaveIn!: ${post.title}\n\n${post.url}\n\nInviato tramite SaveIn!';
-
     DialogHelpers.showShareItemDialog(
       context,
       widget.isDarkTheme,
@@ -2270,7 +2442,15 @@ class _FolderDetailPageState extends State<FolderDetailPage> with WidgetsBinding
         final postToShare = realPosts.firstWhere((p) => p.id == post.id);
         await DataService.instance.sharePost(postToShare, email);
       },
-      systemShareContent: shareContent,
+      systemShareContentBuilder: () async {
+        final realPosts = await DataService.instance.getPosts();
+        final postToShare = realPosts.firstWhere((p) => p.id == post.id);
+        final link =
+            await ShareLinkService.instance.createPostShareLink(postToShare);
+        return 'C’è un contenuto SaveIn che ti aspetta: ${post.title}\n\n'
+            '$link\n\n'
+            'Aprilo con SaveIn per salvarlo e ritrovarlo quando vuoi.';
+      },
     );
   }
 }

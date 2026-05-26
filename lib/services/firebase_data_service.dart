@@ -554,11 +554,12 @@ class FirebaseDataService {
     required String title,
     required String description,
     String? imageUrl,
+    String? previewStorageUrl,
     String? creatorName,
     String? creatorUsername,
     required List<String> tags,
     required String folderId,
-    bool isShared = false, // 🆕 NUOVO: Indica se il post è condiviso
+    bool isShared = false,
   }) async {
     try {
       if (kDebugMode)
@@ -593,6 +594,7 @@ class FirebaseDataService {
         title: title.trim(),
         description: description.trim(),
         imageUrl: imageUrl?.trim(),
+        previewStorageUrl: previewStorageUrl?.trim(),
         creatorName: creatorName?.trim(),
         creatorUsername: creatorUsername?.trim(),
         tags: tags.map((tag) => tag.trim()).toList(),
@@ -612,6 +614,7 @@ class FirebaseDataService {
         title: title.trim(),
         description: description.trim(),
         imageUrl: imageUrl?.trim(),
+        previewStorageUrl: previewStorageUrl?.trim(),
         creatorName: creatorName?.trim(),
         creatorUsername: creatorUsername?.trim(),
         tags: tags.map((tag) => tag.trim()).toList(),

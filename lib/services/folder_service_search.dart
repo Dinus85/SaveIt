@@ -341,10 +341,13 @@ mixin FolderServiceSearch on FolderServiceBase {
   /// Utile per UI che vuole gestire fallback (cache locale -> network).
   List<MockPost> getLastPostsWithImagesForFolder(MockFolder folder, {int maxPosts = 4}) {
     final List<MockPost> postsWithImages = <MockPost>[];
+    bool hasPreview(MockPost post) =>
+        post.imageUrl?.trim().isNotEmpty == true ||
+        post.previewStorageUrl?.trim().isNotEmpty == true;
 
     if (folder.isSpecial) {
       postsWithImages.addAll(
-        allPosts.where((post) => post.imageUrl != null && post.imageUrl!.isNotEmpty),
+        allPosts.where(hasPreview),
       );
     } else {
       void collectPostsRecursively(MockFolder currentFolder) {
@@ -360,7 +363,7 @@ mixin FolderServiceSearch on FolderServiceBase {
 
               return false;
             })
-            .where((post) => post.imageUrl != null && post.imageUrl!.isNotEmpty)
+            .where(hasPreview)
             .toList();
 
         postsWithImages.addAll(directPosts);
@@ -379,7 +382,9 @@ mixin FolderServiceSearch on FolderServiceBase {
 
   List<String> getLastPostImagesForFolder(MockFolder folder, {int maxImages = 4}) {
     return getLastPostsWithImagesForFolder(folder, maxPosts: maxImages)
-        .map((p) => p.imageUrl!)
+        .map((p) => (p.previewStorageUrl?.trim().isNotEmpty == true)
+            ? p.previewStorageUrl!.trim()
+            : p.imageUrl!.trim())
         .toList();
   }
   
@@ -409,7 +414,9 @@ mixin FolderServiceSearch on FolderServiceBase {
   
   int getTotalPostsWithImages() {
     return allPosts
-        .where((post) => post.imageUrl != null && post.imageUrl!.isNotEmpty)
+        .where((post) =>
+            post.imageUrl?.trim().isNotEmpty == true ||
+            post.previewStorageUrl?.trim().isNotEmpty == true)
         .length;
   }
 }

@@ -7,6 +7,7 @@ import '../models/folder.dart';
 import 'package:savein/data_service.dart';
 import '../services/folder_service.dart';
 import '../services/folder_management_unified.dart'; // ⭐ NUOVO
+import '../services/share_link_service.dart';
 import 'package:savein/utils/dialog_helpers.dart';
 import 'custom_bottom_nav.dart';
 import 'post_preview_image.dart';
@@ -35,189 +36,261 @@ class MockFolderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final folderService = FolderService();
-    
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: () => _showFolderMenu(context),
-      child: Container(
-        decoration: BoxDecoration(
-          color: folder.isShared 
-              ? Colors.blue.withOpacity(0.2) // Colore evidenziato per cartelle condivise
-              : (folder.color?.withOpacity(0.15) ?? Colors.white),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: folder.isShared ? Colors.blue : Colors.black, 
-            width: folder.isShared ? 2 : 1,
+
+    return AspectRatio(
+      aspectRatio: 1,
+      child: GestureDetector(
+        onTap: onTap,
+        onLongPress: () => _showFolderMenu(context),
+        child: Container(
+          decoration: BoxDecoration(
+            color: folder.isShared
+                ? Colors.blue.withOpacity(
+                    0.2) // Colore evidenziato per cartelle condivise
+                : (folder.color?.withOpacity(0.15) ?? Colors.white),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: folder.isShared ? Colors.blue : Colors.black,
+              width: folder.isShared ? 2 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            // 🆕 AGGIORNATO: Anteprima con immagini degli ultimi post
-            Positioned.fill(
-              child: _buildFolderPreview(folderService),
-            ),
-            
-            // Gradiente overlay per leggibilità 
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.black.withOpacity(0.2),
-                      Colors.black.withOpacity(0.7),
+          child: Stack(
+            children: [
+              // 🆕 AGGIORNATO: Anteprima con immagini degli ultimi post
+              Positioned.fill(
+                child: _buildFolderPreview(folderService),
+              ),
+
+              // Gradiente overlay per leggibilità
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withOpacity(0.2),
+                        Colors.black.withOpacity(0.7),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Contenuto della card
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment:
+                        MainAxisAlignment.end, // Spinge tutto in basso
+                    children: [
+                      // Icona cartella
+                      Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: folder.color?.withOpacity(0.9) ??
+                              Colors.blue.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          folder.isSpecial
+                              ? Icons.folder_special
+                              : Icons.folder,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+
+                      SizedBox(height: 8),
+
+                      // Nome cartella
+                      Text(
+                        folder.name,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          shadows: [
+                            Shadow(
+                              offset: Offset(0, 1),
+                              blurRadius: 2,
+                              color: Colors.black.withOpacity(0.5),
+                            ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+
+                      SizedBox(height: 2),
+
+                      // Conteggio
+                      Text(
+                        folder.count,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 12,
+                          shadows: [
+                            Shadow(
+                              offset: Offset(0, 1),
+                              blurRadius: 2,
+                              color: Colors.black.withOpacity(0.5),
+                            ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
               ),
-            ),
-            
-            // Contenuto della card
-            Positioned.fill(
-              child: Padding(
-                padding: EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end, // Spinge tutto in basso
-                  children: [
-                    // Icona cartella
-                    Container(
-                      padding: EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: folder.color?.withOpacity(0.9) ?? Colors.blue.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        folder.isSpecial ? Icons.folder_special : Icons.folder,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    
-                    SizedBox(height: 8),
-                    
-                    // Nome cartella
-                    Text(
-                      folder.name,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        shadows: [
-                          Shadow(
-                            offset: Offset(0, 1),
-                            blurRadius: 2,
-                            color: Colors.black.withOpacity(0.5),
-                          ),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    
-                    SizedBox(height: 2),
-                    
-                    // Conteggio
-                    Text(
-                      folder.count,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.9),
-                        fontSize: 12,
-                        shadows: [
-                          Shadow(
-                            offset: Offset(0, 1),
-                            blurRadius: 2,
-                            color: Colors.black.withOpacity(0.5),
-                          ),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
-            // 🆕 Menu e Share spostati fuori dalla Column per evitare overflow
-            if (!folder.isSpecial)
-              Positioned(
-                top: 12,
-                right: 12,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    GestureDetector(
-                      onTap: () => _showFolderMenu(context),
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        padding: EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.8),
-                            width: 1.5,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 4,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.more_vert,
-                          color: Colors.white,
-                          size: 18,
-                        ),
+              // Badge "cartella importata"
+              if (folder.isShared && !folder.isSpecial)
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade700.withOpacity(0.88),
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(12),
+                        bottomRight: Radius.circular(12),
                       ),
                     ),
-                    SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: () => _shareFolder(context),
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        padding: EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade600,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.download_rounded,
+                            color: Colors.white, size: 12),
+                        SizedBox(width: 4),
+                        Text(
+                          'cartella importata',
+                          style: TextStyle(
                             color: Colors.white,
-                            width: 1.5,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.35),
-                              blurRadius: 6,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
                         ),
-                        child: Icon(
-                          Icons.share,
-                          color: Colors.white,
-                          size: 18,
+                      ],
+                    ),
+                  ),
+                ),
+
+              // 🆕 Menu e Share spostati fuori dalla Column per evitare overflow
+              if (!folder.isSpecial)
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: () => _showFolderMenu(context),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          padding: EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.8),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.2),
+                                blurRadius: 4,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.more_vert,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                      SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => _showFolderReminderDialog(context),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          padding: EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade600,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.35),
+                                blurRadius: 6,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.notifications_none,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => _shareFolder(context),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          padding: EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade600,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.35),
+                                blurRadius: 6,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.share,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -226,9 +299,9 @@ class MockFolderCard extends StatelessWidget {
   // 🆕 COMPLETAMENTE RISCRITTO: Anteprima cartella con immagini
   Widget _buildFolderPreview(FolderService folderService) {
     // 🆕 STEP 1: Ottieni ultimi 4 post con immagini
-    final postsWithImages = folderService.getLastPostsWithImagesForFolder(folder, maxPosts: 4);
-    
-    
+    final postsWithImages =
+        folderService.getLastPostsWithImagesForFolder(folder, maxPosts: 4);
+
     if (postsWithImages.isNotEmpty) {
       // 🆕 STEP 2: Mostra griglia immagini se disponibili
       return _PostImagesGrid(
@@ -245,7 +318,7 @@ class MockFolderCard extends StatelessWidget {
   Widget _buildOriginalPreview(FolderService folderService) {
     // Ottieni l'ultimo post ricorsivamente (incluse sottocartelle)
     final lastPost = folderService.getLastPostInFolderRecursive(folder);
-    
+
     if (lastPost == null) {
       // Nessun post: mostra pattern di default
       return Container(
@@ -263,13 +336,14 @@ class MockFolderCard extends StatelessWidget {
         child: Center(
           child: Icon(
             Icons.folder_outlined,
-            color: folder.color?.withOpacity(0.5) ?? Colors.blue.withOpacity(0.5),
+            color:
+                folder.color?.withOpacity(0.5) ?? Colors.blue.withOpacity(0.5),
             size: 48,
           ),
         ),
       );
     }
-    
+
     // Mostra anteprima basata sull'ultimo post
     return Container(
       decoration: BoxDecoration(
@@ -284,7 +358,7 @@ class MockFolderCard extends StatelessWidget {
               painter: _PostPreviewPainter(lastPost),
             ),
           ),
-          
+
           // Icona sociale in basso a destra
           Positioned(
             bottom: 8,
@@ -309,7 +383,7 @@ class MockFolderCard extends StatelessWidget {
 
   Color _getPreviewColorFromPost(MockPost post) {
     final domain = Uri.tryParse(post.url)?.host.toLowerCase() ?? '';
-    
+
     if (domain.contains('youtube.com') || domain.contains('youtu.be')) {
       return Color(0xFFFF0000);
     } else if (domain.contains('github.com')) {
@@ -330,7 +404,7 @@ class MockFolderCard extends StatelessWidget {
 
   IconData _getIconFromPost(MockPost post) {
     final domain = Uri.tryParse(post.url)?.host.toLowerCase() ?? '';
-    
+
     if (domain.contains('youtube.com') || domain.contains('youtu.be')) {
       return Icons.play_circle_filled;
     } else if (domain.contains('github.com')) {
@@ -348,7 +422,7 @@ class MockFolderCard extends StatelessWidget {
 
   Color _getColorFromDomain(String domain) {
     if (domain.isEmpty) return Colors.grey;
-    
+
     final colors = [
       Colors.blue.shade500,
       Colors.green.shade500,
@@ -357,14 +431,14 @@ class MockFolderCard extends StatelessWidget {
       Colors.red.shade500,
       Colors.teal.shade500,
     ];
-    
+
     final hash = domain.hashCode;
     return colors[hash.abs() % colors.length];
   }
 
   void _showFolderMenu(BuildContext context) {
     if (folder.isSpecial) return; // Non mostrare menu per cartelle speciali
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -416,39 +490,29 @@ class MockFolderCard extends StatelessWidget {
                 ],
               ),
             ),
-            
             _buildMenuOption(Icons.edit, 'Rinomina', Colors.blue, () {
               Navigator.pop(context);
               onRename(folder);
             }),
-            
-            _buildMenuOption(Icons.drive_file_move_outline, 'Sposta', Colors.orange, () {
+            _buildMenuOption(
+                Icons.drive_file_move_outline, 'Sposta', Colors.orange, () {
               Navigator.pop(context);
               onMove(folder);
             }),
-            
-            _buildMenuOption(Icons.notifications_none, 'Reminder', Colors.orange, () {
-              Navigator.pop(context);
-              _showFolderReminderDialog(context);
-            }),
-            
             _buildMenuOption(Icons.share, 'Condividi', Colors.blue, () {
               Navigator.pop(context);
               _shareFolder(context);
             }),
-            
             _buildMenuOption(Icons.delete_outline, 'Elimina', Colors.red, () {
               Navigator.pop(context);
               onDelete(folder);
             }),
-            
             SizedBox(height: 16),
           ],
         ),
       ),
     );
   }
-  
 
   void _showFolderReminderDialog(BuildContext context) {
     showDialog(
@@ -461,7 +525,8 @@ class MockFolderCard extends StatelessWidget {
     );
   }
 
-  Widget _buildMenuOption(IconData icon, String title, Color color, VoidCallback onTap) {
+  Widget _buildMenuOption(
+      IconData icon, String title, Color color, VoidCallback onTap) {
     return ListTile(
       leading: Container(
         width: 40,
@@ -485,20 +550,6 @@ class MockFolderCard extends StatelessWidget {
 
   void _shareFolder(BuildContext context) async {
     final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
-    
-    // Mostra un caricamento se necessario, ma qui recuperiamo i post per il sistema di condivisione
-    final allPosts = await DataService.instance.getPosts();
-    final folderPosts = allPosts.where((p) => p.folderId == folder.id).toList();
-    
-    String shareContent = 'Cartella: ${folder.name}\n\n';
-    if (folderPosts.isEmpty) {
-      shareContent += 'Questa cartella è vuota.';
-    } else {
-      for (var i = 0; i < folderPosts.length; i++) {
-        shareContent += '${i + 1}. ${folderPosts[i].title}\n${folderPosts[i].url}\n\n';
-      }
-    }
-    shareContent += 'Inviato tramite SaveIn';
 
     if (context.mounted) {
       DialogHelpers.showShareItemDialog(
@@ -508,10 +559,20 @@ class MockFolderCard extends StatelessWidget {
         folder.name,
         (email) async {
           final realFolders = await DataService.instance.getFolders();
-          final folderToShare = realFolders.firstWhere((f) => f.id == folder.id || f.name == folder.name);
+          final folderToShare = realFolders
+              .firstWhere((f) => f.id == folder.id || f.name == folder.name);
           await DataService.instance.shareFolder(folderToShare, email);
         },
-        systemShareContent: shareContent,
+        systemShareContentBuilder: () async {
+          final realFolders = await DataService.instance.getFolders();
+          final folderToShare = realFolders
+              .firstWhere((f) => f.id == folder.id || f.name == folder.name);
+          final link = await ShareLinkService.instance
+              .createFolderShareLink(folderToShare);
+          return 'Hai ricevuto una cartella SaveIn: ${folder.name}\n\n'
+              '$link\n\n'
+              'Aprila con SaveIn per importarla all’istante nella tua raccolta.';
+        },
       );
     }
   }
@@ -720,6 +781,7 @@ class _ImageTileState extends State<_ImageTile> {
       child: ClipRect(
         child: PostPreviewImage(
           postId: widget.post.id,
+          postUrl: widget.post.url,
           imageUrl: widget.post.imageUrl,
           remoteImageUrl: widget.post.previewStorageUrl,
           fit: widget.fit,
@@ -743,7 +805,7 @@ class _PostPreviewPainter extends CustomPainter {
 
     // Crea un pattern basato sul titolo del post
     final hash = post.title.hashCode;
-    
+
     // Pattern a rete
     for (int i = 0; i < 5; i++) {
       for (int j = 0; j < 5; j++) {

@@ -58,6 +58,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "776660339631-bppg6krpb2n0jr9o45skr4b7fqha977i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "eu.savein.app",
+            "certificate_hash": "5964f8839bfd43666a5dec00c792ae8bdb1d3d8b"
+          }
+        },
+        {
           "client_id": "776660339631-1a3563ekhlqbkpqqv17m1f1cvg2ekr2s.apps.googleusercontent.com",
           "client_type": 3
         }

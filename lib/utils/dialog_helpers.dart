@@ -6,7 +6,6 @@ import 'folder_management.dart';
 
 // Helper class per i dialoghi dell'app
 class DialogHelpers {
-  
   // Dialog per creare una nuova cartella
   static void showCreateFolderDialog(
     BuildContext context,
@@ -15,11 +14,12 @@ class DialogHelpers {
   ) {
     final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
-    final fieldColor = isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
+    final fieldColor =
+        isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
-    
+
     final TextEditingController controller = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -64,7 +64,9 @@ class DialogHelpers {
                 Navigator.pop(context);
               }
             },
-            child: Text('Crea', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+            child: Text('Crea',
+                style:
+                    TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -80,11 +82,13 @@ class DialogHelpers {
   ) {
     final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
-    final fieldColor = isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
+    final fieldColor =
+        isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
-    
-    final TextEditingController controller = TextEditingController(text: folder.name);
-    
+
+    final TextEditingController controller =
+        TextEditingController(text: folder.name);
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -129,7 +133,9 @@ class DialogHelpers {
                 Navigator.pop(context);
               }
             },
-            child: Text('Salva', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+            child: Text('Salva',
+                style:
+                    TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -147,7 +153,7 @@ class DialogHelpers {
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -175,7 +181,9 @@ class DialogHelpers {
               onDeleteFolder();
               Navigator.pop(context);
             },
-            child: Text('Elimina', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: Text('Elimina',
+                style:
+                    TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -191,7 +199,6 @@ class DialogHelpers {
     Function(MockFolder?) onMoveFolder,
   ) {
     if (folderToMove.isSpecial) {
-      
       return;
     }
 
@@ -199,7 +206,7 @@ class DialogHelpers {
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
-    
+
     showDialog(
       context: context,
       builder: (context) => _MoveDialogWidget(
@@ -228,7 +235,7 @@ class DialogHelpers {
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
-    
+
     showDialog(
       context: context,
       builder: (context) => _MovePostDialogWidget(
@@ -260,7 +267,7 @@ class DialogHelpers {
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -280,13 +287,10 @@ class DialogHelpers {
               onConfirm();
               Navigator.pop(context);
             },
-            child: Text(
-              confirmText, 
-              style: TextStyle(
-                color: confirmColor ?? Colors.blue, 
-                fontWeight: FontWeight.bold
-              )
-            ),
+            child: Text(confirmText,
+                style: TextStyle(
+                    color: confirmColor ?? Colors.blue,
+                    fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -301,10 +305,12 @@ class DialogHelpers {
     String title,
     Future<void> Function(String) onShare, {
     String? systemShareContent,
+    Future<String> Function()? systemShareContentBuilder,
   }) {
     final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
-    final fieldColor = isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
+    final fieldColor =
+        isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
 
     final TextEditingController controller = TextEditingController();
@@ -326,7 +332,8 @@ class DialogHelpers {
               Expanded(
                 child: Text(
                   'Condividi ${type == 'post' ? 'Post' : 'Cartella'}',
-                  style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+                  style:
+                      TextStyle(color: textColor, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -337,19 +344,47 @@ class DialogHelpers {
             children: [
               Text(
                 'Condividi "$title" con un altro utente dell\'app tramite email o messaggio.',
-                style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 14),
+                style:
+                    TextStyle(color: textColor.withOpacity(0.7), fontSize: 14),
               ),
               SizedBox(height: 16),
-              if (systemShareContent != null) ...[
+              if (systemShareContent != null ||
+                  systemShareContentBuilder != null) ...[
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
-                    onPressed: () {
-                      Share.share(systemShareContent);
-                      Navigator.pop(context);
-                    },
-                    icon: Icon(Icons.message_outlined),
-                    label: Text('Invia tramite messaggio'),
+                    onPressed: isLoading
+                        ? null
+                        : () async {
+                            setDialogState(() {
+                              isLoading = true;
+                              error = null;
+                            });
+                            try {
+                              final content = systemShareContentBuilder != null
+                                  ? await systemShareContentBuilder()
+                                  : systemShareContent!;
+                              await Share.share(content);
+                              if (context.mounted) Navigator.pop(context);
+                            } catch (e) {
+                              if (context.mounted) {
+                                setDialogState(() {
+                                  isLoading = false;
+                                  error = 'Errore creazione link';
+                                });
+                              }
+                            }
+                          },
+                    icon: isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(Icons.message_outlined),
+                    label: Text(isLoading
+                        ? 'Creo il link...'
+                        : 'Invia tramite messaggio'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.blue,
                       side: BorderSide(color: Colors.blue),
@@ -390,7 +425,8 @@ class DialogHelpers {
                     borderSide: BorderSide.none,
                   ),
                 ),
-                autofocus: systemShareContent == null,
+                autofocus: systemShareContent == null &&
+                    systemShareContentBuilder == null,
               ),
               if (isLoading)
                 Padding(
@@ -489,7 +525,7 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
   @override
   Widget build(BuildContext context) {
     final canMove = _selectedDestination != null || _isHomeSelected;
-    
+
     return AlertDialog(
       backgroundColor: widget.backgroundColor,
       shape: RoundedRectangleBorder(
@@ -510,17 +546,20 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
               style: TextStyle(color: widget.subtitleColor, fontSize: 14),
             ),
             SizedBox(height: 16),
-            
+
             // Pulsante per Home/Cartella principale
             _buildHomeButton(),
-            
+
             SizedBox(height: 12),
             Text(
               'Cartelle:',
-              style: TextStyle(color: widget.textColor, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: widget.textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 8),
-            
+
             // Lista delle cartelle principali
             Expanded(
               child: SingleChildScrollView(
@@ -529,29 +568,34 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
                 ),
               ),
             ),
-            
+
             SizedBox(height: 16),
-            
+
             // Pulsante di conferma CORRETTO
             Container(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: canMove ? () {
-                  print('DEBUG: Confermando spostamento. Home selezionato: $_isHomeSelected, Destinazione: ${_selectedDestination?.name}');
-                  
-                  Navigator.pop(context);
-                  
-                  // CORREZIONE: Passa esplicitamente null se Home è selezionato
-                  if (_isHomeSelected) {
-                    print('DEBUG: Passando null per Home');
-                    widget.onMoveFolder(null);
-                  } else if (_selectedDestination != null) {
-                    print('DEBUG: Passando destinazione: ${_selectedDestination!.name}');
-                    widget.onMoveFolder(_selectedDestination);
-                  } else {
-                    print('ERRORE: Nessuna destinazione valida selezionata');
-                  }
-                } : null,
+                onPressed: canMove
+                    ? () {
+                        print(
+                            'DEBUG: Confermando spostamento. Home selezionato: $_isHomeSelected, Destinazione: ${_selectedDestination?.name}');
+
+                        Navigator.pop(context);
+
+                        // CORREZIONE: Passa esplicitamente null se Home è selezionato
+                        if (_isHomeSelected) {
+                          print('DEBUG: Passando null per Home');
+                          widget.onMoveFolder(null);
+                        } else if (_selectedDestination != null) {
+                          print(
+                              'DEBUG: Passando destinazione: ${_selectedDestination!.name}');
+                          widget.onMoveFolder(_selectedDestination);
+                        } else {
+                          print(
+                              'ERRORE: Nessuna destinazione valida selezionata');
+                        }
+                      }
+                    : null,
                 icon: Icon(
                   Icons.check,
                   color: canMove ? Colors.white : widget.hintColor,
@@ -570,7 +614,9 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
                   ),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: canMove ? Colors.green : widget.hintColor.withOpacity(0.3),
+                  backgroundColor: canMove
+                      ? Colors.green
+                      : widget.hintColor.withOpacity(0.3),
                   padding: EdgeInsets.symmetric(vertical: 16, horizontal: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -591,61 +637,67 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
   }
 
   Widget _buildHomeButton() {
-    final canMoveToHome = widget.folderToMove.level > 0; // Può essere spostato alla home solo se non è già lì
+    final canMoveToHome = widget.folderToMove.level >
+        0; // Può essere spostato alla home solo se non è già lì
     final isSelected = _isHomeSelected;
-    
-    print('DEBUG: Building Home button. Can move to home: $canMoveToHome, Is selected: $isSelected');
-    
+
+    print(
+        'DEBUG: Building Home button. Can move to home: $canMoveToHome, Is selected: $isSelected');
+
     return Container(
       width: double.infinity,
       margin: EdgeInsets.only(bottom: 8),
       child: ElevatedButton.icon(
-        onPressed: canMoveToHome ? () {
-          print('DEBUG: Home button pressed. Current state - Home selected: $_isHomeSelected');
-          
-          setState(() {
-            _isHomeSelected = !_isHomeSelected;
-            if (_isHomeSelected) {
-              _selectedDestination = null; // Deseleziona altre cartelle
-              print('DEBUG: Home selezionato, altre cartelle deselezionate');
-            } else {
-              print('DEBUG: Home deselezionato');
-            }
-          });
-        } : null,
+        onPressed: canMoveToHome
+            ? () {
+                print(
+                    'DEBUG: Home button pressed. Current state - Home selected: $_isHomeSelected');
+
+                setState(() {
+                  _isHomeSelected = !_isHomeSelected;
+                  if (_isHomeSelected) {
+                    _selectedDestination = null; // Deseleziona altre cartelle
+                    print(
+                        'DEBUG: Home selezionato, altre cartelle deselezionate');
+                  } else {
+                    print('DEBUG: Home deselezionato');
+                  }
+                });
+              }
+            : null,
         icon: Icon(
-          Icons.home, 
-          color: isSelected 
-              ? Colors.white 
-              : canMoveToHome 
-                  ? Colors.black87 
+          Icons.home,
+          color: isSelected
+              ? Colors.white
+              : canMoveToHome
+                  ? Colors.black87
                   : widget.hintColor,
           size: 20,
         ),
         label: Text(
           'Home',
           style: TextStyle(
-            color: isSelected 
-                ? Colors.white 
-                : canMoveToHome 
-                    ? Colors.black87 
+            color: isSelected
+                ? Colors.white
+                : canMoveToHome
+                    ? Colors.black87
                     : widget.hintColor,
             fontWeight: FontWeight.bold,
             fontSize: 16,
           ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected 
-              ? Colors.blue 
-              : canMoveToHome 
-                  ? Colors.grey.shade300 
+          backgroundColor: isSelected
+              ? Colors.blue
+              : canMoveToHome
+                  ? Colors.grey.shade300
                   : widget.hintColor.withOpacity(0.3),
           padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           alignment: Alignment.centerLeft,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
-            side: isSelected 
-                ? BorderSide(color: Colors.blue, width: 2) 
+            side: isSelected
+                ? BorderSide(color: Colors.blue, width: 2)
                 : BorderSide.none,
           ),
         ),
@@ -655,30 +707,32 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
 
   List<Widget> _buildFolderButtons() {
     List<Widget> buttons = [];
-    
+
     // 🔥 FIX: Ordina le cartelle alfabeticamente (case-insensitive) prima di costruire i pulsanti
     final sortedFolders = List<MockFolder>.from(widget.allFolders)
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    
+
     for (var folder in sortedFolders) {
       // Salta la cartella speciale "Tutti" e la cartella stessa
       if (folder.isSpecial || folder == widget.folderToMove) continue;
-      
+
       // Non mostrare cartelle che sono discendenti della cartella da spostare
-      if (FolderManagement.isDescendantOf(folder, widget.folderToMove)) continue;
-      
+      if (FolderManagement.isDescendantOf(folder, widget.folderToMove))
+        continue;
+
       buttons.add(_buildFolderButton(folder, 0));
     }
-    
+
     return buttons;
   }
 
   Widget _buildFolderButton(MockFolder folder, int indentLevel) {
     final canMove = FolderManagement.canMoveFolder(widget.folderToMove, folder);
-    final isExpanded = _expandedFolders.contains(folder.name + folder.level.toString());
+    final isExpanded =
+        _expandedFolders.contains(folder.name + folder.level.toString());
     final hasChildren = folder.children.isNotEmpty;
     final isSelected = _selectedDestination == folder;
-    
+
     return Container(
       margin: EdgeInsets.only(left: indentLevel * 20.0, bottom: 4),
       child: Column(
@@ -687,37 +741,41 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
           Container(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: canMove ? () {
-                setState(() {
-                  if (_selectedDestination == folder) {
-                    _selectedDestination = null; // Deseleziona se già selezionata
-                  } else {
-                    _selectedDestination = folder; // Seleziona questa cartella
-                    _isHomeSelected = false; // Deseleziona Home
-                  }
-                  
-                  // 🔥 FIX: Espandi/contrai cliccando ovunque sulla riga
-                  if (hasChildren) {
-                    final key = folder.name + folder.level.toString();
-                    if (isExpanded) {
-                      _expandedFolders.remove(key);
-                    } else {
-                      _expandedFolders.add(key);
+              onPressed: canMove
+                  ? () {
+                      setState(() {
+                        if (_selectedDestination == folder) {
+                          _selectedDestination =
+                              null; // Deseleziona se già selezionata
+                        } else {
+                          _selectedDestination =
+                              folder; // Seleziona questa cartella
+                          _isHomeSelected = false; // Deseleziona Home
+                        }
+
+                        // 🔥 FIX: Espandi/contrai cliccando ovunque sulla riga
+                        if (hasChildren) {
+                          final key = folder.name + folder.level.toString();
+                          if (isExpanded) {
+                            _expandedFolders.remove(key);
+                          } else {
+                            _expandedFolders.add(key);
+                          }
+                        }
+                      });
                     }
-                  }
-                });
-              } : null,
+                  : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: isSelected 
-                    ? Colors.blue 
-                    : canMove 
-                        ? folder.color 
+                backgroundColor: isSelected
+                    ? Colors.blue
+                    : canMove
+                        ? folder.color
                         : widget.hintColor.withOpacity(0.3),
                 padding: EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
-                  side: isSelected 
-                      ? BorderSide(color: Colors.blue, width: 2) 
+                  side: isSelected
+                      ? BorderSide(color: Colors.blue, width: 2)
                       : BorderSide.none,
                 ),
               ),
@@ -739,7 +797,9 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
                       child: Container(
                         padding: EdgeInsets.all(4),
                         child: Icon(
-                          isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                          isExpanded
+                              ? Icons.keyboard_arrow_down
+                              : Icons.keyboard_arrow_right,
                           color: isSelected ? Colors.white : Colors.black87,
                           size: 18,
                         ),
@@ -747,9 +807,9 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
                     )
                   else
                     SizedBox(width: 26),
-                  
+
                   SizedBox(width: 8),
-                  
+
                   // Icona cartella
                   Icon(
                     hasChildren ? Icons.folder : Icons.folder_outlined,
@@ -757,7 +817,7 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
                     size: 18,
                   ),
                   SizedBox(width: 8),
-                  
+
                   // Nome cartella (SOLO IL NOME)
                   Expanded(
                     child: Text(
@@ -769,7 +829,7 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
                       ),
                     ),
                   ),
-                  
+
                   // Icona di selezione
                   if (isSelected)
                     Icon(
@@ -781,13 +841,17 @@ class _MoveDialogWidgetState extends State<_MoveDialogWidget> {
               ),
             ),
           ),
-          
+
           // Sottocartelle (se espanse)
           if (hasChildren && isExpanded)
             // 🔥 FIX: Ordina le sottocartelle alfabeticamente
             ...(List<MockFolder>.from(folder.children)
-                ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())))
-                .where((child) => !FolderManagement.isDescendantOf(child, widget.folderToMove) && child != widget.folderToMove)
+                  ..sort((a, b) =>
+                      a.name.toLowerCase().compareTo(b.name.toLowerCase())))
+                .where((child) =>
+                    !FolderManagement.isDescendantOf(
+                        child, widget.folderToMove) &&
+                    child != widget.folderToMove)
                 .map((child) => _buildFolderButton(child, indentLevel + 1))
                 .toList(),
         ],
@@ -832,7 +896,7 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
   @override
   Widget build(BuildContext context) {
     final canMove = _selectedDestination != null || _isTuttiSelected;
-    
+
     return AlertDialog(
       backgroundColor: widget.backgroundColor,
       shape: RoundedRectangleBorder(
@@ -847,10 +911,11 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  widget.isMultipleSelection 
-                    ? 'Sposta ${widget.selectedCount} Post'
-                    : 'Sposta Post',
-                  style: TextStyle(color: widget.textColor, fontWeight: FontWeight.bold),
+                  widget.isMultipleSelection
+                      ? 'Sposta ${widget.selectedCount} Post'
+                      : 'Sposta Post',
+                  style: TextStyle(
+                      color: widget.textColor, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -865,16 +930,17 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
             child: Row(
               children: [
                 Icon(
-                  widget.isMultipleSelection ? Icons.library_books : Icons.article, 
-                  color: Colors.blue, 
-                  size: 16
-                ),
+                    widget.isMultipleSelection
+                        ? Icons.library_books
+                        : Icons.article,
+                    color: Colors.blue,
+                    size: 16),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    widget.isMultipleSelection 
-                      ? '${widget.selectedCount} post selezionati'
-                      : widget.postToMove.title,
+                    widget.isMultipleSelection
+                        ? '${widget.selectedCount} post selezionati'
+                        : widget.postToMove.title,
                     style: TextStyle(
                       color: Colors.blue,
                       fontSize: 12,
@@ -900,17 +966,20 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
               style: TextStyle(color: widget.subtitleColor, fontSize: 14),
             ),
             SizedBox(height: 16),
-            
+
             // Pulsante per "Tutti" (senza cartella specifica)
             _buildTuttiButton(),
-            
+
             SizedBox(height: 12),
             Text(
               'Cartelle:',
-              style: TextStyle(color: widget.textColor, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: widget.textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 8),
-            
+
             // Lista delle cartelle principali
             Expanded(
               child: SingleChildScrollView(
@@ -919,29 +988,35 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                 ),
               ),
             ),
-            
+
             SizedBox(height: 16),
-            
+
             // Pulsante di conferma
             Container(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: canMove ? () {
-                  print('DEBUG: Confermando spostamento post. Tutti selezionato: $_isTuttiSelected, Destinazione: ${_selectedDestination?.name}');
-                  
-                  Navigator.pop(context);
-                  
-                  // Passa null se "Tutti" è selezionato, altrimenti la cartella selezionata
-                  if (_isTuttiSelected) {
-                    print('DEBUG: Spostando post in "Tutti" (nessuna cartella)');
-                    widget.onMovePost(null);
-                  } else if (_selectedDestination != null) {
-                    print('DEBUG: Spostando post in cartella: ${_selectedDestination!.name}');
-                    widget.onMovePost(_selectedDestination);
-                  } else {
-                    print('ERRORE: Nessuna destinazione valida selezionata');
-                  }
-                } : null,
+                onPressed: canMove
+                    ? () {
+                        print(
+                            'DEBUG: Confermando spostamento post. Tutti selezionato: $_isTuttiSelected, Destinazione: ${_selectedDestination?.name}');
+
+                        Navigator.pop(context);
+
+                        // Passa null se "Tutti" è selezionato, altrimenti la cartella selezionata
+                        if (_isTuttiSelected) {
+                          print(
+                              'DEBUG: Spostando post in "Tutti" (nessuna cartella)');
+                          widget.onMovePost(null);
+                        } else if (_selectedDestination != null) {
+                          print(
+                              'DEBUG: Spostando post in cartella: ${_selectedDestination!.name}');
+                          widget.onMovePost(_selectedDestination);
+                        } else {
+                          print(
+                              'ERRORE: Nessuna destinazione valida selezionata');
+                        }
+                      }
+                    : null,
                 icon: Icon(
                   Icons.check,
                   color: canMove ? Colors.white : widget.hintColor,
@@ -949,11 +1024,11 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                 ),
                 label: Text(
                   _isTuttiSelected
-                      ? (widget.isMultipleSelection 
+                      ? (widget.isMultipleSelection
                           ? 'Sposta ${widget.selectedCount} post in "Tutti"'
                           : 'Sposta in "Tutti"')
                       : _selectedDestination != null
-                          ? (widget.isMultipleSelection 
+                          ? (widget.isMultipleSelection
                               ? 'Sposta ${widget.selectedCount} post in "${_selectedDestination!.name}"'
                               : 'Sposta in "${_selectedDestination!.name}"')
                           : 'Seleziona una destinazione',
@@ -964,7 +1039,9 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                   ),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: canMove ? Colors.green : widget.hintColor.withOpacity(0.3),
+                  backgroundColor: canMove
+                      ? Colors.green
+                      : widget.hintColor.withOpacity(0.3),
                   padding: EdgeInsets.symmetric(vertical: 16, horizontal: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -986,14 +1063,15 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
 
   Widget _buildTuttiButton() {
     final isSelected = _isTuttiSelected;
-    
+
     return Container(
       width: double.infinity,
       margin: EdgeInsets.only(bottom: 8),
       child: ElevatedButton.icon(
         onPressed: () {
-          print('DEBUG: Pulsante "Tutti" premuto. Stato corrente: $_isTuttiSelected');
-          
+          print(
+              'DEBUG: Pulsante "Tutti" premuto. Stato corrente: $_isTuttiSelected');
+
           setState(() {
             _isTuttiSelected = !_isTuttiSelected;
             if (_isTuttiSelected) {
@@ -1005,32 +1083,26 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
           });
         },
         icon: Icon(
-          Icons.all_inbox, 
-          color: isSelected 
-              ? Colors.white 
-              : Colors.black87,
+          Icons.all_inbox,
+          color: isSelected ? Colors.white : Colors.black87,
           size: 20,
         ),
         label: Text(
           'Tutti (nessuna cartella)',
           style: TextStyle(
-            color: isSelected 
-                ? Colors.white 
-                : Colors.black87,
+            color: isSelected ? Colors.white : Colors.black87,
             fontWeight: FontWeight.bold,
             fontSize: 16,
           ),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected 
-              ? Colors.purple 
-              : Colors.purple.shade100,
+          backgroundColor: isSelected ? Colors.purple : Colors.purple.shade100,
           padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           alignment: Alignment.centerLeft,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
-            side: isSelected 
-                ? BorderSide(color: Colors.purple, width: 2) 
+            side: isSelected
+                ? BorderSide(color: Colors.purple, width: 2)
                 : BorderSide.none,
           ),
         ),
@@ -1040,26 +1112,27 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
 
   List<Widget> _buildFolderButtons() {
     List<Widget> buttons = [];
-    
+
     // 🔥 FIX: Ordina le cartelle alfabeticamente (case-insensitive) prima di costruire i pulsanti
     final sortedFolders = List<MockFolder>.from(widget.allFolders)
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    
+
     for (var folder in sortedFolders) {
-      // Salta la cartella speciale "Tutti" 
+      // Salta la cartella speciale "Tutti"
       if (folder.isSpecial) continue;
-      
+
       buttons.add(_buildFolderButton(folder, 0));
     }
-    
+
     return buttons;
   }
 
   Widget _buildFolderButton(MockFolder folder, int indentLevel) {
-    final isExpanded = _expandedFolders.contains(folder.name + folder.level.toString());
+    final isExpanded =
+        _expandedFolders.contains(folder.name + folder.level.toString());
     final hasChildren = folder.children.isNotEmpty;
     final isSelected = _selectedDestination == folder;
-    
+
     return Container(
       margin: EdgeInsets.only(left: indentLevel * 20.0, bottom: 4),
       child: Column(
@@ -1080,7 +1153,7 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                       _expandedFolders.add(key);
                     }
                   }
-                  
+
                   // Seleziona/deseleziona sempre
                   if (_selectedDestination == folder) {
                     _selectedDestination = null;
@@ -1095,7 +1168,9 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                 padding: EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
-                  side: isSelected ? BorderSide(color: Colors.blue, width: 2) : BorderSide.none,
+                  side: isSelected
+                      ? BorderSide(color: Colors.blue, width: 2)
+                      : BorderSide.none,
                 ),
               ),
               child: Row(
@@ -1103,13 +1178,15 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                   // Icona chevron integrata (se ha figli)
                   if (hasChildren)
                     Icon(
-                      isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                      isExpanded
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_right,
                       color: isSelected ? Colors.white : Colors.black87,
                       size: 20,
                     ),
-                  
+
                   SizedBox(width: hasChildren ? 8 : 0),
-                  
+
                   // Icona cartella
                   Icon(
                     hasChildren ? Icons.folder : Icons.folder_outlined,
@@ -1117,7 +1194,7 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                     size: 18,
                   ),
                   SizedBox(width: 8),
-                  
+
                   // Nome cartella
                   Expanded(
                     child: Text(
@@ -1129,7 +1206,7 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
                       ),
                     ),
                   ),
-                  
+
                   // Icona di selezione
                   if (isSelected)
                     Icon(Icons.check_circle, color: Colors.white, size: 20),
@@ -1137,13 +1214,14 @@ class _MovePostDialogWidgetState extends State<_MovePostDialogWidget> {
               ),
             ),
           ),
-          
+
           // Sottocartelle espanse
           if (hasChildren && isExpanded) ...[
             SizedBox(height: 4),
             // 🔥 FIX: Ordina le sottocartelle alfabeticamente
             ...(List<MockFolder>.from(folder.children)
-                ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase())))
+                  ..sort((a, b) =>
+                      a.name.toLowerCase().compareTo(b.name.toLowerCase())))
                 .map((child) => _buildFolderButton(child, indentLevel + 1))
                 .toList(),
           ],

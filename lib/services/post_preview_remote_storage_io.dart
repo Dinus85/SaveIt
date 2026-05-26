@@ -2,8 +2,10 @@
 // Implementazione dart:io: upload su Firebase Storage.
 
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
@@ -19,6 +21,7 @@ class PostPreviewRemoteStorage {
     required String userId,
     required String postId,
     required String localPath,
+    String? sourceUrl,
   }) async {
     if (userId.isEmpty || postId.isEmpty) return null;
     final path = localPath.trim();
@@ -44,6 +47,7 @@ class PostPreviewRemoteStorage {
         return await _uploadBytes(
           userId: userId,
           postId: postId,
+          sourceUrl: sourceUrl,
           bytes: original,
           ext: detected.extension,
           contentType: detected.contentType,
@@ -55,6 +59,7 @@ class PostPreviewRemoteStorage {
       return await _uploadBytes(
         userId: userId,
         postId: postId,
+        sourceUrl: sourceUrl,
         bytes: bytes,
         ext: '.jpg',
         contentType: 'image/jpeg',
@@ -68,6 +73,7 @@ class PostPreviewRemoteStorage {
   Future<String?> _uploadBytes({
     required String userId,
     required String postId,
+    required String? sourceUrl,
     required List<int> bytes,
     required String ext,
     required String contentType,
@@ -76,19 +82,42 @@ class PostPreviewRemoteStorage {
     if (bytes.length > _hardMaxBytes) return null;
 
     final storage = FirebaseStorage.instance;
-    final objectPath = 'users/$userId/post_previews/$postId$ext';
+    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
+    final objectPath = normalizedSourceUrl.isNotEmpty
+        ? 'post_previews/by_url/${_sha256Hex(normalizedSourceUrl)}'
+        : 'users/$userId/post_previews/$postId$ext';
 
     final ref = storage.ref(objectPath);
+    try {
+      return await ref.getDownloadURL();
+    } catch (_) {
+      // Il file globale non esiste ancora: lo carichiamo noi.
+    }
+
     final metadata = SettableMetadata(
       contentType: contentType,
       cacheControl: 'public,max-age=31536000',
       customMetadata: {
         'postId': postId,
+        if (normalizedSourceUrl.isNotEmpty) 'sourceUrlHash': _sha256Hex(normalizedSourceUrl),
       },
     );
 
     await ref.putData(Uint8List.fromList(bytes), metadata);
     return await ref.getDownloadURL();
+  }
+
+  String _normalizeSourceUrl(String? value) {
+    final raw = (value ?? '').trim();
+    if (raw.isEmpty) return '';
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.host.isEmpty) return raw;
+    final normalized = uri.replace(fragment: '');
+    return normalized.toString().trim().toLowerCase();
+  }
+
+  String _sha256Hex(String value) {
+    return sha256.convert(utf8.encode(value)).toString();
   }
 
   List<int> _compressForThumbnail(List<int> input) {

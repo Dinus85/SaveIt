@@ -34,6 +34,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+
+            <!-- Link pubblici SaveIn per post/cartelle condivisi -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="savein.eu"
+                    android:pathPrefix="/s" />
+            </intent-filter>
             
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"

@@ -1036,6 +1036,13 @@ mixin FolderServiceCRUD on FolderServiceBase {
   // ============================================================================
   
   Future<void> movePost(MockPost post, MockFolder? newFolder) async {
+    if (newFolder != null && !newFolder.isSpecial) {
+      final destinationError = _accessService.validateFolderDestination(newFolder);
+      if (destinationError != null) {
+        throw Exception(destinationError);
+      }
+    }
+
     try {
       await executeAuthenticatedOperation(() async {
         final postIndex = allPosts.indexWhere((p) => p.id == post.id);

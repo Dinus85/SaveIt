@@ -8,6 +8,7 @@ class PostPreviewRemoteStorage {
     required String userId,
     required String postId,
     required String localPath,
+    String? sourceUrl,
   }) async {
     return null;
   }

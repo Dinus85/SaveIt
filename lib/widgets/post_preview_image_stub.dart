@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 class PostPreviewImage extends StatelessWidget {
   final String postId;
+  final String? postUrl;
   final String? imageUrl;
   final String? remoteImageUrl;
   final BoxFit fit;
@@ -13,6 +14,7 @@ class PostPreviewImage extends StatelessWidget {
   const PostPreviewImage({
     super.key,
     required this.postId,
+    this.postUrl,
     required this.imageUrl,
     this.remoteImageUrl,
     required this.fit,

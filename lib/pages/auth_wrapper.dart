@@ -76,7 +76,10 @@ class AuthWrapper extends StatelessWidget {
 
       return path.endsWith('/admin') ||
           path.contains('/admin/') ||
+          path.endsWith('/dashboard') ||
+          path.contains('/dashboard/') ||
           fragment.contains('admin') ||
+          fragment.contains('dashboard') ||
           adminQuery == '1' ||
           adminQuery == 'true';
     } catch (_) {

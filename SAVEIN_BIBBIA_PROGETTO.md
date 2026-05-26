@@ -143,6 +143,23 @@ Limiti Free attuali:
 
 Il passaggio Free/Premium e' disponibile nella pagina account. L'utente non deve potersi assegnare Admin.
 
+### Comportamento al downgrade Premium → Free
+
+Quando un utente Premium torna al piano Free mantiene la piena visibilita' di tutte le cartelle create in precedenza (incluse quelle piu' profonde o in numero superiore ai limiti Free). Non viene eliminato nulla.
+
+Tuttavia non puo' piu' eseguire operazioni che superino i limiti Free:
+
+- **Creare** nuove cartelle root oltre il limite di 10 o sottocartelle oltre il livello 1 → bloccato da `AppAccessService` in `folder_service_crud.dart`
+- **Salvare/importare** un nuovo post in una cartella di livello > 1 → bloccato da `validateFolderDestination` in `sharing_service.dart`
+- **Spostare** un post esistente in una cartella di livello > 1 → bloccato da `validateFolderDestination` all'inizio di `movePost` in `folder_service_crud.dart`
+
+Nel `FolderCardSelector` (il picker cartella usato durante l'import) le cartelle oltre il limite Free vengono mostrate grigie (opacita' 45%) con badge **"Premium"** e non sono navigabili ne' selezionabili: il tap mostra uno SnackBar che invita l'upgrade. In questo modo l'utente capisce subito perche' quella destinazione non e' disponibile, senza ricevere un errore dopo aver scelto.
+
+Costanti di riferimento in `lib/services/access_control_service.dart`:
+- `freeRootFolderLimit = 10`
+- `freeMaxFolderLevel = 1`
+- `freeChildFoldersPerParentLimit = 4`
+
 ## Ruoli dashboard
 
 I ruoli dashboard sono separati dai ruoli app. Gli accessi operativi alla dashboard sono gestiti nella collezione `dashboard_accesses`, quindi possono esistere persone abilitate al backend che non sono utenti Free/Premium dell'app.
@@ -227,6 +244,117 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 Build mobile:
 - Versione preparata per prossima release: `pubspec.yaml` `1.0.0+8`.
 - Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
+
+## Condivisione link pubblici (share links)
+
+### Panoramica
+
+SaveIn! supporta la condivisione di post singoli e cartelle (con tutto il contenuto) tramite link pubblici nel formato `https://savein.eu/s/<token>`. Il link funziona su qualsiasi piattaforma di messaggistica.
+
+- **Se l'app è installata**: Android App Links intercetta il link e apre direttamente `SharedLinkPage` nell'app.
+- **Se l'app non è installata**: Firebase Hosting fa rewrite su `openShareLink` (Cloud Function HTTP) che mostra una landing page invitante con pulsante Play Store e messaggio contestuale.
+- **Dopo l'installazione**: l'utente può riaprire lo stesso link dalla chat per importare il contenuto.
+
+### Cloud Functions (SaveIn — `functions/index.js`)
+
+| Funzione | Tipo | Scopo |
+|---|---|---|
+| `createShareLink` | `onCall` | Crea un documento in `shared_links` con token univoco e snapshot del payload; restituisce `{ token, url, type, title }` |
+| `getShareLink` | `onCall` | Legge il documento per token, verifica scadenza/status, incrementa `openCount`, restituisce payload |
+| `trackShareLinkImport` | `onCall` | Incrementa `importCount` dopo che l'utente importa il contenuto |
+| `openShareLink` | `onRequest` | Serve la landing page HTML con messaggio contestuale, link Play Store e redirect automatico allo store dopo 1,4 s |
+| `assetLinks` | `onRequest` | Serve `/.well-known/assetlinks.json` per la verifica Android App Links |
+
+### Collezione Firestore: `shared_links`
+
+Documento indicizzato da `token` (ID documento):
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `token` | string | Uguale all'ID documento; 18 byte base64url |
+| `type` | string | `"post"` o `"folder"` |
+| `title` | string | Titolo visibile nella landing page |
+| `payload` | map | Snapshot del post o della struttura cartella |
+| `ownerId` | string | UID Firebase dell'autore |
+| `ownerEmail` | string | |
+| `ownerName` | string | |
+| `status` | string | `"active"` (unico valore attuale) |
+| `expiresAt` | timestamp | +90 giorni dalla creazione |
+| `viewCount` | number | Incrementato da `openShareLink` |
+| `openCount` | number | Incrementato da `getShareLink` |
+| `importCount` | number | Incrementato da `trackShareLinkImport` |
+| `createdAt` / `updatedAt` | timestamp | |
+
+Payload post: `{ id, url, title, description, imageUrl, previewStorageUrl, creatorName, creatorUsername, tags, folderId }`.
+
+Payload cartella: `{ rootId, name, color, folders: [...], posts: [...] }`. La struttura include tutte le sottocartelle dell'albero e i post al loro interno.
+
+### Variabili d'ambiente Cloud Functions (SaveIn)
+
+| Variabile | Default | Descrizione |
+|---|---|---|
+| `SHARE_LINK_BASE_URL` | `https://savein.eu` | Dominio base link pubblici |
+| `PLAY_STORE_URL` | `https://play.google.com/store/apps/details?id=eu.savein.app` | Link Play Store |
+| `APP_STORE_URL` | `""` | Link App Store (opzionale, se vuoto il pulsante iOS non compare) |
+
+### Firebase Hosting rewrites (SaveIn — `firebase.json`)
+
+```json
+{ "source": "/.well-known/assetlinks.json", "function": { "functionId": "assetLinks" } },
+{ "source": "/s/**", "function": { "functionId": "openShareLink" } }
+```
+
+### Android App Links (`AndroidManifest.xml`)
+
+```xml
+<intent-filter android:autoVerify="true">
+  <action android:name="android.intent.action.VIEW"/>
+  <category android:name="android.intent.category.DEFAULT"/>
+  <category android:name="android.intent.category.BROWSABLE"/>
+  <data android:scheme="https" android:host="savein.eu" android:pathPrefix="/s"/>
+</intent-filter>
+```
+
+### File Flutter principali
+
+| File | Ruolo |
+|---|---|
+| `lib/services/share_link_service.dart` | `ShareLinkService.instance` — crea link, legge token, importa post/cartelle, tiene conto della gerarchia sottocartelle |
+| `lib/pages/shared_link_page.dart` | Schermata di apertura link: mostra anteprima del contenuto, pulsanti "Apri contenuto originale" (post) e "Salva / Importa" |
+| `lib/main.dart` — `_initAppLinks` | Ascolta deep link con `app_links`; estrae token da `savein.eu/s/<token>` e apre `SharedLinkPage` |
+| `lib/utils/dialog_helpers.dart` — `showShareItemDialog` | Parametro `systemShareContentBuilder` (async) che mostra "Creo il link…" durante la creazione e poi apre il foglio di condivisione di sistema |
+| `lib/pages/folder_detail_page.dart` — `_sharePost` | Genera link SaveIn per il post e costruisce il messaggio di condivisione |
+| `lib/widgets/folder_card.dart` — `_shareFolder` | Genera link SaveIn per la cartella (con tutto il contenuto) e costruisce il messaggio |
+
+### Messaggi condivisi
+
+- **Post**: `"C'è un contenuto SaveIn che ti aspetta: <titolo>\n\n<link>\n\nAprilo con SaveIn per salvarlo e ritrovarlo quando vuoi."`
+- **Cartella**: `"Hai ricevuto una cartella SaveIn: <nome>\n\n<link>\n\nAprila con SaveIn per importarla all'istante nella tua raccolta."`
+
+### Landing page fallback (messaggi utenti senza app)
+
+- **Post**: "C'è un contenuto SaveIn che ti aspetta! Scarica l'app gratis per aprirlo e salvarlo. Organizza le tue idee in un clic."
+- **Cartella**: "Hai ricevuto una cartella SaveIn! Scarica l'app gratis per importarla all'istante e avere tutte le nuove idee organizzate in un clic."
+
+### Dipendenza Flutter aggiunta
+
+- `app_links: ^6.4.1` — gestione deep link `https://`
+
+### Evidenziazione visiva del contenuto importato
+
+Post e cartelle importati da un link SaveIn altrui vengono salvati con `isShared: true` (campo Firestore). Questo campo guida la UI per distinguerli visivamente dal contenuto creato dall'utente.
+
+**Cartella importata (`lib/widgets/folder_card.dart`)**:
+- Sfondo `Colors.blue.withOpacity(0.2)` e bordo blu (già presenti)
+- Banner turchese-blu in fondo alla card (`Colors.blue.shade700`, bordi arrotondati solo in basso) con icona `download_rounded` e testo "cartella importata" (10 sp, bold)
+
+**Post importato (`lib/pages/folder_detail_page.dart` — `_buildPostCard`)**:
+- Sfondo e bordo blu tenue (già presenti)
+- Chip pill blu chiaro con bordo (`Colors.blue.shade400`) e testo "post importato" (10 sp, bold), mostrato sotto la riga del dominio sorgente
+
+Il campo `isShared` viene impostato a `true` da `ShareLinkService.importPost` e `ShareLinkService.importFolder` in `lib/services/share_link_service.dart`.
+
+---
 
 ## Import post e metadati
 
