@@ -513,35 +513,118 @@ class _CrossPromoNotificationGate extends StatefulWidget {
 
 class _CrossPromoNotificationGateState
     extends State<_CrossPromoNotificationGate> {
-  bool _scheduled = false;
+  bool _showing = false;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_scheduled) return;
-    _scheduled = true;
+  void initState() {
+    super.initState();
+    AuthService().addListener(_maybeShowCrossPromoNotification);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final result = AuthService().consumeCrossPromotionNotification();
-      if (result == null) return;
-      final activatedAt = DateTime.now();
-      showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Premium SaveIn! attivato'),
-          content: Text(
-            'La versione Premium è stata attivata il giorno '
-            '${_formatDate(activatedAt)} e scadrà il '
-            '${_formatDate(result.premiumUntil)}, dopo 30 giorni di utilizzo.',
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Perfetto'),
+      _maybeShowCrossPromoNotification();
+    });
+  }
+
+  @override
+  void dispose() {
+    AuthService().removeListener(_maybeShowCrossPromoNotification);
+    super.dispose();
+  }
+
+  void _maybeShowCrossPromoNotification() {
+    if (!mounted || _showing) return;
+    final result = AuthService().consumeCrossPromotionNotification();
+    if (result == null) return;
+    _showing = true;
+    final activatedAt = DateTime.now();
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: const Color(0xFFF0FFF4),
+        title: const Row(
+          children: [
+            Text('🎉', style: TextStyle(fontSize: 28)),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Cross-promo completata!',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17),
+              ),
             ),
           ],
         ),
-      );
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '🎁 Grazie alla cross-promotion hai ricevuto ${result.durationDays} giorni di SaveIn Premium in regalo!',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF1B5E20),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF66BB6A)),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '✨ Premium attivo dal ${_formatDate(activatedAt)} al ${_formatDate(result.premiumUntil)}.',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF2E7D32),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _premiumFeatureRow(
+                    Icons.folder_copy_rounded,
+                    'Più cartelle, sottocartelle e livelli di organizzazione',
+                  ),
+                  _premiumFeatureRow(
+                    Icons.sell_rounded,
+                    'Tag manuali per ritrovare subito ogni contenuto',
+                  ),
+                  _premiumFeatureRow(
+                    Icons.block_rounded,
+                    'Nessuna pubblicità interstitial durante l’uso',
+                  ),
+                  _premiumFeatureRow(
+                    Icons.auto_awesome_rounded,
+                    'Esperienza più fluida e senza i limiti del piano Free',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            icon: const Icon(Icons.check_circle_rounded),
+            label: const Text('Fantastico! 🚀'),
+          ),
+        ],
+      ),
+    ).whenComplete(() {
+      _showing = false;
     });
   }
 
@@ -551,6 +634,29 @@ class _CrossPromoNotificationGateState
         '${d.month.toString().padLeft(2, '0')}/${d.year}';
   }
 
+  Widget _premiumFeatureRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: const Color(0xFF2E7D32)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFF14532D),
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => widget.child;
 }
@@ -558,22 +664,32 @@ class _CrossPromoNotificationGateState
 // LOGOUT BUTTON MIGLIORATO
 class LogoutButton extends StatelessWidget {
   final VoidCallback? onLogoutComplete;
+  final EdgeInsetsGeometry? padding;
+  final BoxConstraints? constraints;
 
-  const LogoutButton({Key? key, this.onLogoutComplete}) : super(key: key);
+  const LogoutButton({
+    Key? key,
+    this.onLogoutComplete,
+    this.padding,
+    this.constraints,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return IconButton(
       onPressed: () => _showLogoutDialog(context),
-      icon: Icon(Icons.logout, color: Colors.red),
+      icon: const Icon(Icons.logout, color: Colors.red),
       tooltip: 'Logout',
+      padding: padding ?? const EdgeInsets.all(8.0),
+      constraints: constraints,
     );
   }
 
   void _showLogoutDialog(BuildContext context) {
+    final parentContext = context;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
@@ -624,30 +740,48 @@ class LogoutButton extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('Annulla', style: TextStyle(color: Colors.grey)),
           ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
+              ElevatedButton(
+                onPressed: () async {
+                  // Chiudi il dialog prima di iniziare il logout
+                  Navigator.pop(dialogContext);
 
-              // LOGOUT REATTIVO - Il wrapper si aggiornerà automaticamente
-              await AuthService().logout();
-
-              // Callback opzionale
-              onLogoutComplete?.call();
-
-              // NON serve più navigazione manuale - AuthWrapper è reattivo!
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child:
-                Text('Logout', style: TextStyle(fontWeight: FontWeight.bold)),
+                  try {
+                    // Esegui il logout
+                    await AuthService().logout();
+                    
+                    // Il logout triggera il rebuild di AuthWrapper che mostrerà LoginPage.
+                    // Dobbiamo però assicurarci di chiudere tutte le pagine aperte sopra AuthWrapper (come AccountPage).
+                    
+                    // Usiamo il navigatorKey globale se disponibile, altrimenti il context del genitore.
+                    // popUntil(route.isFirst) ci riporta alla primissima pagina dell'app (AuthWrapper).
+                    if (navigatorKey.currentState != null) {
+                      navigatorKey.currentState!.popUntil((route) => route.isFirst);
+                    } else if (parentContext.mounted) {
+                      Navigator.of(parentContext, rootNavigator: true).popUntil((route) => route.isFirst);
+                    }
+                    
+                    onLogoutComplete?.call();
+                  } catch (e) {
+                    debugPrint('Errore durante logout: $e');
+                    if (parentContext.mounted) {
+                      ScaffoldMessenger.of(parentContext).showSnackBar(
+                        SnackBar(content: Text('Errore durante il logout: $e')),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Logout',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 }

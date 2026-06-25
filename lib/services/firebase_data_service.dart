@@ -5,8 +5,9 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models.dart';
+import 'package:savein/models.dart';
 
 /// Exception personalizzata per errori Firebase
 class FirebaseDataException implements Exception {
@@ -19,6 +20,57 @@ class FirebaseDataException implements Exception {
   @override
   String toString() =>
       'FirebaseDataException: $message${code != null ? ' ($code)' : ''}';
+}
+
+class _GlobalPostCanonicalData {
+  final String? url;
+  final String? title;
+  final String? description;
+  final String? imageUrl;
+  final String? previewStorageUrl;
+  final String? creatorName;
+  final String? creatorUsername;
+
+  const _GlobalPostCanonicalData({
+    this.url,
+    this.title,
+    this.description,
+    this.imageUrl,
+    this.previewStorageUrl,
+    this.creatorName,
+    this.creatorUsername,
+  });
+
+  factory _GlobalPostCanonicalData.fromMap(Map<String, dynamic> data) {
+    String? text(String key) {
+      final value = data[key]?.toString().trim();
+      return value == null || value.isEmpty ? null : value;
+    }
+
+    return _GlobalPostCanonicalData(
+      url: text('url'),
+      title: text('title'),
+      description: text('description'),
+      imageUrl: text('imageUrl'),
+      previewStorageUrl: text('previewStorageUrl'),
+      creatorName: text('creatorName'),
+      creatorUsername: text('creatorUsername'),
+    );
+  }
+}
+
+class _GlobalPostResult {
+  final String? globalPostId;
+  final String? urlHash;
+  final String? normalizedUrl;
+  final _GlobalPostCanonicalData canonical;
+
+  const _GlobalPostResult({
+    required this.globalPostId,
+    required this.urlHash,
+    required this.normalizedUrl,
+    required this.canonical,
+  });
 }
 
 /// Exception per errori di conversione Firestore
@@ -101,6 +153,9 @@ extension SavedPostFirestoreService on SavedPost {
         updatedAt:
             (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
         isShared: data['isShared'] as bool? ?? false,
+        globalPostId: data['globalPostId'] as String?,
+        urlHash: data['urlHash'] as String?,
+        normalizedUrl: data['normalizedUrl'] as String?,
       );
     } catch (e) {
       throw FirestoreConversionException(
@@ -123,6 +178,9 @@ extension SavedPostFirestoreService on SavedPost {
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt ?? DateTime.now()),
       'isShared': isShared,
+      'globalPostId': globalPostId,
+      'urlHash': urlHash,
+      'normalizedUrl': normalizedUrl,
     };
   }
 }
@@ -135,6 +193,8 @@ class FirebaseDataService {
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
 
   // Stream controllers per real-time updates
   StreamController<List<Folder>>? _foldersController;
@@ -242,24 +302,32 @@ class FirebaseDataService {
   /// Carica tutte le cartelle dell'utente
   Future<List<Folder>> getFolders({bool forceRefresh = false}) async {
     try {
-      if (kDebugMode) print('DEBUG: Firebase - Inizio getFolders(forceRefresh: $forceRefresh)');
+      if (kDebugMode)
+        print(
+            'DEBUG: Firebase - Inizio getFolders(forceRefresh: $forceRefresh)');
       // 1. Nostra cache in-memoria
       if (!forceRefresh && _isFolderCacheValid()) {
         if (kDebugMode) {
-          print('DEBUG: Firebase - Cache folders in-memory hit (${_cachedFolders!.length} items)');
+          print(
+              'DEBUG: Firebase - Cache folders in-memory hit (${_cachedFolders!.length} items)');
         }
         return List<Folder>.from(_cachedFolders!);
       }
 
       // 2. Fetch da server
       final result = await _fetchFoldersFromServer();
-      if (kDebugMode) print('DEBUG: Firebase - getFolders completato con successo (${result.length} items)');
+      if (kDebugMode)
+        print(
+            'DEBUG: Firebase - getFolders completato con successo (${result.length} items)');
       return result;
     } on FirebaseException catch (e) {
-      if (kDebugMode) print('ERRORE Firebase getFolders: ${e.code} - ${e.message}');
+      if (kDebugMode)
+        print('ERRORE Firebase getFolders: ${e.code} - ${e.message}');
 
       if (_cachedFolders != null) {
-        if (kDebugMode) print('DEBUG: Firebase - Usando cache fallback (${_cachedFolders!.length} items)');
+        if (kDebugMode)
+          print(
+              'DEBUG: Firebase - Usando cache fallback (${_cachedFolders!.length} items)');
         return List<Folder>.from(_cachedFolders!);
       }
 
@@ -271,25 +339,32 @@ class FirebaseDataService {
       if (kDebugMode) print('ERRORE generale getFolders: $e');
 
       if (_cachedFolders != null) {
-        if (kDebugMode) print('DEBUG: Firebase - Usando cache fallback per errore generale');
+        if (kDebugMode)
+          print('DEBUG: Firebase - Usando cache fallback per errore generale');
         return List<Folder>.from(_cachedFolders!);
       }
 
-      throw FirebaseDataException('Errore durante il caricamento delle cartelle: $e');
+      throw FirebaseDataException(
+          'Errore durante il caricamento delle cartelle: $e');
     }
   }
 
   Future<List<Folder>> _fetchFoldersFromServer() async {
-    if (kDebugMode) print('DEBUG: Firebase - Caricando folders da Firestore... via await _foldersCollection.get()');
+    if (kDebugMode)
+      print(
+          'DEBUG: Firebase - Caricando folders da Firestore... via await _foldersCollection.get()');
 
     final snapshot = await _foldersCollection.orderBy('createdAt').get();
-    if (kDebugMode) print('DEBUG: Firebase - _foldersCollection.get() completato con ${snapshot.docs.length} documenti');
+    if (kDebugMode)
+      print(
+          'DEBUG: Firebase - _foldersCollection.get() completato con ${snapshot.docs.length} documenti');
     final folders = snapshot.docs
         .map((doc) => FolderFirestoreService.fromFirestore(doc))
         .toList();
 
     if (!folders.any((f) => f.isDefault)) {
-      if (kDebugMode) print('DEBUG: Firebase - Cartella "Tutti" non trovata, creandola...');
+      if (kDebugMode)
+        print('DEBUG: Firebase - Cartella "Tutti" non trovata, creandola...');
       final defaultFolder = await _createDefaultFolder();
       folders.insert(0, defaultFolder);
     }
@@ -298,7 +373,9 @@ class FirebaseDataService {
     _lastFolderSync = DateTime.now();
     _cachedUserId = _auth.currentUser?.uid;
 
-    if (kDebugMode) print('DEBUG: Firebase - Caricate ${folders.length} folders con successo');
+    if (kDebugMode)
+      print(
+          'DEBUG: Firebase - Caricate ${folders.length} folders con successo');
     return folders;
   }
 
@@ -329,7 +406,8 @@ class FirebaseDataService {
       }
 
       // Verifica che non esista già una cartella con lo stesso nome nello stesso parent
-      final existingFolders = await getFolders();
+      final existingFolders = await getFolders(
+          forceRefresh: true); // FIX: Forza refresh per evitare falsi duplicati
       if (existingFolders.any((f) =>
           f.name.toLowerCase() == name.toLowerCase() &&
           !f.isDefault &&
@@ -446,20 +524,24 @@ class FirebaseDataService {
             'Non è possibile eliminare la cartella "Tutti"');
       }
 
+      final folderIdsToDelete = await _collectFolderTreeIds(folderId);
+
+      // ✅ ELIMINA I POST NELLA CARTELLA E IN TUTTE LE SOTTOCARTELLE
+      await _deletePostsInFolders(folderIdsToDelete);
+
       // ✅ ELIMINA RICORSIVAMENTE TUTTE LE SOTTOCARTELLE
       await _deleteSubfoldersRecursively(folderId);
 
       // ✅ ELIMINA LA CARTELLA PRINCIPALE
       await _foldersCollection.doc(folderId).delete();
 
-      // Invalida SOLO cache cartelle (non post - rimangono orfani e visibili in "Tutti")
+      // Invalida cache cartelle e post: la cancellazione ora è completa.
       _invalidateFolderCache();
+      _invalidatePostCache();
 
       if (kDebugMode) {
         print(
-            'DEBUG: Firebase - Cartella e sottocartelle eliminate ricorsivamente');
-        print(
-            'DEBUG: Firebase - I post rimangono orfani e visibili in "Tutti"');
+            'DEBUG: Firebase - Cartella, sottocartelle e post collegati eliminati');
       }
     } on FirebaseException catch (e) {
       if (kDebugMode)
@@ -476,6 +558,47 @@ class FirebaseDataService {
     }
   }
 
+  Future<Set<String>> _collectFolderTreeIds(String rootFolderId) async {
+    final ids = <String>{rootFolderId};
+    var changed = true;
+
+    while (changed) {
+      changed = false;
+      final snapshot = await _foldersCollection.get();
+      for (final doc in snapshot.docs) {
+        final parentId = (doc.data()['parentId'] as String?)?.trim();
+        if (parentId != null && parentId.isNotEmpty && ids.contains(parentId)) {
+          changed = ids.add(doc.id) || changed;
+        }
+      }
+    }
+
+    return ids;
+  }
+
+  Future<void> _deletePostsInFolders(Set<String> folderIds) async {
+    for (final folderId in folderIds) {
+      final snapshot =
+          await _postsCollection.where('folderId', isEqualTo: folderId).get();
+      if (snapshot.docs.isEmpty) continue;
+
+      var batch = _firestore.batch();
+      var count = 0;
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+        count++;
+        if (count >= 450) {
+          await batch.commit();
+          batch = _firestore.batch();
+          count = 0;
+        }
+      }
+      if (count > 0) {
+        await batch.commit();
+      }
+    }
+  }
+
   // ============================================================================
   // OPERAZIONI POST
   // ============================================================================
@@ -484,7 +607,9 @@ class FirebaseDataService {
   Future<List<SavedPost>> getPosts(
       {String? folderId, bool forceRefresh = false}) async {
     try {
-      if (kDebugMode) print('DEBUG: Firebase - Inizio getPosts(folderId: $folderId, forceRefresh: $forceRefresh)');
+      if (kDebugMode)
+        print(
+            'DEBUG: Firebase - Inizio getPosts(folderId: $folderId, forceRefresh: $forceRefresh)');
       // Controlla cache se non è richiesto refresh forzato
       if (!forceRefresh && _isPostCacheValid()) {
         if (kDebugMode) {
@@ -501,7 +626,8 @@ class FirebaseDataService {
       }
 
       if (kDebugMode)
-        print('DEBUG: Firebase - Caricando posts da Firestore... via query.get()');
+        print(
+            'DEBUG: Firebase - Caricando posts da Firestore... via query.get()');
 
       Query<Map<String, dynamic>> query = _postsCollection;
 
@@ -510,7 +636,9 @@ class FirebaseDataService {
       }
 
       final snapshot = await query.orderBy('createdAt', descending: true).get();
-      if (kDebugMode) print('DEBUG: Firebase - query.get() completato con ${snapshot.docs.length} documenti');
+      if (kDebugMode)
+        print(
+            'DEBUG: Firebase - query.get() completato con ${snapshot.docs.length} documenti');
 
       final posts = snapshot.docs
           .map((doc) => SavedPostFirestoreService.fromFirestore(doc))
@@ -546,6 +674,40 @@ class FirebaseDataService {
       if (kDebugMode) print('ERRORE generale getPosts: $e');
       throw FirebaseDataException('Errore durante il caricamento dei post: $e');
     }
+  }
+
+  Future<_GlobalPostResult> _ensureGlobalPost({
+    required String url,
+    required String title,
+    required String description,
+    String? imageUrl,
+    String? previewStorageUrl,
+    String? creatorName,
+    String? creatorUsername,
+  }) async {
+    final callable = _functions.httpsCallable('ensureGlobalPost');
+    final result = await callable.call<Map<String, dynamic>>({
+      'post': {
+        'url': url.trim(),
+        'title': title.trim(),
+        'description': description.trim(),
+        'imageUrl': imageUrl?.trim(),
+        'previewStorageUrl': previewStorageUrl?.trim(),
+        'creatorName': creatorName?.trim(),
+        'creatorUsername': creatorUsername?.trim(),
+      },
+    });
+    final data = Map<String, dynamic>.from(result.data);
+    final canonical = data['canonical'] is Map
+        ? Map<String, dynamic>.from(data['canonical'] as Map)
+        : <String, dynamic>{};
+
+    return _GlobalPostResult(
+      globalPostId: data['globalPostId']?.toString(),
+      urlHash: data['urlHash']?.toString(),
+      normalizedUrl: data['normalizedUrl']?.toString(),
+      canonical: _GlobalPostCanonicalData.fromMap(canonical),
+    );
   }
 
   /// Crea un nuovo post
@@ -585,23 +747,37 @@ class FirebaseDataService {
         throw FirebaseDataException('Cartella di destinazione non trovata');
       }
 
+      final globalPost = await _ensureGlobalPost(
+        url: url,
+        title: title,
+        description: description,
+        imageUrl: imageUrl,
+        previewStorageUrl: previewStorageUrl,
+        creatorName: creatorName,
+        creatorUsername: creatorUsername,
+      );
+      final canonical = globalPost.canonical;
       final now = DateTime.now();
 
       // Crea oggetto SavedPost temporaneo per conversione
       final tempPost = SavedPost(
         id: '',
-        url: url.trim(),
-        title: title.trim(),
-        description: description.trim(),
-        imageUrl: imageUrl?.trim(),
-        previewStorageUrl: previewStorageUrl?.trim(),
-        creatorName: creatorName?.trim(),
-        creatorUsername: creatorUsername?.trim(),
+        url: canonical.url ?? url.trim(),
+        title: canonical.title ?? title.trim(),
+        description: canonical.description ?? description.trim(),
+        imageUrl: canonical.imageUrl ?? imageUrl?.trim(),
+        previewStorageUrl:
+            canonical.previewStorageUrl ?? previewStorageUrl?.trim(),
+        creatorName: canonical.creatorName ?? creatorName?.trim(),
+        creatorUsername: canonical.creatorUsername ?? creatorUsername?.trim(),
         tags: tags.map((tag) => tag.trim()).toList(),
         folderId: folderId,
         createdAt: now,
         updatedAt: now,
         isShared: isShared,
+        globalPostId: globalPost.globalPostId,
+        urlHash: globalPost.urlHash,
+        normalizedUrl: globalPost.normalizedUrl,
       );
 
       // Salva su Firestore
@@ -610,18 +786,22 @@ class FirebaseDataService {
       // Crea oggetto SavedPost finale con ID generato
       final post = SavedPost(
         id: docRef.id,
-        url: url.trim(),
-        title: title.trim(),
-        description: description.trim(),
-        imageUrl: imageUrl?.trim(),
-        previewStorageUrl: previewStorageUrl?.trim(),
-        creatorName: creatorName?.trim(),
-        creatorUsername: creatorUsername?.trim(),
+        url: canonical.url ?? url.trim(),
+        title: canonical.title ?? title.trim(),
+        description: canonical.description ?? description.trim(),
+        imageUrl: canonical.imageUrl ?? imageUrl?.trim(),
+        previewStorageUrl:
+            canonical.previewStorageUrl ?? previewStorageUrl?.trim(),
+        creatorName: canonical.creatorName ?? creatorName?.trim(),
+        creatorUsername: canonical.creatorUsername ?? creatorUsername?.trim(),
         tags: tags.map((tag) => tag.trim()).toList(),
         folderId: folderId,
         createdAt: now,
         updatedAt: now,
         isShared: isShared,
+        globalPostId: globalPost.globalPostId,
+        urlHash: globalPost.urlHash,
+        normalizedUrl: globalPost.normalizedUrl,
       );
 
       // Invalida cache per forzare ricaricamento
@@ -821,18 +1001,64 @@ class FirebaseDataService {
   /// Cerca un utente per email
   Future<Map<String, dynamic>?> findUserByEmail(String email) async {
     try {
-      final normalizedEmail = email.toLowerCase().trim();
-      final snapshot = await _firestore
-          .collection('users')
-          .where('normalizedEmail', isEqualTo: normalizedEmail)
-          .limit(1)
-          .get();
+      final rawEmail = email.trim();
+      final normalizedEmail = rawEmail.toLowerCase();
+      if (normalizedEmail.isEmpty) return null;
 
-      if (snapshot.docs.isEmpty) return null;
+      try {
+        final callable = _functions.httpsCallable('findShareRecipientByEmail');
+        final response = await callable.call(<String, dynamic>{
+          'email': rawEmail,
+        });
+        final data = Map<String, dynamic>.from(response.data as Map);
+        return {
+          'id': data['id']?.toString() ?? '',
+          'name': data['name']?.toString() ?? 'Utente',
+          'email': data['email']?.toString() ?? rawEmail,
+        };
+      } on FirebaseFunctionsException catch (e) {
+        if (e.code == 'not-found') return null;
+        if (kDebugMode) print('ERRORE findShareRecipientByEmail: $e');
+      }
 
-      final data = snapshot.docs.first.data();
+      final users = _firestore.collection('users');
+
+      QueryDocumentSnapshot<Map<String, dynamic>>? match;
+
+      for (final query in [
+        users.where('normalizedEmail', isEqualTo: normalizedEmail).limit(1),
+        users.where('emailLower', isEqualTo: normalizedEmail).limit(1),
+        users.where('email_lower', isEqualTo: normalizedEmail).limit(1),
+        users.where('email', isEqualTo: rawEmail).limit(1),
+        users.where('email', isEqualTo: normalizedEmail).limit(1),
+      ]) {
+        final snapshot = await query.get();
+        if (snapshot.docs.isNotEmpty) {
+          match = snapshot.docs.first;
+          break;
+        }
+      }
+
+      if (match == null) {
+        final legacySnapshot = await users.limit(1000).get();
+        for (final doc in legacySnapshot.docs) {
+          final candidateEmail =
+              (doc.data()['email'] ?? doc.data()['normalizedEmail'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+          if (candidateEmail == normalizedEmail) {
+            match = doc;
+            break;
+          }
+        }
+      }
+
+      if (match == null) return null;
+
+      final data = match.data();
       return {
-        'id': snapshot.docs.first.id,
+        'id': match.id,
         'name': data['name'] ?? 'Utente',
         'email': data['email'] ?? email,
       };
@@ -853,24 +1079,22 @@ class FirebaseDataService {
       final currentUser = _auth.currentUser;
       if (currentUser == null) throw Exception('Utente non autenticato');
 
-      final shareData = {
+      final callable = _functions.httpsCallable('shareItemWithUser');
+      await callable.call(<String, dynamic>{
         'resourceId': resourceId,
         'type': type,
-        'ownerId': currentUser.uid,
-        'ownerName': currentUser.displayName ?? 'Un utente',
-        'ownerEmail': currentUser.email ?? '',
-        'sharedAt': FieldValue.serverTimestamp(),
+        'recipientId': recipientId,
         'originalData': originalData,
-      };
-
-      await _firestore
-          .collection('users')
-          .doc(recipientId)
-          .collection('shared_items')
-          .add(shareData);
+      });
 
       if (kDebugMode)
         print('DEBUG: Item condiviso con successo con $recipientId');
+    } on FirebaseFunctionsException catch (e) {
+      final message = e.message ?? 'Errore durante la condivisione';
+      if (kDebugMode) {
+        print('ERRORE shareItem callable: ${e.code} - $message');
+      }
+      throw FirebaseDataException(message, code: e.code, originalError: e);
     } catch (e) {
       if (kDebugMode) print('ERRORE shareItem: $e');
       throw FirebaseDataException('Errore durante la condivisione: $e');
@@ -894,6 +1118,42 @@ class FirebaseDataService {
     } catch (e) {
       if (kDebugMode) print('ERRORE getSharedItems: $e');
       return [];
+    }
+  }
+
+  /// Importa un elemento condiviso copiandolo direttamente dal Firestore
+  /// dell'utente mittente tramite Cloud Function.
+  Future<Map<String, dynamic>> importSharedResource({
+    String? shareId,
+    String? token,
+    String? targetFolderId,
+    String? targetParentFolderId,
+  }) async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) throw Exception('Utente non autenticato');
+
+      final callable = _functions.httpsCallable('importSharedResource');
+      final response = await callable.call(<String, dynamic>{
+        if (shareId != null && shareId.trim().isNotEmpty) 'shareId': shareId,
+        if (token != null && token.trim().isNotEmpty) 'token': token,
+        if (targetFolderId != null && targetFolderId.trim().isNotEmpty)
+          'targetFolderId': targetFolderId,
+        if (targetParentFolderId != null &&
+            targetParentFolderId.trim().isNotEmpty)
+          'targetParentFolderId': targetParentFolderId,
+      });
+
+      return Map<String, dynamic>.from(response.data as Map);
+    } on FirebaseFunctionsException catch (e) {
+      final message = e.message ?? 'Errore durante l\'importazione';
+      if (kDebugMode) {
+        print('ERRORE importSharedResource callable: ${e.code} - $message');
+      }
+      throw FirebaseDataException(message, code: e.code, originalError: e);
+    } catch (e) {
+      if (kDebugMode) print('ERRORE importSharedResource: $e');
+      throw FirebaseDataException('Errore durante l\'importazione: $e');
     }
   }
 

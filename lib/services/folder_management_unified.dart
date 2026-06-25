@@ -16,9 +16,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../models/folder.dart';
-import '../models.dart';
-import '../data_service.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/models.dart';
+import 'package:savein/data_service.dart';
 import '../utils/constants.dart';
 
 // ============================================================================

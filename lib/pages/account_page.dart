@@ -1,21 +1,23 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
-import '../models/folder.dart';
-import '../utils/theme_helpers.dart';
-import '../pages/simple_stats_page.dart';
-import '../pages/privacy_policy_page.dart';
-import '../pages/terms_conditions_page.dart';
-import '../pages/marketing_communications_page.dart';
-import '../services/access_control_service.dart';
-import '../services/auth_service.dart';
-import '../services/promo_popup_service.dart';
-import '../pages/login_page.dart';
-import 'help_center_page.dart';
-import 'contact_page.dart';
-import '../widgets/custom_bottom_nav.dart';
-import '../widgets/first_launch_tutorial_dialog.dart';
-import '../data_service.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/utils/theme_helpers.dart';
+import 'package:savein/pages/simple_stats_page.dart';
+import 'package:savein/pages/privacy_policy_page.dart';
+import 'package:savein/pages/terms_conditions_page.dart';
+import 'package:savein/pages/marketing_communications_page.dart';
+import 'package:savein/services/access_control_service.dart';
+import 'package:savein/services/auth_service.dart';
+import 'package:savein/services/promo_popup_service.dart';
+import 'package:savein/pages/login_page.dart';
+import 'package:savein/pages/help_center_page.dart';
+import 'package:savein/pages/contact_page.dart';
+import 'package:savein/pages/auth_wrapper.dart';
+import 'package:savein/widgets/custom_bottom_nav.dart';
+import 'package:savein/widgets/first_launch_tutorial_dialog.dart';
+import 'package:savein/widgets/new_signup_premium_promo_dialog.dart';
+import 'package:savein/data_service.dart';
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -83,10 +85,12 @@ class PasswordCriterion {
 // PAGINA DI ELIMINAZIONE ACCOUNT CORRETTA - NAVIGAZIONE FORZATA AL LOGIN
 class _AccountDeletionLoadingPageReactive extends StatefulWidget {
   final bool isDarkTheme;
+  final Function(bool) onThemeChanged;
 
   const _AccountDeletionLoadingPageReactive({
     Key? key,
     required this.isDarkTheme,
+    required this.onThemeChanged,
   }) : super(key: key);
 
   @override
@@ -147,17 +151,16 @@ class _AccountDeletionLoadingPageReactiveState
               print(
                   'DEBUG: Countdown completato - Navigando forzatamente al login');
 
-              // CORREZIONE: Navigazione forzata al login invece di aspettare AuthWrapper
+              // Forza la Login: in alcune navigazioni la root e' gia' la Home.
               if (mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
+                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
                   MaterialPageRoute(
-                      builder: (context) => LoginPage(
-                            isDarkTheme: widget.isDarkTheme,
-                            onThemeChanged: (isDark) {
-                              // callback vuoto per evitare errori
-                            },
-                          )),
-                  (route) => false, // Rimuove tutto lo stack di navigazione
+                    builder: (_) => LoginPage(
+                      isDarkTheme: widget.isDarkTheme,
+                      onThemeChanged: widget.onThemeChanged,
+                    ),
+                  ),
+                  (route) => false,
                 );
               }
             }
@@ -369,6 +372,27 @@ class AccountPage extends StatelessWidget {
     }
 
     return totalFolders;
+  }
+
+  String _formatBirthDate(DateTime? birthDate) {
+    if (birthDate == null) return 'Da inserire';
+    final day = birthDate.day.toString().padLeft(2, '0');
+    final month = birthDate.month.toString().padLeft(2, '0');
+    return '$day/$month/${birthDate.year}';
+  }
+
+  String _formatGender(String? gender) {
+    switch ((gender ?? '').trim().toLowerCase()) {
+      case 'maschio':
+        return 'Maschio';
+      case 'femmina':
+        return 'Femmina';
+      case 'preferisco_non_dirlo':
+      case 'preferisco non dirlo':
+        return 'Preferisco non dirlo';
+      default:
+        return 'Da inserire';
+    }
   }
 
   void _openHelpCenterPage(BuildContext context) {
@@ -797,14 +821,19 @@ class AccountPage extends StatelessWidget {
 
               print('DEBUG: Iniziando logout da AccountPage');
 
-              // CRITICO: Usa AuthService per logout - AuthWrapper gestirà la navigazione automaticamente
               await AuthService().logout();
+              if (!context.mounted) return;
 
-              print(
-                  'DEBUG: Logout completato - AuthWrapper mostrerà automaticamente LoginPage');
-
-              // NON serve più navigazione manuale!
-              // AuthWrapper sta ascoltando AuthService e mostrerà automaticamente LoginPage
+              print('DEBUG: Logout completato - navigazione a LoginPage');
+              Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => LoginPage(
+                    isDarkTheme: isDarkTheme,
+                    onThemeChanged: onThemeChanged,
+                  ),
+                ),
+                (route) => false,
+              );
             },
             child: Text('Disconnetti', style: TextStyle(color: Colors.red)),
           ),
@@ -944,6 +973,7 @@ class AccountPage extends StatelessWidget {
       MaterialPageRoute(
         builder: (context) => _AccountDeletionLoadingPageReactive(
           isDarkTheme: isDarkTheme,
+          onThemeChanged: onThemeChanged,
         ),
       ),
     );
@@ -968,323 +998,361 @@ class AccountPage extends StatelessWidget {
         final String displayName = currentUser?.name ?? 'Utente';
         final String displayEmail = currentUser?.email ?? 'email@esempio.com';
         final String displayUsername = currentUser?.username ?? '@utente';
-        final String displayRole =
-            AppAccessService().roleLabel(currentUser?.role ?? AppUserRole.free);
+        final String displayRole = AppAccessService()
+            .roleLabel(currentUser?.effectiveRole ?? AppUserRole.free);
 
         return Scaffold(
           backgroundColor: backgroundColor,
-          appBar: AppBar(
-            backgroundColor: backgroundColor,
-            elevation: 0,
-            titleSpacing: 16,
-            title: Text(
-              'Account',
-              style: TextStyle(
-                color: appBarTextColor,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            leading: IconButton(
-              icon: Icon(Icons.arrow_back, color: navIconColor, size: 28),
-              onPressed: () => Navigator.pop(context),
-            ),
-            toolbarHeight: 80,
-          ),
-          body: SingleChildScrollView(
-            padding: EdgeInsets.all(16),
+          body: SafeArea(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Launcher popup promo (invisibile, triggered al mount)
-                _PromoLauncher(
-                  onActivateCrossPromo: (ctx) => _activateSmartChefPromo(ctx),
-                  onOpenOtherApp: _openSmartChefStore,
-                ),
-
-                // Profilo utente
                 Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.black, width: 1),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
+                    color: backgroundColor,
+                    border: Border(
+                      bottom: BorderSide(
+                        color: isDarkTheme
+                            ? Colors.grey.shade800
+                            : Colors.grey.shade200,
+                        width: 1,
                       ),
-                    ],
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      _buildInfoRow('Nome:', displayName, cardTextColor,
-                          cardSubtitleColor),
-                      SizedBox(height: 12),
-                      _buildInfoRow('Email:', displayEmail, cardTextColor,
-                          cardSubtitleColor),
-                      SizedBox(height: 12),
-                      _buildInfoRow('Username:', displayUsername, cardTextColor,
-                          cardSubtitleColor),
-                      SizedBox(height: 12),
-                      _buildInfoRow('Piano:', displayRole, cardTextColor,
-                          cardSubtitleColor),
-                      SizedBox(height: 12),
-                      _buildInfoRow(
-                          'Statistiche:',
-                          '${_getTotalPosts()} Post | ${_getTotalFolders()} Cartelle',
-                          cardTextColor,
-                          cardSubtitleColor),
+                      IconButton(
+                        icon: Icon(Icons.arrow_back,
+                            color: navIconColor, size: 28),
+                        onPressed: () => Navigator.pop(context),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Account',
+                          style: TextStyle(
+                            color: appBarTextColor,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (currentUser != null)
+                        LogoutButton(onLogoutComplete: () {}),
                     ],
                   ),
                 ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Profilo utente
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.black, width: 1),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildInfoRow('Nome:', displayName, cardTextColor,
+                                  cardSubtitleColor),
+                              const SizedBox(height: 12),
+                              _buildInfoRow('Email:', displayEmail,
+                                  cardTextColor, cardSubtitleColor),
+                              const SizedBox(height: 12),
+                              _buildInfoRow('Username:', displayUsername,
+                                  cardTextColor, cardSubtitleColor),
+                              const SizedBox(height: 12),
+                              _buildInfoRow(
+                                  'Data di nascita:',
+                                  _formatBirthDate(currentUser?.birthDate),
+                                  cardTextColor,
+                                  cardSubtitleColor),
+                              const SizedBox(height: 12),
+                              _buildInfoRow(
+                                  'Sesso:',
+                                  _formatGender(currentUser?.gender),
+                                  cardTextColor,
+                                  cardSubtitleColor),
+                              const SizedBox(height: 12),
+                              _buildInfoRow('Piano:', displayRole,
+                                  cardTextColor, cardSubtitleColor),
+                              const SizedBox(height: 12),
+                              _buildInfoRow(
+                                  'Statistiche:',
+                                  '${_getTotalPosts()} Post | ${_getTotalFolders()} Cartelle',
+                                  cardTextColor,
+                                  cardSubtitleColor),
+                            ],
+                          ),
+                        ),
 
-                SizedBox(height: 24),
-                _buildPlanCard(
-                  context,
-                  currentUser,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                ),
+                        const SizedBox(height: 24),
+                        _buildCrossPromoAccountBanner(),
+                        const SizedBox(height: 8),
+                        _buildPlanCard(
+                          context,
+                          currentUser,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                        ),
 
-                // Account
-                Text(
-                  'Account',
-                  style: TextStyle(
-                    color: appBarTextColor,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 12),
+                        // Account
+                        Text(
+                          'Account',
+                          style: TextStyle(
+                            color: appBarTextColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
 
-                _buildOptionCard(
-                  'Modifica Profilo',
-                  'Nome, username e foto profilo',
-                  Icons.edit,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _openEditProfilePage(context),
-                ),
+                        _buildOptionCard(
+                          'Modifica Profilo',
+                          'Nome, username, data di nascita e sesso',
+                          Icons.edit,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openEditProfilePage(context),
+                        ),
 
-                _buildOptionCard(
-                  'Privacy Policy',
-                  'Informativa sulla privacy e trattamento dati',
-                  Icons.privacy_tip,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _openPrivacyPolicyPage(context),
-                ),
+                        _buildOptionCard(
+                          'Privacy Policy',
+                          'Informativa sulla privacy e trattamento dati',
+                          Icons.privacy_tip,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openPrivacyPolicyPage(context),
+                        ),
 
-                _buildOptionCard(
-                  'Termini e Condizioni',
-                  'Condizioni d\'uso e profilazione',
-                  Icons.description,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _openTermsConditionsPage(context),
-                ),
+                        _buildOptionCard(
+                          'Termini e Condizioni',
+                          'Condizioni d\'uso e profilazione',
+                          Icons.description,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openTermsConditionsPage(context),
+                        ),
 
-                _buildOptionCard(
-                  'Statistiche Utilizzo',
-                  'Visualizza le tue abitudini',
-                  Icons.analytics,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _openStatsPage(context),
-                ),
+                        _buildOptionCard(
+                          'Statistiche Utilizzo',
+                          'Visualizza le tue abitudini',
+                          Icons.analytics,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openStatsPage(context),
+                        ),
 
-                if (currentUser?.isAdmin ?? false)
-                  _buildOptionCard(
-                    'Gestione ruoli admin',
-                    'Assegna Free, Premium o Admin ad altri utenti',
-                    Icons.admin_panel_settings,
-                    cardColor,
-                    cardTextColor,
-                    cardSubtitleColor,
-                    () => _showAdminRoleManagementDialog(context),
-                  ),
+                        if (currentUser?.isAdmin ?? false)
+                          _buildOptionCard(
+                            'Gestione ruoli admin',
+                            'Assegna Free, Premium o Admin ad altri utenti',
+                            Icons.admin_panel_settings,
+                            cardColor,
+                            cardTextColor,
+                            cardSubtitleColor,
+                            () => _showAdminRoleManagementDialog(context),
+                          ),
 
-                SizedBox(height: 24),
+                        const SizedBox(height: 24),
 
-                // Impostazioni App
-                Text(
-                  'Impostazioni App',
-                  style: TextStyle(
-                    color: appBarTextColor,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 12),
+                        // Impostazioni App
+                        Text(
+                          'Impostazioni App',
+                          style: TextStyle(
+                            color: appBarTextColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 12),
 
-                _buildMarketingCommsCard(
-                  'Marketing - Comunicazioni',
-                  'Consenso per email promozionali',
-                  Icons.email,
-                  marketingCommsEnabled,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  (newValue) => _handleMarketingCommsChange(context, newValue),
-                  () => _openMarketingCommunicationsPage(context),
-                ),
+                        _buildMarketingCommsCard(
+                          'Marketing - Comunicazioni',
+                          'Consenso per email promozionali',
+                          Icons.email,
+                          marketingCommsEnabled,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          (newValue) =>
+                              _handleMarketingCommsChange(context, newValue),
+                          () => _openMarketingCommunicationsPage(context),
+                        ),
 
-                _buildSwitchCard(
-                  'Tema Scuro',
-                  'Attiva/disattiva tema scuro',
-                  Icons.dark_mode,
-                  isDarkTheme,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  (newValue) => _handleThemeChange(context, newValue),
-                ),
+                        _buildSwitchCard(
+                          'Tema Scuro',
+                          'Attiva/disattiva tema scuro',
+                          Icons.dark_mode,
+                          isDarkTheme,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          (newValue) => _handleThemeChange(context, newValue),
+                        ),
 
-                SizedBox(height: 24),
+                        SizedBox(height: 24),
 
-                // Supporto
-                Text(
-                  'Supporto',
-                  style: TextStyle(
-                    color: appBarTextColor,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 12),
+                        // Supporto
+                        Text(
+                          'Supporto',
+                          style: TextStyle(
+                            color: appBarTextColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 12),
 
-                _buildOptionCard(
-                  'Centro Assistenza',
-                  'FAQ e guide',
-                  Icons.help_center,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _openHelpCenterPage(context),
-                ),
+                        _buildOptionCard(
+                          'Centro Assistenza',
+                          'FAQ e guide',
+                          Icons.help_center,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openHelpCenterPage(context),
+                        ),
 
-                _buildOptionCard(
-                  'Rivedi tutorial',
-                  'Guarda di nuovo i 3 passaggi iniziali',
-                  Icons.slideshow_outlined,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _showTutorial(context),
-                ),
+                        _buildOptionCard(
+                          'Rivedi tutorial',
+                          'Guarda di nuovo i 3 passaggi iniziali',
+                          Icons.slideshow_outlined,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _showTutorial(context),
+                        ),
 
-                _buildOptionCard(
-                  'Contattaci',
-                  'Segnala un problema',
-                  Icons.contact_support,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _openContactPage(context),
-                ),
+                        _buildOptionCard(
+                          'Contattaci',
+                          'Segnala un problema',
+                          Icons.contact_support,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openContactPage(context),
+                        ),
 
-                _buildOptionCard(
-                  'Versione Corrente',
-                  'Versione 1.0.0',
-                  Icons.info,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _showVersionInfo(context),
-                ),
+                        _buildOptionCard(
+                          'Versione Corrente',
+                          'Versione 1.0.0',
+                          Icons.info,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _showVersionInfo(context),
+                        ),
 
-                _buildOptionCard(
-                  'Backup anteprime Instagram',
-                  'Salva su cloud le anteprime per non perderle più',
-                  Icons.cloud_upload_outlined,
-                  cardColor,
-                  cardTextColor,
-                  cardSubtitleColor,
-                  () => _backupInstagramPreviews(context),
-                ),
+                        _buildOptionCard(
+                          'Backup anteprime Instagram',
+                          'Salva su cloud le anteprime per non perderle più',
+                          Icons.cloud_upload_outlined,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _backupInstagramPreviews(context),
+                        ),
 
-                SizedBox(height: 32),
+                        SizedBox(height: 32),
 
-                // Disconnetti
-                Container(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => _showLogoutDialog(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red[700],
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.black, width: 1),
-                      ),
+                        // Disconnetti
+                        Container(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () => _showLogoutDialog(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[700],
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: Colors.black, width: 1),
+                              ),
+                            ),
+                            child: Text(
+                              'Disconnetti',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        SizedBox(height: 16),
+
+                        // Scritta "Oppure"
+                        Center(
+                          child: Container(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: backgroundColor,
+                            ),
+                            child: Text(
+                              'Oppure',
+                              style: TextStyle(
+                                color: appBarTextColor.withOpacity(0.7),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        SizedBox(height: 16),
+
+                        // Elimina Account
+                        Container(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () => _showDeleteAccountDialog(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[800],
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: Colors.black, width: 1),
+                              ),
+                            ),
+                            child: Text(
+                              'Elimina Account',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        SizedBox(height: 32),
+                      ],
                     ),
-                    child: Text(
-                      'Disconnetti',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
                   ),
                 ),
-
-                SizedBox(height: 16),
-
-                // Scritta "Oppure"
-                Center(
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: backgroundColor,
-                    ),
-                    child: Text(
-                      'Oppure',
-                      style: TextStyle(
-                        color: appBarTextColor.withOpacity(0.7),
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-
-                SizedBox(height: 16),
-
-                // Elimina Account
-                Container(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => _showDeleteAccountDialog(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red[800],
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.black, width: 1),
-                      ),
-                    ),
-                    child: Text(
-                      'Elimina Account',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-
-                SizedBox(height: 32),
               ],
             ),
           ),
@@ -1504,49 +1572,6 @@ class AccountPage extends StatelessWidget {
     );
   }
 
-  Future<void> _handlePlanChange(
-    BuildContext context,
-    AppUserRole targetRole,
-  ) async {
-    final accessService = AppAccessService();
-    final targetLabel = accessService.roleLabel(targetRole);
-
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text('Cambia piano'),
-            content: Text('Vuoi passare al piano $targetLabel?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text('Annulla'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text('Conferma'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (!confirmed) return;
-
-    final success = await AuthService().updateOwnRole(targetRole);
-    if (!context.mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          success
-              ? 'Piano aggiornato a $targetLabel'
-              : 'Impossibile aggiornare il piano',
-        ),
-        backgroundColor: success ? Colors.green : Colors.red,
-      ),
-    );
-  }
-
   String _formatDate(DateTime date) {
     final d = date.toLocal();
     return '${d.day.toString().padLeft(2, '0')}/'
@@ -1561,33 +1586,6 @@ class AccountPage extends StatelessWidget {
   }
 
   Future<void> _activateSmartChefPromo(BuildContext context) async {
-    final user = AuthService().currentUser;
-    final email = user?.email ?? '';
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: Text('Promo lancio SaveIn! + SmartChef'),
-            content: Text(
-              'Attivando la promo ottieni SaveIn! Premium per 30 giorni da oggi.\n\n'
-              'Per ottenere anche SmartChef Premium gratis, devi registrarti o accedere '
-              'a SmartChef entro 14 giorni usando la stessa email:\n$email',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: Text('Annulla'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: Text('Attiva promo'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (!confirmed) return;
-
     try {
       final result = await AuthService().activateSmartChefLaunchPromo();
       if (!context.mounted) return;
@@ -1595,13 +1593,36 @@ class AccountPage extends StatelessWidget {
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: Text('Premium SaveIn! attivato'),
-          content: Text(
-            'La versione Premium è stata attivata il giorno '
-            '${_formatDate(DateTime.now())} e scadrà il '
-            '${_formatDate(result.premiumUntil)}, dopo 30 giorni di utilizzo.\n\n'
-            'Ora installa o apri SmartChef e accedi con la stessa email entro il '
-            '${_formatDate(result.claimBy)} per attivare anche lì il mese gratuito.',
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          backgroundColor: Color(0xFFFFFBF5),
+          title: Text('🎁 Promo prenotata!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Perfetto, abbiamo messo da parte il tuo regalo Premium.',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Color(0xFFFFB74D)),
+                ),
+                child: Text(
+                  '📲 Ora apri SmartChef e accedi/registrati con la stessa email entro il ${_formatDate(result.claimBy)}.\n\n✨ Appena SmartChef conferma l’email, il Premium si attiverà su entrambe le app.',
+                  style: TextStyle(
+                    color: Color(0xFF6B4E16),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -1627,6 +1648,204 @@ class AccountPage extends StatelessWidget {
         ),
       );
     }
+  }
+
+  Widget _buildCrossPromoAccountBanner() {
+    return FutureBuilder<PromotionBanner?>(
+      future: PromoPopupService.getAccountBanner(),
+      builder: (context, snapshot) {
+        final banner = snapshot.data;
+        if (banner == null) return SizedBox.shrink();
+        if (!banner.isCrossPromo) {
+          return _buildGenericPromoAccountBanner(banner);
+        }
+        return Container(
+          width: double.infinity,
+          margin: EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Color(0xFFFFFBF5),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Color(0xFFFFB74D), width: 1.4),
+            boxShadow: [
+              BoxShadow(
+                color: Color(0xFFFF9800).withValues(alpha: 0.14),
+                blurRadius: 18,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (banner.imageUrl.trim().isNotEmpty)
+                AspectRatio(
+                  aspectRatio: 3,
+                  child: Image.network(
+                    banner.imageUrl.trim(),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => SizedBox.shrink(),
+                  ),
+                ),
+              Padding(
+                padding: EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      banner.title.isNotEmpty
+                          ? '🎁 ${banner.title}'
+                          : '🎁 Promo SaveIn + SmartChef',
+                      style: TextStyle(
+                        color: Color(0xFFE65100),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      banner.message.isNotEmpty
+                          ? banner.message
+                          : 'Attiva il vantaggio e completalo usando la stessa email in entrambe le app.',
+                      style: TextStyle(
+                        color: Color(0xFF6B4E16),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: 12),
+                    Center(
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              await AuthService().recordPromotionBannerEvent(
+                                promotionId: banner.id,
+                                eventType: 'click',
+                                placement: 'savein_account',
+                              );
+                              if (!context.mounted) return;
+                              await _activateSmartChefPromo(context);
+                            },
+                            icon: Icon(Icons.card_giftcard),
+                            label: Text(
+                              banner.ctaLabel.isNotEmpty
+                                  ? banner.ctaLabel
+                                  : 'Attiva promo',
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _openSmartChefStore,
+                            icon: Icon(Icons.open_in_new),
+                            label: Text(
+                              banner.secondaryCtaLabel.trim().isNotEmpty
+                                  ? banner.secondaryCtaLabel
+                                  : 'Apri SmartChef',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGenericPromoAccountBanner(PromotionBanner banner) {
+    final hasActionUrl = banner.actionUrl.trim().isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Color(0xFFB8E6DC), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (banner.imageUrl.trim().isNotEmpty)
+            AspectRatio(
+              aspectRatio: 3,
+              child: Image.network(
+                banner.imageUrl.trim(),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => SizedBox.shrink(),
+              ),
+            ),
+          Padding(
+            padding: EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  banner.title.isNotEmpty ? banner.title : 'Promo SaveIn',
+                  style: TextStyle(
+                    color: Color(0xFF2C5F5D),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+                if (banner.message.trim().isNotEmpty) ...[
+                  SizedBox(height: 6),
+                  Text(
+                    banner.message,
+                    style: TextStyle(
+                      color: Color(0xFF344054),
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+                if (hasActionUrl) ...[
+                  SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        await AuthService().recordPromotionBannerEvent(
+                          promotionId: banner.id,
+                          eventType: 'click',
+                          placement: 'savein_account',
+                        );
+                        final uri = Uri.tryParse(banner.actionUrl.trim());
+                        if (uri == null) return;
+                        await launchUrl(
+                          uri,
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: Icon(Icons.open_in_new),
+                      label: Text(
+                        banner.ctaLabel.trim().isNotEmpty
+                            ? banner.ctaLabel
+                            : 'Scopri',
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showAdminRoleManagementDialog(BuildContext context) {
@@ -1722,7 +1941,10 @@ class AccountPage extends StatelessWidget {
     Color subtitleColor,
   ) {
     final accessService = AppAccessService();
-    final role = currentUser?.role ?? AppUserRole.free;
+    final role = currentUser?.effectiveRole ?? AppUserRole.free;
+    final premiumUntil = currentUser?.premiumUntil;
+    final showPremiumExpiry =
+        role == AppUserRole.premium || role == AppUserRole.admin;
 
     return Container(
       width: double.infinity,
@@ -1743,6 +1965,9 @@ class AccountPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (role == AppUserRole.free) ...[
+            _buildNewSignupPromoAccountNotice(context),
+          ],
           Row(
             children: [
               Icon(Icons.workspace_premium, color: textColor),
@@ -1768,39 +1993,543 @@ class AccountPage extends StatelessWidget {
                     : 'Privilegi Premium completi senza pagamento.',
             style: TextStyle(color: subtitleColor, fontSize: 14),
           ),
-          SizedBox(height: 12),
-          if (accessService.canSelfManagePlan)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton(
-                  onPressed: role == AppUserRole.free
-                      ? null
-                      : () => _handlePlanChange(context, AppUserRole.free),
-                  child: Text('Passa a Free'),
-                ),
-                ElevatedButton(
-                  onPressed: role == AppUserRole.premium
-                      ? null
-                      : () => _handlePlanChange(context, AppUserRole.premium),
-                  child: Text('Passa a Premium'),
-                ),
-              ],
-            )
-          else
-            Text(
-              'Il ruolo Admin non può essere attivato o modificato autonomamente.',
-              style: TextStyle(
-                color: subtitleColor,
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
+          if (showPremiumExpiry) ...[
+            SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF86EFAC)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.event_available_rounded,
+                    color: Color(0xFF15803D),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      premiumUntil == null
+                          ? 'Scadenza Premium: senza scadenza'
+                          : 'Scadenza Premium: ${_formatDate(premiumUntil)}',
+                      style: const TextStyle(
+                        color: Color(0xFF14532D),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+          ],
+          SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              onPressed: () => _showPlanComparisonSlides(context),
+              icon: const Icon(Icons.compare_arrows_outlined),
+              label: const Text('Vedi differenze Free/Premium'),
+            ),
+          ),
         ],
       ),
     );
   }
+
+  void _showPlanComparisonSlides(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => const _PlanComparisonSlidesDialog(),
+    );
+  }
+
+  Widget _buildNewSignupPromoAccountNotice(BuildContext context) {
+    return FutureBuilder<NewSignupPremiumPromoConfig?>(
+      future: AuthService().getNewSignupPremiumPromoConfig(),
+      builder: (context, snapshot) {
+        final config = snapshot.data;
+        if (config == null) return const SizedBox.shrink();
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _openNewSignupPremiumPromo(context),
+          child: Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2563EB).withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: const Color(0xFF2563EB).withValues(alpha: 0.28),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.card_giftcard,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Promo attiva: ${config.durationDays} giorni Premium gratis',
+                        style: const TextStyle(
+                          color: Color(0xFF111827),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'Tocca qui per vedere le slide e attivarla.',
+                        style: TextStyle(
+                          color: Color(0xFF4B5563),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Color(0xFF2563EB)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openNewSignupPremiumPromo(BuildContext context) async {
+    final config = await AuthService().getNewSignupPremiumPromoConfig();
+    if (!context.mounted || config == null) {
+      return;
+    }
+
+    final accepted = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => NewSignupPremiumPromoDialog(
+            durationDays: config.durationDays,
+            priceAfterTrial: config.priceAfterTrial,
+          ),
+        ) ??
+        false;
+    if (!context.mounted || !accepted) return;
+
+    try {
+      final premiumUntil = await AuthService().activateNewSignupPremiumPromo();
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Premium attivato'),
+          content: Text(
+            'Hai attivato 1 mese gratuito di SaveIn! Premium.\n'
+            'Scadenza: ${premiumUntil.day.toString().padLeft(2, '0')}/'
+            '${premiumUntil.month.toString().padLeft(2, '0')}/${premiumUntil.year}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+class _PlanComparisonSlidesDialog extends StatefulWidget {
+  const _PlanComparisonSlidesDialog();
+
+  @override
+  State<_PlanComparisonSlidesDialog> createState() =>
+      _PlanComparisonSlidesDialogState();
+}
+
+class _PlanComparisonSlidesDialogState
+    extends State<_PlanComparisonSlidesDialog> {
+  final PageController _controller = PageController();
+  int _index = 0;
+
+  static const _slides = [
+    _PlanSlideData(
+      icon: Icons.folder_copy_outlined,
+      title: '📁 Cartelle e sottocartelle',
+      freeText:
+          'Con Free puoi creare fino a 10 cartelle nella home, con profondità home + 1 livello e massimo 4 sottocartelle per cartella.',
+      premiumText:
+          'Con Premium superi i limiti Free: più cartelle, più livelli e più libertà per organizzare tutti i contenuti.',
+      color: Color(0xFF2C7A7B),
+    ),
+    _PlanSlideData(
+      icon: Icons.tag_outlined,
+      title: '🏷️ Tag e ricerca',
+      freeText:
+          'Con Free puoi cercare nei contenuti salvati e usare gli hashtag automatici quando vengono estratti dal contenuto.',
+      premiumText:
+          'Con Premium puoi aggiungere anche tag manuali, così rendi ogni salvataggio più facile da ritrovare.',
+      color: Color(0xFF2563EB),
+    ),
+    _PlanSlideData(
+      icon: Icons.block_outlined,
+      title: '🚀 Pubblicità',
+      freeText:
+          'Con Free possono essere mostrati annunci interstitial durante l’uso dell’app.',
+      premiumText:
+          'Con Premium usi SaveIn senza annunci interstitial e con un’esperienza più fluida ✨',
+      color: Color(0xFFEA580C),
+    ),
+  ];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _goTo(int page) {
+    if (page < 0 || page >= _slides.length) return;
+    _controller.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final width = size.width < 520 ? size.width * 0.9 : 460.0;
+    final height = size.height < 720 ? size.height * 0.82 : 560.0;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 28,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: DefaultTextStyle(
+          style: const TextStyle(color: Color(0xFF111827)),
+          child: IconTheme(
+            data: const IconThemeData(color: Color(0xFF111827)),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 12, 8, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF2563EB),
+                                    Color(0xFF7C3AED)
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.diamond_outlined,
+                                color: Colors.white,
+                                size: 19,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            const Expanded(
+                              child: Text(
+                                'Free vs Premium',
+                                style: TextStyle(
+                                  color: Color(0xFF111827),
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _controller,
+                    itemCount: _slides.length,
+                    onPageChanged: (value) => setState(() => _index = value),
+                    itemBuilder: (context, index) {
+                      return _PlanComparisonSlide(slide: _slides[index]);
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: _index == 0 ? null : () => _goTo(_index - 1),
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(
+                            _slides.length,
+                            (i) => AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              margin: const EdgeInsets.symmetric(horizontal: 3),
+                              width: i == _index ? 18 : 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: i == _index
+                                    ? _slides[_index].color
+                                    : Colors.black26,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_index == _slides.length - 1)
+                        FilledButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Chiudi'),
+                        )
+                      else
+                        IconButton(
+                          onPressed: () => _goTo(_index + 1),
+                          icon: const Icon(Icons.chevron_right),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanComparisonSlide extends StatelessWidget {
+  final _PlanSlideData slide;
+
+  const _PlanComparisonSlide({required this.slide});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 110,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  slide.color,
+                  Color.lerp(slide.color, Colors.black, 0.18)!,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(26),
+              boxShadow: [
+                BoxShadow(
+                  color: slide.color.withValues(alpha: 0.22),
+                  blurRadius: 16,
+                  offset: const Offset(0, 9),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Icon(slide.icon, size: 38, color: Colors.white),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    slide.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      height: 1.15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          _PlanInfoBox(
+            title: 'Free',
+            text: slide.freeText,
+            color: Colors.grey.shade700,
+          ),
+          const SizedBox(height: 12),
+          _PlanInfoBox(
+            title: 'Premium',
+            text: slide.premiumText,
+            color: slide.color,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanInfoBox extends StatelessWidget {
+  final String title;
+  final String text;
+  final Color color;
+
+  const _PlanInfoBox({
+    required this.title,
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 4,
+            height: 48,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    color: Color(0xFF374151),
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanSlideData {
+  final IconData icon;
+  final String title;
+  final String freeText;
+  final String premiumText;
+  final Color color;
+
+  const _PlanSlideData({
+    required this.icon,
+    required this.title,
+    required this.freeText,
+    required this.premiumText,
+    required this.color,
+  });
 }
 
 // ── Launcher popup promo ──────────────────────────────────────────────────────
@@ -1857,6 +2586,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _birthDateController = TextEditingController();
 
   bool _isLoading = false;
   bool _hasChanges = false;
@@ -1867,6 +2597,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   String _originalName = '';
   String _originalUsername = '';
+  DateTime? _originalBirthDate;
+  String? _originalGender;
+
+  DateTime? _birthDate;
+  String? _gender;
 
   // Validazione password
   List<PasswordCriterion> _passwordCriteria = [];
@@ -1892,6 +2627,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
+    _birthDateController.dispose();
     super.dispose();
   }
 
@@ -1901,8 +2637,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
       setState(() {
         _originalName = currentUser.name;
         _originalUsername = currentUser.username ?? '@utente';
+        _originalBirthDate = currentUser.birthDate;
+        _originalGender = currentUser.gender;
+
         _nameController.text = _originalName;
         _usernameController.text = _originalUsername.replaceFirst('@', '');
+        _birthDate = _originalBirthDate;
+        _gender = _originalGender;
+
+        if (_birthDate != null) {
+          _birthDateController.text =
+              "${_birthDate!.day}/${_birthDate!.month}/${_birthDate!.year}";
+        }
       });
     }
   }
@@ -1917,9 +2663,29 @@ class _EditProfilePageState extends State<EditProfilePage> {
     setState(() {
       _hasChanges = currentName != _originalName ||
           currentUsername != _originalUsername ||
+          _birthDate != _originalBirthDate ||
+          _gender != _originalGender ||
           hasPasswordChange;
       _isChangingPassword = hasPasswordChange;
     });
+  }
+
+  Future<void> _selectBirthDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(2000),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      locale: const Locale('it', 'IT'),
+    );
+    if (picked != null && picked != _birthDate) {
+      setState(() {
+        _birthDate = picked;
+        _birthDateController.text =
+            "${picked.day}/${picked.month}/${picked.year}";
+        _checkForChanges();
+      });
+    }
   }
 
   void _onPasswordChanged() {
@@ -1959,6 +2725,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   Widget build(BuildContext context) {
     final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
     final currentUser = AuthService().currentUser;
+    final genderLocked = (_originalGender ?? '').trim().isNotEmpty;
 
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
@@ -2165,6 +2932,109 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
               Text(
                 'L\'email non può essere modificata per motivi di sicurezza',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+
+              SizedBox(height: 32),
+
+              // Data di nascita
+              Text(
+                'Data di nascita',
+                style: TextStyle(
+                  color: ThemeHelpers.getTitleColor(widget.isDarkTheme),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(height: 8),
+              TextFormField(
+                controller: _birthDateController,
+                readOnly: true,
+                onTap: _originalBirthDate != null
+                    ? null
+                    : () => _selectBirthDate(context),
+                style: TextStyle(
+                    color: _originalBirthDate != null
+                        ? Colors.grey.shade600
+                        : Colors.black87),
+                decoration: _getInputDecoration(
+                  'Seleziona la tua data di nascita',
+                  Icons.calendar_today_outlined,
+                ).copyWith(
+                  fillColor: _originalBirthDate != null
+                      ? Colors.grey.shade100
+                      : Colors.white,
+                  suffixIcon: _originalBirthDate != null
+                      ? Icon(Icons.lock_outline,
+                          color: Colors.grey.shade400, size: 20)
+                      : null,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                _originalBirthDate != null
+                    ? 'La data di nascita non può essere modificata'
+                    : 'Chiediamo la tua data di nascita per offrirti sconti e regali speciali in quel periodo.',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+
+              SizedBox(height: 20),
+
+              // Sesso
+              Text(
+                'Sesso',
+                style: TextStyle(
+                  color: ThemeHelpers.getTitleColor(widget.isDarkTheme),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: _gender,
+                dropdownColor: Colors.white,
+                style: TextStyle(
+                    color:
+                        genderLocked ? Colors.grey.shade600 : Colors.black87),
+                decoration: _getInputDecoration(
+                  'Seleziona il tuo sesso',
+                  Icons.people_outline,
+                ).copyWith(
+                  fillColor: genderLocked ? Colors.grey.shade100 : Colors.white,
+                  suffixIcon: genderLocked
+                      ? Icon(Icons.lock_outline,
+                          color: Colors.grey.shade400, size: 20)
+                      : null,
+                ),
+                items: [
+                  DropdownMenuItem(value: 'maschio', child: Text('Maschio')),
+                  DropdownMenuItem(value: 'femmina', child: Text('Femmina')),
+                  DropdownMenuItem(
+                      value: 'preferisco non dirlo',
+                      child: Text('Preferisco non dirlo')),
+                ],
+                onChanged: genderLocked
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _gender = value;
+                          _checkForChanges();
+                        });
+                      },
+              ),
+              SizedBox(height: 8),
+              Text(
+                genderLocked
+                    ? 'Il sesso non può essere modificato dopo il primo inserimento'
+                    : 'Puoi scegliere se indicarlo ora. Dopo il primo salvataggio non sarà più modificabile.',
                 style: TextStyle(
                   color: Colors.grey.shade600,
                   fontSize: 12,
@@ -2617,6 +3487,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         success = await AuthService().updateUserProfileAndPassword(
           name: newName,
           username: newUsername,
+          birthDate: _birthDate,
+          gender: _gender,
           newPassword: _newPasswordController.text,
         );
       } else {
@@ -2624,6 +3496,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         success = await AuthService().updateUserProfile(
           name: newName,
           username: newUsername,
+          birthDate: _birthDate,
+          gender: _gender,
         );
       }
 

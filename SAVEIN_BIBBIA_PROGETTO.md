@@ -92,7 +92,11 @@ Campi importanti utente:
 - `email`
 - `username`
 - `role`: ruolo app, valori `free`, `premium`, `admin`
+- `premiumUntil`: scadenza Premium opzionale. Se `role=premium` e la data e' futura, l'utente e' Premium; se manca, Premium e' senza scadenza; se e' passata, l'app lo considera Free.
+- `premiumSource`: origine Premium (`admin_dashboard`, `new_signup_promo`, `cross_promo_*`, ecc.)
 - `dashboardRole`: ruolo accesso dashboard, valori `none`, `author`, `editor`, `admin`
+- `birthDate`: data di nascita (Timestamp), usata per sconti e regali
+- `gender`: sesso (maschio, femmina, preferisco non dirlo)
 - `isBlocked`
 - `blockedReason`
 - `blockedAt`
@@ -130,22 +134,38 @@ Cartella:
 ## Ruoli app
 
 Ruoli utente dell'app:
-- `Free`: limiti attivi, pubblicita, feature ridotte
-- `Premium`: limiti rimossi e niente pubblicita
+- `Free`: limiti e feature configurati dalla dashboard, pubblicita, feature ridotte
+- `Premium`: limiti e feature configurati dalla dashboard per il tier Premium, niente pubblicita
 - `Admin`: come Premium, senza pagamento, non attivabile dall'utente
 
-Limiti Free attuali:
-- massimo 10 cartelle root
-- profondita: home + 1 livello
-- massimo 4 sottocartelle per cartella
-- niente hashtag manuali
-- annunci interstitial: prima apertura giornaliera e ogni 5 import post
+I limiti non devono essere hardcoded come fonte di verita': la pagina `Limiti Funzioni` della dashboard comanda sempre su Firestore `config/plan_limits.featureRules`, sia per Free sia per Premium.
+
+Feature rule principali:
+- `root_folders`: numero massimo di cartelle nella Home.
+- `child_folders`: numero massimo di sottocartelle dirette per cartella.
+- `folder_levels`: profondita massima della gerarchia cartelle.
+- `manual_tags`: abilita/disabilita tag manuali.
+- `share_folder`: abilita e limita condivisione cartelle.
+- `share_post`: abilita e limita condivisione post.
+- `import_shared`: abilita e limita import di contenuti condivisi.
+
+Regole importanti:
+- `limit <= 0` significa illimitato per quel tier.
+- `enabled=false` disabilita la funzione per quel tier e deve mostrare popup/upsell coerente, non errore generico.
+- Admin non ha limiti di utilizzo.
+- Free e Premium leggono sempre la rispettiva colonna dalla dashboard. Non assumere che Premium sia sempre illimitato: se la dashboard imposta un limite Premium, l'app deve applicarlo.
+- `PlanLimitsService` deve aggiornare il profilo utente da Firestore prima di scegliere il tier, cosi un cambio Free/Premium fatto dalla dashboard viene capito dall'app anche se era gia aperta.
+- `AuthService` mantiene un listener live su `users/{uid}`: `role`, `premiumUntil` e `premiumSource` devono restare sincronizzati con Firestore. Non usare la cache locale come fonte di verita per i limiti.
+- Per `root_folders` il controllo deve usare il conteggio reale delle cartelle Home, non un contatore `feature_usage`.
+- Annunci interstitial: prima apertura giornaliera, ogni 5 import post, prima di impostare un reminder e prima di aprire un reminder da notifica/popup per utenti Free. Premium/Admin non vedono pubblicita.
 
 Il passaggio Free/Premium e' disponibile nella pagina account. L'utente non deve potersi assegnare Admin.
 
-### Comportamento al downgrade Premium → Free
+### Comportamento al cambio piano Premium/Free
 
 Quando un utente Premium torna al piano Free mantiene la piena visibilita' di tutte le cartelle create in precedenza (incluse quelle piu' profonde o in numero superiore ai limiti Free). Non viene eliminato nulla.
+
+Quando un utente passa da Free a Premium dalla dashboard, l'app deve aggiornare il profilo locale da Firestore e usare immediatamente le regole Premium di `config/plan_limits`. Se continua a usare le regole Free, controllare `AuthService.reloadCurrentUserFromFirestore()`, il listener su `users/{uid}` e `_currentTier()` in `PlanLimitsService`.
 
 Tuttavia non puo' piu' eseguire operazioni che superino i limiti Free:
 
@@ -155,10 +175,91 @@ Tuttavia non puo' piu' eseguire operazioni che superino i limiti Free:
 
 Nel `FolderCardSelector` (il picker cartella usato durante l'import) le cartelle oltre il limite Free vengono mostrate grigie (opacita' 45%) con badge **"Premium"** e non sono navigabili ne' selezionabili: il tap mostra uno SnackBar che invita l'upgrade. In questo modo l'utente capisce subito perche' quella destinazione non e' disponibile, senza ricevere un errore dopo aver scelto.
 
-Costanti di riferimento in `lib/services/access_control_service.dart`:
-- `freeRootFolderLimit = 10`
-- `freeMaxFolderLevel = 1`
-- `freeChildFoldersPerParentLimit = 4`
+Le vecchie costanti Free in `lib/services/access_control_service.dart` sono solo fallback se Firestore non risponde. Non devono essere usate come regola primaria.
+
+## Reminder post e cartelle
+
+SaveIn! consente di impostare reminder su post e cartelle.
+
+### File principali
+
+- `lib/widgets/reminder_dialog.dart`: dialog di creazione/gestione reminder.
+- `lib/services/reminder_service.dart`: persistenza Firestore, scheduling notifiche locali e gestione tap notifica.
+- `lib/pages/folder_detail_page.dart`: reminder sui post e sottocartelle, apertura/evidenziazione target con scroll preciso.
+- `lib/widgets/folder_card.dart`: reminder sulle cartelle.
+- `lib/services/interstitial_ad_service.dart`: gate ADV per utenti Free.
+- `lib/main.dart`: funzione `openReminderTargetInApp`, `homeHighlightFolderNotifier`, e logica di navigazione per cartelle root.
+
+### Dati Firestore
+
+- I reminder sono salvati in `users/{userId}/reminders`.
+- Campi principali: `targetType` (`post` o `folder`), `postId`, `postTitle`, `postUrl`, `folderId`, `folderName`, `reminderDay`, `reminderMonth`, `reminderHour`, `reminderMinute`, `isYearly`, `notificationId`, `isActive`, `createdAt`, `lastTriggeredAt`.
+
+### Regole prodotto
+
+- I reminder sono disponibili anche agli utenti Free.
+- Utenti Free: prima di impostare o aprire un reminder deve comparire un passaggio pubblicitario. Se AdMob non carica, viene mostrato un popup fallback obbligatorio `Annuncio` con pulsante `Continua`.
+- Utenti Premium/Admin: nessuna pubblicita sui reminder.
+- L'apertura di una notifica reminder non apre direttamente l'URL del post: entra in SaveIn! e naviga al target.
+- Reminder non annuali: dopo tap/apertura vengono eliminati e spariscono dalla UI.
+- Reminder annuali: restano attivi e vengono rischedulati, aggiornando `lastTriggeredAt`.
+- I reminder scaduti non annuali vengono rimossi automaticamente quando si leggono le liste reminder.
+- Se l'app viene aperta da notifica a freddo (app terminata), `ReminderService` legge `getNotificationAppLaunchDetails()` e riprocessa il payload dopo l'inizializzazione.
+
+### Navigazione alla notifica
+
+La funzione `openReminderTargetInApp` in `lib/main.dart` determina la destinazione in base al tipo di reminder:
+
+**Reminder su post:**
+- Apre `FolderDetailPage` della cartella che contiene il post.
+- Passa `highlightPostId` per evidenziare il post target.
+- Lo scroll porta il post esattamente al centro del viewport.
+
+**Reminder su sottocartella (ha un parent):**
+- Apre `FolderDetailPage` del parent della sottocartella.
+- Passa `highlightFolderId` per evidenziare la sottocartella nella griglia.
+- Lo scroll porta la card della sottocartella al centro del viewport.
+
+**Reminder su cartella root (livello 0, in Home, parent == null):**
+- NON apre `FolderDetailPage`: fa `popUntil(isFirst)` per tornare alla Home.
+- Imposta `homeHighlightFolderNotifier.value = folderId` (ValueNotifier globale).
+- `_WebHomePageState` ascolta il notifier e triggera highlight + scroll sulla griglia Home.
+
+### Scroll centrato: meccanismo a due passi
+
+Lo scroll verso il target usa **posizione reale da `GlobalKey`** (non stima fissa):
+
+**Prima passa:** se l'elemento non è ancora nel viewport, `SliverList`/`SliverGrid` non lo ha ancora costruito (lazy rendering). Si fa uno scroll approssimativo (stima offset) per portarlo in vista.
+
+**Seconda passa:** dopo il render, il `GlobalKey` è collegato al widget reale. Si calcola la posizione esatta:
+```dart
+final box = key.currentContext!.findRenderObject() as RenderBox;
+final itemOffset = box.localToGlobal(Offset.zero, ancestor: scrollableBox);
+final centeredOffset = currentScrollOffset + itemOffset.dy - (viewportHeight - itemHeight) / 2;
+```
+Il risultato porta il **centro dell'elemento** esattamente al **centro del viewport**.
+
+Chiavi usate:
+- `_highlightedPostKey` (`GlobalKey`) in `_FolderDetailPageState`: assegnata al Container del post evidenziato in `_buildPostCard`.
+- `_highlightedFolderKey` (`GlobalKey`) in `_FolderDetailPageState`: assegnata all'`AnimatedBuilder` della sottocartella evidenziata nel `SliverGrid`.
+- `_highlightedHomeFolderKey` (`GlobalKey`) in `_WebHomePageState`: assegnata all'`AnimatedBuilder` della card root evidenziata nella griglia Home.
+
+### Highlight animato (effetto pulse)
+
+Ogni elemento evidenziato usa un `AnimationController` con `repeat(reverse: true)` a 700ms per creare un effetto pulsante per 5 secondi:
+- Sfondo arancione: opacità da 0.18 a 0.40.
+- Bordo arancione: spessore da 2.5px a 4px.
+- Ombra esterna arancione: `blurRadius` da 10 a 22, `spreadRadius` da 1 a 4.
+
+L'`AnimationController` è in `_FolderDetailPageState` (per post/subfolder) e in `_WebHomePageState` (per root folder in Home), con `SingleTickerProviderStateMixin`.
+
+### Comunicazione Home ↔ openReminderTargetInApp
+
+Per le cartelle root viene usato un `ValueNotifier<String?>` globale:
+```dart
+final ValueNotifier<String?> homeHighlightFolderNotifier = ValueNotifier(null);
+```
+Definito in `lib/main.dart`. `_WebHomePageState` si registra con `addListener` in `initState` e rimuove il listener in `dispose`. Quando il notifier cambia, triggera `setState` con il nuovo `_highlightRootFolderId` e avvia scroll + animazione pulse.
 
 ## Ruoli dashboard
 
@@ -194,7 +295,10 @@ Sezioni:
 - Post salvati utente
 - Cartelle utente
 - Piani Free/Premium
+- Limiti Funzioni
+- Statistiche globali
 - Costi/Ricavi
+- Notifiche
 - Banner promo
 - Accessi dashboard: gestisce `dashboard_accesses`, non la lista utenti app
 
@@ -204,37 +308,91 @@ Vincoli UI:
 - Dettaglio utente in pagina dedicata, non pannello laterale
 - Post: elenco titoli, filtro per provenienza/social/sito
 - Cartelle: espandibili, con sottocartelle e post
+- Nel dettaglio del singolo utente deve esserci `Storico account e piano`: mostra registrazione, passaggi Free/Premium/Admin, modifiche scadenza Premium, promo compleanno, promo/banner, promo benvenuto e cross-promo.
+- Lo storico permanente nuovo viene scritto in `users/{uid}/account_history`. La vista dashboard integra anche fonti storiche gia presenti: `admin_logs`, `promotion_redemptions`, `new_signup_premium_promo_claims`, `cross_app_promos` e il campo utente `birthdayOffer`.
+- Quando si azzerano dati di test cross-promo o redemption, non cancellare `users/{uid}/account_history`.
+- Tutte le sezioni principali della dashboard web devono usare la stessa larghezza della Home dashboard: `BoxConstraints(maxWidth: 1400)`. Non introdurre pagine interne a `1100`/`1200`, altrimenti risultano visivamente piu strette.
+- I controlli cliccabili custom (`_AdminNavButton`, tab Notifica/Email, select promo, righe link) devono usare `MouseRegion(cursor: SystemMouseCursors.click)` quando sono interattivi, cosi su web compare la manina.
+- La pagina Notifiche usa due schede evidenti e colorate: `Notifica Push / In-App` e `Email Marketing`. Devono sembrare pulsanti selezionabili, non semplici label.
+- La Home dashboard contiene una barra `Invia Promo/Banner` sopra la tabella utenti: permette di scegliere promo/banner preparati e inviarli agli utenti selezionati senza entrare nella pagina Notifiche.
+- Le notifiche dashboard SaveIn! passano sempre dalla Cloud Function `sendDashboardNotification`, anche quando si seleziona solo `In-app`: la Function crea `notification_campaigns/{campaignId}` e, se richiesto, `users/{uid}/notifications/{notificationId}`.
+- Nella finestra di composizione Notifiche/Email c'e' il flag `Questa comunicazione deve arrivare sempre perche e' di sistema`. Se attivo, la dashboard passa `systemCommunication=true` alle Cloud Functions e l'invio bypassa il blocco marketing/comunicazioni per gli utenti selezionati.
+- Se il flag sistema non e' attivo, `sendDashboardNotification` e `sendBulkEmail` rispettano `consents.marketing.accepted`/`acceptedMarketing`: gli utenti senza consenso vengono saltati e la risposta include `skippedConsentCount`.
+- Prima dell'invio, se tra gli utenti selezionati ci sono persone con comunicazioni `NO` e il flag sistema non e' attivo, la dashboard deve mostrare un avviso: la notifica/email non sara inviata a quegli utenti. L'admin puo annullare oppure continuare saltandoli.
+- Le push dashboard usano FCM con `type=dashboard_notification`, `campaignId`, `title` e `body` nel payload data. Quando l'utente tocca la push, l'app deve aprirsi e mostrare un popup con lo stesso titolo/testo. Se titolo/testo non sono nel payload, l'app recupera `notification_campaigns/{campaignId}`.
+- Android richiede in `android/app/src/main/AndroidManifest.xml` l'intent-filter `FLUTTER_NOTIFICATION_CLICK` sulla `MainActivity`, coerente con `android.notification.clickAction` inviato dalla Cloud Function. Senza questo filtro la notifica puo comparire nella barra ma il tap non apre l'app.
+- `AppNotificationService` conserva in memoria i payload push aperti prima che la UI sia montata: quando `AppNotificationListener` parte, svuota la coda e mostra il popup. Questo copre il caso app chiusa/avvio a freddo.
+- Le notifiche in-app vengono ascoltate da `AppNotificationListener` su `users/{uid}/notifications`, filtrando lato app i documenti con `readAt == null`. Dopo la chiusura del popup viene scritto `readAt`.
 
 ## Promo incrociate e banner dinamici
 
-SaveIn! supporta banner promozionali configurabili da dashboard e promo incrociate con SmartChef.
+SaveIn! supporta banner promozionali configurabili dal punto centrale SmartChef/SaveIn e promo incrociate con SmartChef.
 
 Collezioni Firestore:
-- `promotion_banners`: configurazione banner. Campi principali: `active`, `app`, `apps`, `type`, `title`, `message`, `ctaLabel`, `secondaryCtaLabel`, `action`, `actionUrl`, `imageUrl`, `priority`, `oncePerUser`, `direction`.
+- `promotion_banners`: configurazione banner. Campi principali: `active`, `app`, `apps`, `type`, `title`, `message`, `ctaLabel`, `secondaryCtaLabel`, `action`, `actionUrl`, `imageUrl`, `saveinImageUrl`, `smartchefImageUrl`, `priority`, `oncePerUser`, `direction`.
 - `promotion_banner_events`: statistiche aggregate per banner (`view`, `click`) con `promotionId`, `eventType`, `placement`, `count`.
 - `promotion_redemptions`: riscatti promo, usato per nascondere banner `oncePerUser` e mostrare statistiche utilizzi.
 - `cross_app_promos`: stato promo SaveIn! ↔ SmartChef, con direzioni `savein_to_smartchef` e `smartchef_to_savein`.
+- `app_config/new_signup_premium_promo`: configurazione promo benvenuto nuovi iscritti SaveIn (`active`, `app`, `durationDays`, `priceAfterTrial`, `startsAt`, `endsAt`). E' il documento reale letto dalle Cloud Functions SaveIn.
+- `new_signup_premium_promo_claims`: storico permanente per email delle promo benvenuto gia usate. Campi principali: `email`, `normalizedEmail`, `firstUserId`, `lastUserId`, `startedAt`, `premiumUntil`, `durationDays`, `status`.
 
 Dashboard:
 - La voce `Banner promo` e' subito vicino a `Home dashboard` per non restare nascosta nello scroll orizzontale.
-- La pagina permette creare, modificare, attivare/disattivare, eliminare e vedere statistiche dei banner.
-- Il campo `imageUrl` e' l'immagine realmente mostrata agli utenti; dimensione consigliata `1200x400 px` (rapporto 3:1). Immagini `1200x628` sono accettate ma vengono adattate/ritagliate.
+- La pagina SaveIn e' ora un monitor locale: mostra i banner sincronizzati nel progetto SaveIn, ma creazione/modifica/attivazione/disattivazione/eliminazione avvengono dalla gestione centrale `/admin/promo-banners` del backend SmartChef.
+- Il centro promo garantisce una sola promo attiva globale alla volta e sincronizza su SaveIn le promo `app=savein` o `app=both` tramite endpoint protetto.
+- La Home dashboard SaveIn mostra anche promo/banner `active: false` se sono `app=savein` o `app=both`: `active` indica se il banner appare automaticamente nell'app, non se e' inviabile manualmente agli utenti selezionati.
+- Nella barra `Invia Promo/Banner`, le promo non attive nell'app devono comparire con badge/testo `non attivo in app`, ma restano selezionabili per invio manuale.
+- La tendina `Invia Promo/Banner` deve essere una select visibile, non testo semplice: campo bianco con bordo, freccia, larghezza controllata (circa 430 px), menu con intestazioni `Offerte Compleanno` e `Banner SaveIn`.
+- Per `generic_promo` si usa solo `imageUrl`; nel form SaveIn non vanno mostrati i campi dei pulsanti (`ctaLabel`/`secondaryCtaLabel`) perche' il banner generico e' gestito come immagine/link.
+- Per `cross_promo` si usano immagini dedicate: `saveinImageUrl` per SaveIn! e `smartchefImageUrl` per SmartChef. `imageUrl` resta fallback/generic.
 - Il pulsante `Carica immagine banner` carica immagini PNG/JPG/WEBP su Firebase Storage tramite Cloud Function admin-only.
 - Il pulsante `Scegli dallo storico` mostra tutte le immagini presenti in Storage sotto `promotion_banners/`, consente di riutilizzarle e di eliminarle definitivamente. Eliminare un'immagine usata da un banner rompe la visualizzazione di quel banner finche' non si sostituisce `imageUrl`.
+- La sezione `Promo nuovi iscritti` abilita/disabilita il mese Premium gratuito di benvenuto. Sotto mostra lo storico delle ultime email che hanno gia usato la promo con inizio, fine e stato.
+- Il centro promo SmartChef mostra la tab SaveIn leggendo la config live da SaveIn tramite `syncCentralNewSignupPremiumPromo` in `GET` protetto. Questo evita disallineamenti tra copia locale SmartChef e documento reale SaveIn.
 
 Cloud Functions:
+- `syncCentralPromotionBanner`: endpoint HTTP protetto da `X-Cross-Promo-Secret` usato dal centro promo SmartChef per creare/aggiornare/eliminare banner SaveIn sincronizzati.
+- `syncCentralNewSignupPremiumPromo`: endpoint HTTP protetto da `X-Cross-Promo-Secret` usato dal centro promo SmartChef. In `POST` aggiorna `app_config/new_signup_premium_promo` di SaveIn; in `GET` restituisce la config live per farla comparire nella dashboard SmartChef.
 - `getActivePromotionBanner`: restituisce il banner attivo piu' prioritario per utente/app, rispettando `active`, finestra temporale, `oncePerUser` e riscatti gia' presenti.
 - `recordPromotionBannerEvent`: registra view/click.
 - `uploadPromotionBannerImage`: carica file banner su Storage, solo admin dashboard.
 - `listPromotionBannerImages`: elenca storico immagini banner da Storage, solo admin dashboard.
 - `deletePromotionBannerImage`: elimina definitivamente un file banner da Storage, solo admin dashboard.
 - `activateSmartChefLaunchPromo`, `confirmSmartChefCrossPromo`, `receiveSmartChefLaunchPromo`, `claimPendingSmartChefLaunchPromo`: gestiscono la promo incrociata account-based tramite email.
+- `getNewSignupPremiumPromoEligibility`: controlla lato server se la mail puo vedere/attivare la promo benvenuto. Se la mail ha gia una promo ancora valida, ripristina Premium sul nuovo account fino alla scadenza originale.
+- `activateNewSignupPremiumPromo`: attiva la promo benvenuto e scrive lo storico permanente in `new_signup_premium_promo_claims`. Se la mail ha gia usato la promo e la scadenza e' passata, blocca il riutilizzo.
+
+Configurazione SmartChef necessaria per la sync SaveIn:
+- Il servizio Cloud Run SmartChef `smart-chef-backend` deve avere queste env vars separate, non concatenate in un unico valore:
+  - `CROSS_PROMO_SECRET`
+  - `SAVEIN_PROMOTION_BANNER_SYNC_URL=https://us-central1-saveit-app-1784d.cloudfunctions.net/syncCentralPromotionBanner`
+  - `SAVEIN_NEW_SIGNUP_PROMO_SYNC_URL=https://us-central1-saveit-app-1784d.cloudfunctions.net/syncCentralNewSignupPremiumPromo`
+  - `SAVEIN_CROSS_PROMO_CONFIRM_URL=https://us-central1-saveit-app-1784d.cloudfunctions.net/confirmSmartChefCrossPromo`
+  - `SAVEIN_CROSS_PROMO_PENDING_URL=https://us-central1-saveit-app-1784d.cloudfunctions.net/receiveSmartChefLaunchPromo`
+- Per evitare problemi PowerShell con virgole/virgolette, preferire `gcloud run services update ... --env-vars-file smartchef_cloudrun_env.yaml`.
+- SmartChef ha una rotta admin `POST /admin/promo-banners/sync-savein` per risincronizzare su SaveIn i banner centrali gia esistenti.
 
 UI utente:
 - Home SaveIn!: banner sotto la barra di ricerca.
 - Pagina Account: banner anche nella sezione account/piano.
 - Se `imageUrl` e' valorizzato, l'immagine viene mostrata in alto nel banner; titolo, messaggio e CTA restano sotto.
 - Le view vengono deduplicate localmente per evitare conteggi ripetuti nella stessa sessione.
+- Pagina Account:
+  - Se l'utente e' Free e la promo benvenuto e' attiva, compare un avviso sopra la tipologia account.
+  - Cliccando l'avviso si apre una dialog a slide stile tutorial SmartChef/SaveIn, formato verticale 9:16, testi scuri espliciti e illustrazioni.
+  - Le slide promo benvenuto sono 4: mese Premium gratis, cartelle, tag/ricerca, niente pubblicita e uso piu fluido. L'ultima slide contiene un solo pulsante `Prova Premium gratis`.
+  - L'esempio visuale della slide cartelle usa `Viaggi` con sottocartelle `Giappone`, `Francia`, `India`; dentro `Giappone`: `Ristoranti`, `Monumenti`, `Esperienze`.
+  - Il popup automatico della promo benvenuto viene proposto al massimo una volta al giorno per utente, al primo ingresso utile. Premere `Non ora` non blocca la promo per sempre: la ripropone dal giorno successivo se l'utente resta idoneo.
+  - Il bottone `Vedi differenze Free/Premium` e' full-width blu per maggiore visibilita. Il confronto piani non include piu la slide statistiche.
+  - Se un Premium temporaneo clicca `Passa a Free`, non viene interrotto subito: l'app avvisa che restera Premium fino alla data prevista e poi tornera Free automaticamente.
+
+Regole anti-abuso promo benvenuto:
+- Non basarsi solo sul documento `users/{uid}`: l'utente puo eliminarlo insieme all'account.
+- La fonte di verita e' `new_signup_premium_promo_claims/{normalizedEmail}` scritta solo da Cloud Function.
+- Se una mail ha gia usato la promo:
+  - se `premiumUntil` e' futura, un nuovo account con stessa mail riparte Premium fino alla scadenza originale;
+  - se `premiumUntil` e' passata, la promo non viene piu proposta e non puo essere riattivata.
+- Le regole Firestore permettono lettura dashboard dello storico ma vietano scritture client su `new_signup_premium_promo_claims`.
 
 Deploy:
 ```powershell
@@ -264,6 +422,7 @@ SaveIn! supporta la condivisione di post singoli e cartelle (con tutto il conten
 | `trackShareLinkImport` | `onCall` | Incrementa `importCount` dopo che l'utente importa il contenuto |
 | `openShareLink` | `onRequest` | Serve la landing page HTML con messaggio contestuale, link Play Store e redirect automatico allo store dopo 1,4 s |
 | `assetLinks` | `onRequest` | Serve `/.well-known/assetlinks.json` per la verifica Android App Links |
+| `sendDashboardNotification` | `onCall` | Invia notifiche dashboard a utenti selezionati: crea campagna, eventuali documenti in-app e push FCM con payload apribile dall'app |
 
 ### Collezione Firestore: `shared_links`
 
@@ -356,6 +515,18 @@ Il campo `isShared` viene impostato a `true` da `ShareLinkService.importPost` e 
 
 ---
 
+## Registrazione e Profilo Utente
+
+SaveIn! raccoglie informazioni di base per personalizzare l'esperienza e offrire vantaggi.
+
+- **Dati raccolti**: Nome, Email, Password, Data di Nascita e Sesso.
+- **Data di Nascita**: Viene chiesta esplicitamente per offrire sconti e regali speciali (es. compleanno). Un avviso nel form spiega questa finalità.
+- **Sesso**: Opzioni: "Maschio", "Femmina", "Preferisco non dirlo".
+- **Modifica Profilo**: Gli utenti possono aggiornare Data di Nascita e Sesso dalla pagina "Modifica Profilo" nell'area Account.
+- **Sync Firestore**: Tutti i dati sono sincronizzati in tempo reale con la collezione `users` tramite `AuthService`.
+
+---
+
 ## Import post e metadati
 
 Servizio principale:
@@ -435,6 +606,7 @@ Regole logiche:
 - Editor puo bloccare/sbloccare utenti ma non modificare ruoli.
 - Admin dashboard puo gestire accessi e ruoli.
 - Gli utenti non devono potersi auto-assegnare campi admin/dashboard.
+- Le statistiche globali della dashboard usano `collectionGroup('posts')` e `collectionGroup('folders')`: le rules devono includere match dedicati `/{path=**}/posts/{postId}` e `/{path=**}/folders/{folderId}` con `allow read: if isDashboardViewer();`, altrimenti appare `permission-denied`.
 
 Ogni modifica a ruoli/campi sensibili deve essere allineata a `firestore.rules`.
 
@@ -452,6 +624,9 @@ Logica:
 - Solo utenti Free.
 - Annuncio a prima apertura giornaliera.
 - Annuncio ogni 5 import post.
+- Gate ADV prima di impostare un reminder (`showReminderSetupGate`).
+- Gate ADV prima di aprire un reminder da notifica o popup interno (`showReminderOpenGate`).
+- Se AdMob non carica, i gate reminder mostrano un popup fallback obbligatorio `Annuncio` per non saltare il passaggio pubblicitario.
 - Premium/Admin non devono vedere annunci.
 
 Config native:
@@ -466,6 +641,8 @@ Servizi:
 
 La dashboard legge statistiche cloud e riepiloghi sincronizzati in:
 - `users/{userId}/analytics/summary`
+- `collectionGroup('posts')` per statistiche globali su provenienze/creator e conteggi post
+- `collectionGroup('folders')` per statistiche globali sui nomi cartella
 
 Statistiche admin utente:
 - post totali/periodo
@@ -476,6 +653,10 @@ Statistiche admin utente:
 - post per mese
 - ultimi post
 - analytics app sincronizzate quando disponibili
+
+Statistiche globali dashboard:
+- La sezione `Statistiche globali` mostra post analizzati, cartelle analizzate, top provenienze, cartelle piu comuni e top creator importati.
+- Richiede deploy delle Firestore rules oltre al deploy hosting se si modifica la logica di lettura.
 
 ## File chiave
 
@@ -905,3 +1086,39 @@ L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla p
 - La Privacy Policy pubblica è su GitHub Pages (`dinus85.github.io/saveit-legal-content/privacy.html`). Per aggiornarla modificare `privacy.html` nel repo `Dinus85/saveit-legal-content`.
 - Per aggiornare gli ID AdMob iOS, creare l'app su AdMob per iOS e sostituire gli ID di test in `interstitial_ad_service.dart` e `ios/Runner/Info.plist`.
 - Le immagini banner promo stanno in Firebase Storage sotto `promotion_banners/` e sono gestite da funzioni admin-only. Non aprire regole Storage pubbliche in scrittura per gestire questi upload.
+- La promo benvenuto nuovi iscritti deve passare sempre dalle Cloud Functions `getNewSignupPremiumPromoEligibility` e `activateNewSignupPremiumPromo`. Non riattivarla con scritture dirette client su `users/{uid}`: serve lo storico permanente per email in `new_signup_premium_promo_claims`.
+- Quando si modifica la promo benvenuto deployare sia Functions sia regole Firestore: `firebase deploy --only functions,firestore:rules`. Per la dashboard web serve anche build/deploy hosting.
+- Dopo eliminazione account, `AuthService.deleteAccount()` deve pulire subito sessione locale e impedire che `_loadUserData` ricrei un profilo fallback mentre Firebase Auth notifica il logout.
+
+## Aggiornamenti 15/06/2026
+
+- Dashboard SaveIn: tutte le pagine interne sono state uniformate alla larghezza della Home dashboard (`maxWidth: 1400`).
+- Dashboard SaveIn: aggiunta pagina `Limiti Funzioni` con valori default dalla Bibbia, modifica dinamica Free/Premium, descrizioni feature e salvataggio su `config/plan_limits`.
+- Dashboard SaveIn: pagina `Notifiche` rifinita con tab evidenti `Notifica Push / In-App` e `Email Marketing`; i tab devono mostrare cursore a manina su web.
+- Dashboard SaveIn: Home dashboard contiene la barra `Invia Promo/Banner` per inviare promo/banner preparati agli utenti selezionati. La select deve mostrare anche banner non attivi in app, perche' l'invio manuale e' separato dalla visibilita automatica in app.
+- Dashboard SaveIn: la tendina `Invia Promo/Banner` e' stata resa un vero campo select con bordo, freccia, larghezza controllata e menu ordinato per sezioni.
+- Dashboard SaveIn: statistiche globali abilitate tramite rules per `collectionGroup('posts')` e `collectionGroup('folders')`.
+- Dashboard SaveIn: cursore web a manina sui controlli custom cliccabili (`_AdminNavButton`, tab notifiche/email, select promo, righe link).
+- SmartChef backend: aggiunta pagina dedicata `/admin/notifications` per inviare push, messaggi in-app ed email.
+- SmartChef backend: pagina notifiche allineata alla larghezza delle altre pagine admin (`max-width: 1600px`).
+- SmartChef backend: configurate env vars Cloud Run per sincronizzare promo/banner centrali verso SaveIn; usare preferibilmente `--env-vars-file` per evitare errori PowerShell.
+- SmartChef backend: aggiunta rotta admin `POST /admin/promo-banners/sync-savein` per risincronizzare su SaveIn banner centrali gia esistenti.
+
+Deploy SaveIn web:
+```powershell
+cd C:\Users\dinop\saveit
+flutter build web --release --base-href / --no-wasm-dry-run
+firebase deploy --only hosting --project saveit-app-1784d
+```
+
+Deploy SaveIn rules quando cambiano permessi/statistiche:
+```powershell
+cd C:\Users\dinop\saveit
+firebase deploy --only firestore:rules --project saveit-app-1784d
+```
+
+Deploy SmartChef backend:
+```powershell
+cd C:\Users\dinop\smart_chef_sm\backend
+gcloud run deploy smart-chef-backend --source . --region europe-west1 --project smartchef-82bc8
+```

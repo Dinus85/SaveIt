@@ -5,6 +5,7 @@ import '../pages/privacy_policy_page.dart';
 import '../pages/terms_conditions_page.dart';
 import '../pages/marketing_communications_page.dart';
 import '../services/auth_service.dart';
+import '../widgets/first_launch_tutorial_dialog.dart';
 import '../main.dart'; // Aggiunto import per WebHomePage
 
 // Helper class per validazione password
@@ -104,13 +105,17 @@ class _RegistrationPageState extends State<RegistrationPage> {
   final _confirmEmailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _birthDateController = TextEditingController();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _acceptedTerms = false;
   bool _acceptedPrivacy = false;
-  bool _acceptedMarketing = false;
+  bool _optOutMarketing = false;
+
+  DateTime? _birthDate;
+  String? _gender;
 
   // Stato validazione password
   List<PasswordCriterion> _passwordCriteria = [];
@@ -142,6 +147,7 @@ class _RegistrationPageState extends State<RegistrationPage> {
     _confirmEmailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _birthDateController.dispose();
     super.dispose();
   }
 
@@ -647,9 +653,86 @@ class _RegistrationPageState extends State<RegistrationPage> {
               ),
             ),
           ],
+          SizedBox(height: 20),
+          Text(
+            'Data di nascita',
+            style: TextStyle(
+              color: themeColors.titleColor,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(height: 8),
+          TextFormField(
+            controller: _birthDateController,
+            readOnly: true,
+            onTap: () => _selectBirthDate(context),
+            style: TextStyle(color: Colors.black87),
+            decoration: _getInputDecoration(
+              'Seleziona la tua data di nascita',
+              Icons.calendar_today_outlined,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Chiediamo la tua data di nascita per offrirti sconti e regali speciali in quel periodo.',
+            style: TextStyle(
+              color: themeColors.subtitleColor,
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          SizedBox(height: 20),
+          Text(
+            'Sesso',
+            style: TextStyle(
+              color: themeColors.titleColor,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: _gender,
+            dropdownColor: Colors.white,
+            style: TextStyle(color: Colors.black87),
+            decoration: _getInputDecoration(
+              'Seleziona il tuo sesso',
+              Icons.people_outline,
+            ),
+            items: [
+              DropdownMenuItem(value: 'maschio', child: Text('Maschio')),
+              DropdownMenuItem(value: 'femmina', child: Text('Femmina')),
+              DropdownMenuItem(
+                  value: 'preferisco non dirlo',
+                  child: Text('Preferisco non dirlo')),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _gender = value;
+              });
+            },
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _selectBirthDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(2000),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      locale: const Locale('it', 'IT'),
+    );
+    if (picked != null && picked != _birthDate) {
+      setState(() {
+        _birthDate = picked;
+        _birthDateController.text =
+            "${picked.day}/${picked.month}/${picked.year}";
+      });
+    }
   }
 
   Widget _buildPasswordCriteria(ThemeColors themeColors) {
@@ -743,9 +826,9 @@ class _RegistrationPageState extends State<RegistrationPage> {
           onInfoTap: () => _openTermsConditions(),
         ),
         _buildConsentCheckbox(
-          'Accetto di ricevere comunicazioni marketing',
-          _acceptedMarketing,
-          (value) => setState(() => _acceptedMarketing = value ?? false),
+          'Non voglio ricevere comunicazioni marketing (offerte, novità e suggerimenti personalizzati)',
+          _optOutMarketing,
+          (value) => setState(() => _optOutMarketing = value ?? false),
           false,
           themeColors,
           onInfoTap: () => _openMarketingInfo(),
@@ -1021,7 +1104,9 @@ class _RegistrationPageState extends State<RegistrationPage> {
         password: _passwordController.text,
         acceptedTerms: _acceptedTerms,
         acceptedPrivacy: _acceptedPrivacy,
-        acceptedMarketing: _acceptedMarketing,
+        acceptedMarketing: !_optOutMarketing,
+        birthDate: _birthDate,
+        gender: _gender,
       );
 
       if (result.success && result.user != null) {
@@ -1033,8 +1118,8 @@ class _RegistrationPageState extends State<RegistrationPage> {
             MaterialPageRoute(
                 builder: (context) => WebHomePage(
                       isDarkTheme: widget.isDarkTheme,
-                      marketingProfileEnabled: _acceptedMarketing,
-                      marketingCommsEnabled: _acceptedMarketing,
+                      marketingProfileEnabled: !_optOutMarketing,
+                      marketingCommsEnabled: !_optOutMarketing,
                       onThemeChanged: widget.onThemeChanged,
                       onMarketingProfileChanged: (value) {},
                       onMarketingCommsChanged: (value) {},
@@ -1065,146 +1150,12 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
   // POPUP DI BENVENUTO PER NUOVI UTENTI
   void _showWelcomeDialog(String userName, {bool isNewUser = false}) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        contentPadding: EdgeInsets.zero,
-        content: Container(
-          width: 300,
-          padding: EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              colors: [Colors.blue.shade50, Colors.white],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Icona di benvenuto
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.blue.withOpacity(0.3),
-                      blurRadius: 15,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  Icons.celebration,
-                  color: Colors.white,
-                  size: 40,
-                ),
-              ),
-
-              SizedBox(height: 20),
-
-              // Titolo
-              isNewUser
-                  ? Column(
-                      children: [
-                        Text(
-                          'Benvenuto in',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        SizedBox(height: 8),
-                        Image.asset(
-                          'assets/icon/SaveIn!.png',
-                          height: 84,
-                          fit: BoxFit.contain,
-                        ),
-                      ],
-                    )
-                  : Text(
-                      'Bentornato!',
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-
-              SizedBox(height: 12),
-
-              // Nome utente
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'Ciao $userName!',
-                  style: TextStyle(
-                    color: Colors.blue.shade700,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-
-              SizedBox(height: 16),
-
-              // Messaggio
-              Text(
-                isNewUser
-                    ? 'Il tuo account è stato creato con successo!\nSei pronto a organizzare i tuoi contenuti preferiti dal web.'
-                    : 'È bello rivederti!\nI tuoi contenuti salvati ti aspettano.',
-                style: TextStyle(
-                  color: Colors.black54,
-                  fontSize: 16,
-                  height: 1.4,
-                ),
-                textAlign: TextAlign.center,
-              ),
-
-              SizedBox(height: 24),
-
-              // Pulsante
-              Container(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 2,
-                  ),
-                  child: Text(
-                    'Inizia a esplorare',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final welcomeFuture = SaveInFirstLaunchTutorial.show(
+      context,
+      markSeenOnClose: true,
+      welcomeUserName: isNewUser ? userName : null,
     );
+    SaveInFirstLaunchTutorial.trackExternalWelcome(welcomeFuture);
   }
 
   // 🔥 CORRETTO: Solo SnackBar, no navigazione

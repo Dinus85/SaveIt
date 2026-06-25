@@ -3,19 +3,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 
-const _kCrossDismissedAt = 'promo_cross_dismissed_at';
-const _kCrossActivated = 'promo_cross_activated';
 const _kGenericDismissedAt = 'promo_generic_dismissed_at';
 const _k48h = Duration(hours: 48);
+
+String _kCrossDismissedAtForBanner(String bannerId) =>
+    'promo_cross_dismissed_at_$bannerId';
+
+String _kCrossActivatedForBanner(String bannerId) =>
+    'promo_cross_activated_$bannerId';
 
 class PromoPopupService {
   PromoPopupService._();
 
   // ── Lettura preferenze ────────────────────────────────────────────────────
 
-  static Future<bool> _isCrossPromoActivated() async {
+  static Future<bool> _isCrossPromoActivated(String bannerId) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_kCrossActivated) ?? false;
+    return prefs.getBool(_kCrossActivatedForBanner(bannerId)) ?? false;
   }
 
   static Future<bool> _isDismissedRecently(String key) async {
@@ -27,15 +31,15 @@ class PromoPopupService {
 
   // ── Scrittura preferenze ──────────────────────────────────────────────────
 
-  static Future<void> markCrossPromoDismissed() async {
+  static Future<void> markCrossPromoDismissed(String bannerId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(
-        _kCrossDismissedAt, DateTime.now().millisecondsSinceEpoch);
+    await prefs.setInt(_kCrossDismissedAtForBanner(bannerId),
+        DateTime.now().millisecondsSinceEpoch);
   }
 
-  static Future<void> markCrossPromoActivated() async {
+  static Future<void> markCrossPromoActivated(String bannerId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kCrossActivated, true);
+    await prefs.setBool(_kCrossActivatedForBanner(bannerId), true);
   }
 
   static Future<void> markGenericPromoDismissed() async {
@@ -50,12 +54,10 @@ class PromoPopupService {
     final banner = await AuthService().getActivePromotionBanner();
     if (banner == null) return null;
 
-    final activated = await _isCrossPromoActivated();
-
     if (banner.isCrossPromo) {
-      if (activated)
-        return null; // cross promo già attivata, non mostrare mai più
-      final dismissed = await _isDismissedRecently(_kCrossDismissedAt);
+      final dismissed = await _isDismissedRecently(
+        _kCrossDismissedAtForBanner(banner.id),
+      );
       if (dismissed) return null;
       return banner;
     } else {
@@ -64,6 +66,10 @@ class PromoPopupService {
       if (dismissed) return null;
       return banner;
     }
+  }
+
+  static Future<PromotionBanner?> getAccountBanner() async {
+    return AuthService().getActivePromotionBanner();
   }
 
   // ── Popup ─────────────────────────────────────────────────────────────────
@@ -158,7 +164,7 @@ class _CrossPromoContent extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.close, size: 20),
                 onPressed: () async {
-                  await PromoPopupService.markCrossPromoDismissed();
+                  await PromoPopupService.markCrossPromoDismissed(banner.id);
                   if (context.mounted) Navigator.of(context).pop();
                 },
               ),
@@ -200,7 +206,8 @@ class _CrossPromoContent extends StatelessWidget {
                     eventType: 'click',
                     placement: 'savein_popup',
                   );
-                  await PromoPopupService.markCrossPromoActivated();
+                  await PromoPopupService.markCrossPromoDismissed(banner.id);
+                  await PromoPopupService.markCrossPromoActivated(banner.id);
                   if (context.mounted) {
                     Navigator.of(context).pop();
                     await onActivate(context);

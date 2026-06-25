@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -71,11 +72,71 @@ class InterstitialAdService {
     return _showInterstitial();
   }
 
-  /// Mostra una interstitial ad prima di aprire un post da reminder.
+  /// Mostra una interstitial ad prima di aprire un reminder.
   /// Non fa nulla se l'utente è Premium o su web.
   Future<void> showReminderAd() async {
     if (!_shouldUseAds) return;
     await _showInterstitial();
+  }
+
+  /// Mostra sempre un passaggio pubblicitario prima di aprire un reminder.
+  /// Usa AdMob se disponibile, altrimenti mostra un popup fallback.
+  Future<void> showReminderOpenGate(BuildContext context) async {
+    if (!_shouldUseAds) return;
+
+    final shown = await _showInterstitial();
+    if (shown || !context.mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Annuncio'),
+        content: const Text(
+          'Per aprire il reminder con un account Free devi prima visualizzare una pubblicità.',
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Continua'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Richiede una interstitial prima di impostare un reminder per utenti Free.
+  /// Per Premium/web restituisce true senza mostrare pubblicità.
+  Future<bool> showReminderSetupAdIfRequired() async {
+    if (!_shouldUseAds) return true;
+    return _showInterstitial();
+  }
+
+  /// Mostra sempre un passaggio pubblicitario prima di impostare un reminder.
+  /// Usa AdMob se disponibile, altrimenti mostra un popup fallback così il tap
+  /// non passa direttamente alla funzione per gli utenti Free.
+  Future<void> showReminderSetupGate(BuildContext context) async {
+    if (!_shouldUseAds) return;
+
+    final shown = await showReminderSetupAdIfRequired();
+    if (shown || !context.mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Annuncio'),
+        content: const Text(
+          'I reminder sono gratis per gli utenti Free guardando una pubblicità.',
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Continua'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> recordSuccessfulImport() async {

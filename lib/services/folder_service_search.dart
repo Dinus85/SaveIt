@@ -3,8 +3,8 @@
 
 import 'package:flutter/material.dart';
 import '../advanced_analytics_models.dart';
-import '../models.dart';
-import '../models/folder.dart';
+import 'package:savein/models.dart';
+import 'package:savein/models/folder.dart';
 
 
 import 'folder_service_models.dart';

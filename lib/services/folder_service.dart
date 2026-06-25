@@ -8,29 +8,29 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/folder.dart';
-import '../models.dart';
-import '../utils/constants.dart';
-import '../pages/simple_stats_page.dart';
-import '../data_service.dart' show DataService;
-import 'auth_service.dart';
-import '../advanced_analytics_models.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/models.dart';
+import 'package:savein/utils/constants.dart';
+import 'package:savein/pages/simple_stats_page.dart';
+import 'package:savein/data_service.dart' show DataService;
+import 'package:savein/services/auth_service.dart';
+import 'package:savein/advanced_analytics_models.dart';
 
 // Import dei moduli
-import 'folder_service_models.dart';
-import 'folder_service_base.dart';
-import 'folder_service_sync.dart';
-import 'folder_service_crud.dart';
-import 'folder_service_search.dart';
-import 'folder_service_analytics.dart';
-import 'folder_service_sharing.dart';
+import 'package:savein/services/folder_service_models.dart';
+import 'package:savein/services/folder_service_base.dart';
+import 'package:savein/services/folder_service_sync.dart';
+import 'package:savein/services/folder_service_crud.dart';
+import 'package:savein/services/folder_service_search.dart';
+import 'package:savein/services/folder_service_analytics.dart';
+import 'package:savein/services/folder_service_sharing.dart';
 
 // ⭐ NUOVO: Import sistema unificato
-import 'folder_management_unified.dart';
+import 'package:savein/services/folder_management_unified.dart';
 
 // Export per rendere i tipi accessibili a chi importa FolderService
-export 'folder_service_models.dart';
-export '../models.dart' show MockPost, MockFolder;
+export 'package:savein/services/folder_service_models.dart';
+export 'package:savein/models.dart' show MockPost, MockFolder;
 
 /// FolderService - Servizio principale per gestione cartelle e post
 /// Combina tutti i mixin per fornire funzionalità complete

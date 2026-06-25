@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/folder.dart';
-import '../models.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/models.dart';
 import '../utils/theme_helpers.dart';
 import '../services/sharing_service.dart';
 import '../services/folder_service_models.dart';

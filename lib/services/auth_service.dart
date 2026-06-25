@@ -6,6 +6,9 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'simple_analytics_service.dart';
+import '../advanced_analytics_service.dart';
 
 enum AppUserRole { free, premium, admin }
 
@@ -84,6 +87,8 @@ class User {
   final DateTime createdAt;
   final DateTime? premiumUntil;
   final String? premiumSource;
+  final DateTime? birthDate;
+  final String? gender;
 
   User({
     required this.id,
@@ -101,9 +106,17 @@ class User {
     required this.createdAt,
     this.premiumUntil,
     this.premiumSource,
+    this.birthDate,
+    this.gender,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(dynamic value) {
+      if (value is Timestamp) return value.toDate();
+      if (value is String) return DateTime.tryParse(value);
+      return null;
+    }
+
     return User(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
@@ -114,18 +127,15 @@ class User {
           DashboardAccessRoleX.fromValue(json['dashboardRole'] as String?),
       isBlocked: json['isBlocked'] ?? false,
       blockedReason: json['blockedReason'],
-      blockedAt: json['blockedAt'] != null
-          ? DateTime.tryParse(json['blockedAt'])
-          : null,
+      blockedAt: parseDate(json['blockedAt']),
       acceptedTerms: json['acceptedTerms'] ?? false,
       acceptedPrivacy: json['acceptedPrivacy'] ?? false,
-      acceptedMarketing: json['acceptedMarketing'] ?? false,
-      createdAt:
-          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
-      premiumUntil: json['premiumUntil'] != null
-          ? DateTime.tryParse(json['premiumUntil'])
-          : null,
+      acceptedMarketing: json['acceptedMarketing'] ?? true,
+      createdAt: parseDate(json['createdAt']) ?? DateTime.now(),
+      premiumUntil: parseDate(json['premiumUntil']),
       premiumSource: json['premiumSource'],
+      birthDate: parseDate(json['birthDate']),
+      gender: json['gender'],
     );
   }
 
@@ -146,6 +156,8 @@ class User {
       'createdAt': createdAt.toIso8601String(),
       'premiumUntil': premiumUntil?.toIso8601String(),
       'premiumSource': premiumSource,
+      'birthDate': birthDate?.toIso8601String(),
+      'gender': gender,
     };
   }
 
@@ -162,10 +174,14 @@ class User {
     bool? acceptedPrivacy,
     bool? acceptedMarketing,
     DateTime? premiumUntil,
+    bool clearPremiumUntil = false,
     String? premiumSource,
+    bool clearPremiumSource = false,
+    DateTime? birthDate,
+    String? gender,
   }) {
     return User(
-      id: this.id,
+      id: id,
       name: name ?? this.name,
       email: email ?? this.email,
       username: username ?? this.username,
@@ -177,20 +193,30 @@ class User {
       acceptedTerms: acceptedTerms ?? this.acceptedTerms,
       acceptedPrivacy: acceptedPrivacy ?? this.acceptedPrivacy,
       acceptedMarketing: acceptedMarketing ?? this.acceptedMarketing,
-      createdAt: this.createdAt,
-      premiumUntil: premiumUntil ?? this.premiumUntil,
-      premiumSource: premiumSource ?? this.premiumSource,
+      createdAt: createdAt,
+      premiumUntil:
+          clearPremiumUntil ? null : premiumUntil ?? this.premiumUntil,
+      premiumSource:
+          clearPremiumSource ? null : premiumSource ?? this.premiumSource,
+      birthDate: birthDate ?? this.birthDate,
+      gender: gender ?? this.gender,
     );
   }
 
-  bool get hasActiveTimedPremium =>
-      premiumUntil != null && premiumUntil!.isAfter(DateTime.now());
+  bool get hasActiveTimedPremium => _isPremiumExpiryActive(premiumUntil);
+
+  static bool _isPremiumExpiryActive(DateTime? until) {
+    if (until == null) return true;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiryDay = DateTime(until.year, until.month, until.day);
+    return !today.isAfter(expiryDay);
+  }
+
   AppUserRole get effectiveRole {
     if (role == AppUserRole.admin) return AppUserRole.admin;
-    if (role == AppUserRole.premium) {
-      if (premiumUntil == null || hasActiveTimedPremium) {
-        return AppUserRole.premium;
-      }
+    if (role == AppUserRole.premium && _isPremiumExpiryActive(premiumUntil)) {
+      return AppUserRole.premium;
     }
     return AppUserRole.free;
   }
@@ -252,6 +278,75 @@ class CrossPromotionResult {
   }
 }
 
+class NewSignupPremiumPromoConfig {
+  final bool active;
+  final int durationDays;
+  final String priceAfterTrial;
+
+  const NewSignupPremiumPromoConfig({
+    required this.active,
+    required this.durationDays,
+    required this.priceAfterTrial,
+  });
+
+  factory NewSignupPremiumPromoConfig.fromMap(Map<String, dynamic> data) {
+    return NewSignupPremiumPromoConfig(
+      active: data['active'] == true,
+      durationDays: (data['durationDays'] as num?)?.toInt() ?? 30,
+      priceAfterTrial: (data['priceAfterTrial'] ?? '2.99').toString(),
+    );
+  }
+}
+
+class NewSignupPremiumPromoEligibility {
+  final bool active;
+  final bool canClaim;
+  final bool alreadyClaimed;
+  final bool restored;
+  final bool expired;
+  final int durationDays;
+  final String priceAfterTrial;
+  final DateTime? premiumUntil;
+  final DateTime? startedAt;
+
+  const NewSignupPremiumPromoEligibility({
+    required this.active,
+    required this.canClaim,
+    required this.alreadyClaimed,
+    required this.restored,
+    required this.expired,
+    required this.durationDays,
+    required this.priceAfterTrial,
+    this.premiumUntil,
+    this.startedAt,
+  });
+
+  factory NewSignupPremiumPromoEligibility.fromMap(Map<String, dynamic> data) {
+    DateTime? parseOptionalDate(dynamic value) {
+      if (value == null) return null;
+      return DateTime.tryParse(value.toString())?.toLocal();
+    }
+
+    return NewSignupPremiumPromoEligibility(
+      active: data['active'] == true,
+      canClaim: data['canClaim'] == true,
+      alreadyClaimed: data['alreadyClaimed'] == true,
+      restored: data['restored'] == true,
+      expired: data['expired'] == true,
+      durationDays: (data['durationDays'] as num?)?.toInt() ?? 30,
+      priceAfterTrial: (data['priceAfterTrial'] ?? '2.99').toString(),
+      premiumUntil: parseOptionalDate(data['premiumUntil']),
+      startedAt: parseOptionalDate(data['startedAt']),
+    );
+  }
+
+  NewSignupPremiumPromoConfig get config => NewSignupPremiumPromoConfig(
+        active: active,
+        durationDays: durationDays,
+        priceAfterTrial: priceAfterTrial,
+      );
+}
+
 class PromotionBanner {
   final String id;
   final String type;
@@ -310,6 +405,8 @@ class AuthService extends ChangeNotifier {
   User? _currentUser;
   bool _isInitialized = false;
   StreamSubscription<firebase_auth.User?>? _authSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+      _userProfileSubscription;
   Completer<void>? _initializationCompleter;
   Completer<void>? _consentLoadingCompleter;
   CrossPromotionResult? _pendingCrossPromotionNotification;
@@ -319,7 +416,10 @@ class AuthService extends ChangeNotifier {
   DateTime? _lastConsentSyncAt;
   String? _lastConsentSyncUserId;
   bool _isProcessingAuthStateChange = false;
+  bool _isDeletingAccount = false;
+  bool _isCompletingGoogleSignIn = false;
   static const Duration _consentSyncCooldown = Duration(seconds: 10);
+  VoidCallback? onUserProfileChanged;
 
   // Getters pubblici
   User? get currentUser => _currentUser;
@@ -341,42 +441,267 @@ class AuthService extends ChangeNotifier {
     return null;
   }
 
+  /// Legge il documento utente privilegiando il server.
+  /// Ritorna `(doc, fromServer)`:
+  ///   - fromServer = true  → dati freschi dal server
+  ///   - fromServer = false → dati dalla cache locale (potrebbero essere stale)
+  ///   - null               → impossibile leggere (completamente offline)
+  Future<(DocumentSnapshot<Map<String, dynamic>>?, bool)> _fetchUserDocument(
+      String userId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get(
+            const GetOptions(source: Source.server),
+          );
+      return (doc, true);
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: fallback cache profilo utente: $e');
+      }
+    }
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get(
+            const GetOptions(source: Source.cache),
+          );
+      return (doc, false);
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: impossibile leggere documento utente (offline?): $e');
+      }
+      return (null, false);
+    }
+  }
+
+  User _userFromFirestoreData(
+    firebase_auth.User firebaseUser,
+    Map<String, dynamic> data,
+    String documentId, {
+    User? fallback,
+  }) {
+    final email = (data['email'] as String?)?.trim().isNotEmpty == true
+        ? (data['email'] as String).trim()
+        : firebaseUser.email ?? fallback?.email ?? '';
+    final name = (data['name'] as String?)?.trim().isNotEmpty == true
+        ? (data['name'] as String).trim()
+        : firebaseUser.displayName ?? fallback?.name ?? 'Utente';
+    final marketingConsent = data['consents']?['marketing']?['accepted'] ??
+        fallback?.acceptedMarketing ??
+        true;
+
+    final blockedAtValue = data['blockedAt'];
+    final blockedAt = blockedAtValue is Timestamp
+        ? blockedAtValue.toDate()
+        : (blockedAtValue is String ? DateTime.tryParse(blockedAtValue) : null);
+
+    return User(
+      id: (data['userId'] as String?)?.trim().isNotEmpty == true
+          ? (data['userId'] as String).trim()
+          : documentId,
+      name: name,
+      email: email,
+      username: data['username'] as String? ?? fallback?.username,
+      role: AppUserRoleX.fromValue(data['role'] as String?),
+      dashboardRole: DashboardAccessRoleX.fromValue(
+        data['dashboardRole'] as String?,
+      ),
+      isBlocked: data['isBlocked'] ?? false,
+      blockedReason: data['blockedReason'] as String?,
+      blockedAt: blockedAt,
+      acceptedTerms: data['acceptedTerms'] ?? fallback?.acceptedTerms ?? true,
+      acceptedPrivacy:
+          data['acceptedPrivacy'] ?? fallback?.acceptedPrivacy ?? true,
+      acceptedMarketing: marketingConsent,
+      createdAt: _dateFromFirestoreValue(data['createdAt']) ??
+          fallback?.createdAt ??
+          firebaseUser.metadata.creationTime ??
+          DateTime.now(),
+      premiumUntil: _dateFromFirestoreValue(data['premiumUntil']),
+      premiumSource: data['premiumSource'] as String?,
+      birthDate:
+          _dateFromFirestoreValue(data['birthDate']) ?? fallback?.birthDate,
+      gender: data['gender'] as String? ?? fallback?.gender,
+    );
+  }
+
+  bool _hasProfileChanged(User? current, User updated) {
+    if (current == null) return true;
+    return current.role != updated.role ||
+        current.effectiveRole != updated.effectiveRole ||
+        current.dashboardRole != updated.dashboardRole ||
+        current.isBlocked != updated.isBlocked ||
+        current.blockedReason != updated.blockedReason ||
+        current.premiumUntil != updated.premiumUntil ||
+        current.premiumSource != updated.premiumSource ||
+        current.acceptedMarketing != updated.acceptedMarketing ||
+        current.name != updated.name ||
+        current.email != updated.email;
+  }
+
+  Future<void> _applySyncedUserProfile(User syncedUser) async {
+    if (!_hasProfileChanged(_currentUser, syncedUser)) {
+      return;
+    }
+
+    _currentUser = syncedUser;
+    await _saveUserLocally(syncedUser);
+    notifyListeners();
+    onUserProfileChanged?.call();
+  }
+
+  void _ensureUserProfileSync(String userId) {
+    if (_userProfileSubscription != null) {
+      return;
+    }
+    _startUserProfileSync(userId);
+  }
+
+  void _startUserProfileSync(String userId) {
+    _userProfileSubscription?.cancel();
+    _userProfileSubscription =
+        _firestore.collection('users').doc(userId).snapshots().listen(
+      (snapshot) async {
+        final firebaseUser = _firebaseAuth.currentUser;
+        final data = snapshot.data();
+        if (firebaseUser == null ||
+            firebaseUser.uid != userId ||
+            !snapshot.exists ||
+            data == null) {
+          return;
+        }
+
+        final syncedUser = _userFromFirestoreData(
+          firebaseUser,
+          data,
+          snapshot.id,
+          fallback: _currentUser,
+        );
+        await _applySyncedUserProfile(syncedUser);
+      },
+      onError: (error) {
+        if (kDebugMode) {
+          print('DEBUG: errore listener profilo utente: $error');
+        }
+        _userProfileSubscription = null;
+      },
+    );
+  }
+
   Future<User?> reloadCurrentUserFromFirestore() async {
     final firebaseUser = _firebaseAuth.currentUser;
     if (firebaseUser == null) return null;
 
-    _currentUser ??= User(
+    final (doc, fromServer) = await _fetchUserDocument(firebaseUser.uid);
+    if (doc == null) {
+      // Completamente offline: mantieni stato corrente, riattiva listener
+      _ensureUserProfileSync(firebaseUser.uid);
+      return _currentUser;
+    }
+    final data = doc.data();
+    if (doc.exists && data != null) {
+      final loadedUser = _userFromFirestoreData(
+        firebaseUser,
+        data,
+        doc.id,
+        fallback: _currentUser,
+      );
+
+      // Protezione anti-downgrade: non ridurre il ruolo usando dati dalla cache locale
+      final currentRole = _currentUser?.effectiveRole ?? AppUserRole.free;
+      final loadedRole = loadedUser.effectiveRole;
+      final isDowngrade =
+          currentRole == AppUserRole.premium && loadedRole == AppUserRole.free;
+      if (isDowngrade && !fromServer) {
+        if (kDebugMode) {
+          print(
+              'DEBUG: ⚠️ reloadCurrentUser: downgrade Premium→Free da cache stale ignorato');
+        }
+        _ensureUserProfileSync(firebaseUser.uid);
+        return _currentUser;
+      }
+
+      _currentUser = loadedUser;
+      await _saveUserLocally(_currentUser!);
+      notifyListeners();
+      onUserProfileChanged?.call();
+      _startUserProfileSync(firebaseUser.uid);
+    } else {
+      _currentUser ??= _userFromFirebase(firebaseUser);
+      await _loadMarketingConsentFromFirestore(forceRefresh: true);
+    }
+    return _currentUser;
+  }
+
+  Future<User?> _loadCachedUserIfAny(firebase_auth.User firebaseUser) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userData = prefs.getString('user_${firebaseUser.uid}');
+      if (userData == null) return null;
+      final cachedUser = User.fromJson(jsonDecode(userData));
+      final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
+      if (cachedUser.id == firebaseUser.uid &&
+          _normalizeEmail(cachedUser.email) == firebaseEmail) {
+        return cachedUser;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Stream<User?> get userStream async* {
+    await for (final firebaseUser in _firebaseAuth.authStateChanges()) {
+      if (firebaseUser == null || _isDeletingAccount) {
+        _currentUser = null;
+        await _userProfileSubscription?.cancel();
+        _userProfileSubscription = null;
+        await _clearLocalData(preserveUserProfileCache: !_isDeletingAccount);
+        notifyListeners();
+        yield null;
+        continue;
+      }
+
+      if (_isCompletingGoogleSignIn) {
+        if (kDebugMode) {
+          print('DEBUG: ⏳ Stream auth in pausa durante bootstrap Google');
+        }
+        yield null;
+        continue;
+      }
+
+      final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
+      final hasMatchingUser = _currentUser?.id == firebaseUser.uid &&
+          _normalizeEmail(_currentUser?.email ?? '') == firebaseEmail;
+
+      if (!hasMatchingUser) {
+        final cachedUser = await _loadCachedUserIfAny(firebaseUser);
+        _currentUser = cachedUser ?? _userFromFirebase(firebaseUser);
+        notifyListeners();
+      }
+
+      yield _currentUser;
+
+      await _loadUserData(firebaseUser);
+      if (_currentUser?.id == firebaseUser.uid) {
+        notifyListeners();
+        yield _currentUser;
+      }
+    }
+  }
+
+  User _userFromFirebase(firebase_auth.User firebaseUser) {
+    final displayName = firebaseUser.displayName?.trim();
+    final fallbackName =
+        displayName?.isNotEmpty == true ? displayName! : 'Utente';
+
+    return User(
       id: firebaseUser.uid,
-      name: firebaseUser.displayName ?? 'Utente',
+      name: fallbackName,
       email: firebaseUser.email ?? '',
-      username:
-          '@${(firebaseUser.displayName ?? 'utente').toLowerCase().replaceAll(' ', '.')}',
+      username: '@${fallbackName.toLowerCase().replaceAll(' ', '.')}',
       role: AppUserRole.free,
       isBlocked: false,
       acceptedTerms: true,
       acceptedPrivacy: true,
-      acceptedMarketing: false,
+      acceptedMarketing: true,
       createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
     );
-
-    await _loadMarketingConsentFromFirestore(forceRefresh: true);
-    return _currentUser;
-  }
-
-  Stream<User?> get userStream {
-    return _firebaseAuth.authStateChanges().asyncMap((firebaseUser) async {
-      if (firebaseUser != null) {
-        if (_currentUser?.id != firebaseUser.uid ||
-            _currentUser?.email != firebaseUser.email) {
-          await _loadUserData(firebaseUser);
-        }
-        return _currentUser;
-      } else {
-        _currentUser = null;
-        notifyListeners();
-        return null;
-      }
-    });
   }
 
   Future<void> initialize() async {
@@ -438,6 +763,12 @@ class AuthService extends ChangeNotifier {
   }
 
   void _onFirebaseAuthStateChanged(firebase_auth.User? firebaseUser) async {
+    if (_isCompletingGoogleSignIn) {
+      if (kDebugMode) {
+        print('DEBUG: ⏳ Google Sign-In in completamento, salto listener auth');
+      }
+      return;
+    }
     if (_isProcessingAuthStateChange) {
       if (kDebugMode) print('DEBUG: ⏳ Salto cambio stato auth (già in corso)');
       return;
@@ -451,20 +782,30 @@ class AuthService extends ChangeNotifier {
             'DEBUG: 🔥 Firebase Auth State Changed: ${firebaseUser?.email ?? "NULL"}');
       }
 
-      if (firebaseUser != null) {
+      if (_isDeletingAccount) {
+        _currentUser = null;
+        await _userProfileSubscription?.cancel();
+        _userProfileSubscription = null;
+        await _clearLocalData();
+        notifyListeners();
+      } else if (firebaseUser != null) {
         // Evita ricaricamento se l'utente è lo stesso e abbiamo già i dati
         if (_currentUser?.id == firebaseUser.uid &&
             _currentUser?.email == firebaseUser.email) {
-          if (kDebugMode)
+          if (kDebugMode) {
             print(
-                'DEBUG: ℹ️ Utente già caricato, salto ricaricamento ridondante');
+                'DEBUG: ℹ️ Utente già caricato, verifico listener profilo Firestore');
+          }
+          _ensureUserProfileSync(firebaseUser.uid);
         } else {
           await _loadUserData(firebaseUser);
         }
       } else {
         if (_currentUser != null) {
           _currentUser = null;
-          await _clearLocalData();
+          await _userProfileSubscription?.cancel();
+          _userProfileSubscription = null;
+          await _clearLocalData(preserveUserProfileCache: true);
           notifyListeners();
         }
       }
@@ -481,6 +822,7 @@ class AuthService extends ChangeNotifier {
   @override
   void dispose() {
     _authSubscription?.cancel();
+    _userProfileSubscription?.cancel();
     super.dispose();
   }
 
@@ -506,6 +848,7 @@ class AuthService extends ChangeNotifier {
           credential.user!,
           email,
         );
+        await _loadUserData(credential.user!);
 
         if (kDebugMode) {
           print(
@@ -631,29 +974,44 @@ class AuthService extends ChangeNotifier {
         idToken: googleAuth.idToken,
       );
 
+      _isCompletingGoogleSignIn = true;
       final userCredential =
           await _firebaseAuth.signInWithCredential(credential);
 
       if (userCredential.user != null) {
         final firebaseUser = userCredential.user!;
         final googleEmail = firebaseUser.email ?? googleUser.email;
-        final existingUserId = await _findExistingUserIdByEmail(googleEmail);
-        if (existingUserId != null && existingUserId != firebaseUser.uid) {
-          _pendingGoogleCredential = credential;
-          _pendingGoogleEmail = googleEmail;
-          await _firebaseAuth.signOut();
-          try {
-            await _googleSignIn.signOut();
-          } catch (_) {}
-          _currentUser = null;
-          notifyListeners();
-          return AuthResult(
-            success: false,
-            message: 'Questa email è già registrata con un altro metodo. '
-                'Per proteggere i tuoi dati, accedi con email e password: '
-                'collegheremo Google allo stesso account.',
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(firebaseUser.uid)
+            .get(const GetOptions(source: Source.serverAndCache));
+        if (!userDoc.exists) {
+          final displayName = firebaseUser.displayName?.trim();
+          final name = displayName?.isNotEmpty == true
+              ? displayName!
+              : (googleUser.displayName?.trim().isNotEmpty == true
+                  ? googleUser.displayName!.trim()
+                  : 'Utente');
+          final user = User(
+            id: firebaseUser.uid,
+            name: name,
+            email: googleEmail,
+            username: '@${name.toLowerCase().replaceAll(' ', '.')}',
+            role: AppUserRole.free,
+            isBlocked: false,
+            acceptedTerms: true,
+            acceptedPrivacy: true,
+            acceptedMarketing: true,
+            createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
           );
+          _currentUser = user;
+          await _saveUserLocally(user);
+          await _saveUserToFirestore(user);
+          notifyListeners();
         }
+        await _loadUserData(firebaseUser);
+        _isCompletingGoogleSignIn = false;
+        notifyListeners();
 
         if (kDebugMode) {
           print(
@@ -675,8 +1033,10 @@ class AuthService extends ChangeNotifier {
         return AuthResult(success: true, user: _currentUser);
       }
 
+      _isCompletingGoogleSignIn = false;
       return AuthResult(success: false, message: 'Errore Google Sign-In');
     } on firebase_auth.FirebaseAuthException catch (e) {
+      _isCompletingGoogleSignIn = false;
       if (kDebugMode) print('ERRORE Google Sign-In Firebase: ${e.code} - $e');
       if (e.code == 'account-exists-with-different-credential') {
         _pendingGoogleCredential = e.credential;
@@ -696,6 +1056,7 @@ class AuthService extends ChangeNotifier {
         message: _getFirebaseErrorMessage(e),
       );
     } catch (e) {
+      _isCompletingGoogleSignIn = false;
       if (kDebugMode) print('ERRORE Google Sign-In: $e');
       return AuthResult(
         success: false,
@@ -712,6 +1073,8 @@ class AuthService extends ChangeNotifier {
     required bool acceptedTerms,
     required bool acceptedPrivacy,
     required bool acceptedMarketing,
+    DateTime? birthDate,
+    String? gender,
   }) async {
     try {
       if (kDebugMode) print('DEBUG: 🔥 Registrazione nuovo utente: $email');
@@ -734,6 +1097,8 @@ class AuthService extends ChangeNotifier {
           acceptedPrivacy: acceptedPrivacy,
           acceptedMarketing: acceptedMarketing,
           createdAt: DateTime.now(),
+          birthDate: birthDate,
+          gender: gender,
         );
 
         await _saveUserLocally(user);
@@ -849,6 +1214,7 @@ class AuthService extends ChangeNotifier {
     }
 
     try {
+      _isDeletingAccount = true;
       final userEmail = _currentUser!.email;
       final userId = _currentUser!.id;
       if (kDebugMode) print('DEBUG: 🔥 Eliminazione account: $userEmail');
@@ -859,19 +1225,23 @@ class AuthService extends ChangeNotifier {
         if (kDebugMode) print('WARNING: Errore disconnessione Google: $e');
       }
 
-      // ✅ NUOVO: Elimina documento Firestore
-      try {
-        await _firestore.collection('users').doc(userId).delete();
-        if (kDebugMode) print('DEBUG: ✅ Documento Firestore eliminato');
-      } catch (e) {
-        if (kDebugMode) print('WARNING: Errore eliminazione Firestore: $e');
-      }
+      await _deleteCurrentUserData(userId: userId, email: userEmail);
 
       await _firebaseAuth.currentUser!.delete();
       if (kDebugMode) print('DEBUG: Account Firebase eliminato');
 
-      if (kDebugMode)
-        print('DEBUG: ✔ Eliminazione completata - Il listener pulirà lo stato');
+      try {
+        await _firebaseAuth.signOut();
+      } catch (_) {}
+
+      _currentUser = null;
+      await _clearLocalData(deletedUserId: userId);
+      await _clearAnalyticsServices();
+      notifyListeners();
+
+      if (kDebugMode) {
+        print('DEBUG: ✔ Eliminazione completata - sessione locale pulita');
+      }
 
       return AuthResult(
         success: true,
@@ -888,6 +1258,177 @@ class AuthService extends ChangeNotifier {
         success: false,
         message: 'Errore durante l\'eliminazione dell\'account',
       );
+    } finally {
+      _isDeletingAccount = false;
+    }
+  }
+
+  Future<void> _deleteCurrentUserData({
+    required String userId,
+    required String email,
+  }) async {
+    final userRef = _firestore.collection('users').doc(userId);
+    final normalizedEmail = email.toLowerCase().trim();
+
+    const userSubcollections = [
+      'folders',
+      'posts',
+      'shared_items',
+      'fcmTokens',
+      'notifications',
+      'reminders',
+      'analytics',
+      'account_history',
+    ];
+
+    for (final collectionName in userSubcollections) {
+      await _deleteCollection(userRef.collection(collectionName));
+    }
+
+    await _ignoreCleanupErrors(
+      'feature_usage',
+      () => _deleteDocumentIfExists(
+        _firestore.collection('feature_usage').doc(userId),
+      ),
+    );
+    await _ignoreCleanupErrors(
+      'shared_links',
+      () => _deleteQuery(
+        _firestore
+            .collection('shared_links')
+            .where('ownerId', isEqualTo: userId),
+      ),
+    );
+    await _ignoreCleanupErrors(
+      'promotion_redemptions',
+      () => _deleteQuery(
+        _firestore
+            .collection('promotion_redemptions')
+            .where('userId', isEqualTo: userId),
+      ),
+    );
+    await _ignoreCleanupErrors(
+      'new_signup_premium_promo_claims.firstUserId',
+      () => _deleteQuery(
+        _firestore
+            .collection('new_signup_premium_promo_claims')
+            .where('firstUserId', isEqualTo: userId),
+      ),
+    );
+    await _ignoreCleanupErrors(
+      'new_signup_premium_promo_claims.lastUserId',
+      () => _deleteQuery(
+        _firestore
+            .collection('new_signup_premium_promo_claims')
+            .where('lastUserId', isEqualTo: userId),
+      ),
+    );
+    await _ignoreCleanupErrors(
+      'cross_app_promos.sourceUid',
+      () => _deleteQuery(
+        _firestore
+            .collection('cross_app_promos')
+            .where('sourceUid', isEqualTo: userId),
+      ),
+    );
+    await _ignoreCleanupErrors(
+      'cross_app_promos.saveinUid',
+      () => _deleteQuery(
+        _firestore
+            .collection('cross_app_promos')
+            .where('saveinUid', isEqualTo: userId),
+      ),
+    );
+    if (normalizedEmail.isNotEmpty) {
+      await _ignoreCleanupErrors(
+        'dashboard_accesses',
+        () => _deleteDocumentIfExists(
+          _firestore.collection('dashboard_accesses').doc(normalizedEmail),
+        ),
+      );
+    }
+
+    await _deleteUserStorage(userId);
+
+    try {
+      await userRef.delete();
+      if (kDebugMode) print('DEBUG: ✅ Dati Firestore utente eliminati');
+    } catch (e) {
+      if (kDebugMode) print('WARNING: Errore eliminazione profilo utente: $e');
+    }
+  }
+
+  Future<void> _deleteCollection(
+    CollectionReference<Map<String, dynamic>> collection, {
+    int batchSize = 200,
+  }) async {
+    while (true) {
+      final snapshot = await collection.limit(batchSize).get();
+      if (snapshot.docs.isEmpty) return;
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    }
+  }
+
+  Future<void> _deleteQuery(
+    Query<Map<String, dynamic>> query, {
+    int batchSize = 200,
+  }) async {
+    while (true) {
+      final snapshot = await query.limit(batchSize).get();
+      if (snapshot.docs.isEmpty) return;
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    }
+  }
+
+  Future<void> _deleteDocumentIfExists(
+    DocumentReference<Map<String, dynamic>> ref,
+  ) async {
+    final snapshot = await ref.get();
+    if (snapshot.exists) {
+      await ref.delete();
+    }
+  }
+
+  Future<void> _ignoreCleanupErrors(
+    String label,
+    Future<void> Function() cleanup,
+  ) async {
+    try {
+      await cleanup();
+    } catch (e) {
+      if (kDebugMode) print('WARNING: Cleanup $label saltato: $e');
+    }
+  }
+
+  Future<void> _deleteUserStorage(String userId) async {
+    try {
+      await _deleteStorageFolder(FirebaseStorage.instance.ref('users/$userId'));
+    } catch (e) {
+      if (kDebugMode) print('WARNING: Errore eliminazione Storage utente: $e');
+    }
+  }
+
+  Future<void> _deleteStorageFolder(Reference ref) async {
+    final result = await ref.listAll();
+    for (final item in result.items) {
+      try {
+        await item.delete();
+      } catch (e) {
+        if (kDebugMode) print('WARNING: Errore eliminazione file Storage: $e');
+      }
+    }
+    for (final prefix in result.prefixes) {
+      await _deleteStorageFolder(prefix);
     }
   }
 
@@ -945,19 +1486,40 @@ class AuthService extends ChangeNotifier {
   // ✅ METODI PRIVATI FIRESTORE
   // ========================================
 
-  /// Salva l'utente completo su Firestore (registrazione)
+  /// Salva l'utente completo su Firestore solo alla prima creazione.
+  ///
+  /// IMPORTANTE: se il documento esiste gia', non riscrivere mai campi di piano
+  /// come role/premiumUntil/premiumSource dal client. Il piano e' deciso dalla
+  /// dashboard/backend; durante login/logout il client puo' avere fallback Free.
   Future<void> _saveUserToFirestore(User user) async {
     try {
       print('DEBUG: 🌐 Salvando utente su Firestore...');
 
       final now = FieldValue.serverTimestamp();
+      final userRef = _firestore.collection('users').doc(user.id);
+      DocumentSnapshot<Map<String, dynamic>>? existingDoc;
+      try {
+        existingDoc =
+            await userRef.get(const GetOptions(source: Source.server));
+      } catch (e) {
+        if (kDebugMode) {
+          print(
+              'DEBUG: ⚠️ Lettura server utente fallita, salvo solo metadata: $e');
+        }
+      }
 
-      await _firestore.collection('users').doc(user.id).set({
+      if (existingDoc == null || existingDoc.exists) {
+        await _saveUserProfileMetadataToFirestore(user);
+        return;
+      }
+
+      await userRef.set({
         'userId': user.id,
         'email': user.email,
         'normalizedEmail': user.email.toLowerCase().trim(),
         'name': user.name,
         'username': user.username,
+        'app_id': 'savein',
         'role': user.role.value,
         'dashboardRole': user.dashboardRole.value,
         'isBlocked': user.isBlocked,
@@ -968,6 +1530,9 @@ class AuthService extends ChangeNotifier {
         'roleUpdatedBy': 'system',
         'createdAt': now,
         'lastLogin': now,
+        'birthDate':
+            user.birthDate != null ? Timestamp.fromDate(user.birthDate!) : null,
+        'gender': user.gender,
         'consents': {
           'marketing': {
             'accepted': user.acceptedMarketing,
@@ -996,6 +1561,22 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  Future<void> _saveUserProfileMetadataToFirestore(User user) async {
+    final now = FieldValue.serverTimestamp();
+    await _firestore.collection('users').doc(user.id).set({
+      'userId': user.id,
+      'email': user.email,
+      'normalizedEmail': user.email.toLowerCase().trim(),
+      'name': user.name,
+      'username': user.username,
+      'app_id': 'savein',
+      'lastLogin': now,
+      'birthDate':
+          user.birthDate != null ? Timestamp.fromDate(user.birthDate!) : null,
+      'gender': user.gender,
+    }, SetOptions(merge: true));
+  }
+
   /// Aggiorna solo il consenso marketing su Firestore
   Future<void> _updateMarketingConsentFirestore(bool consent) async {
     if (_firebaseAuth.currentUser == null) {
@@ -1011,18 +1592,6 @@ class AuthService extends ChangeNotifier {
       }
 
       await _firestore.collection('users').doc(userId).set({
-        'userId': userId,
-        'email': _currentUser!.email,
-        'normalizedEmail': _currentUser!.email.toLowerCase().trim(),
-        'name': _currentUser!.name,
-        'username': _currentUser!.username,
-        'role': _currentUser!.role.value,
-        'dashboardRole': _currentUser!.dashboardRole.value,
-        'isBlocked': _currentUser!.isBlocked,
-        'blockedReason': _currentUser!.blockedReason,
-        'blockedAt': _currentUser!.blockedAt != null
-            ? Timestamp.fromDate(_currentUser!.blockedAt!)
-            : null,
         'consents': {
           'marketing': {
             'accepted': consent,
@@ -1032,7 +1601,7 @@ class AuthService extends ChangeNotifier {
           }
         },
         'lastLogin': now,
-      }, SetOptions(merge: true)); // ✅ merge = non sovrascrive altri campi
+      }, SetOptions(merge: true));
 
       _lastConsentSyncUserId = userId;
       _lastConsentSyncAt = DateTime.now();
@@ -1084,72 +1653,37 @@ class AuthService extends ChangeNotifier {
         final data = doc.data()!;
 
         final marketingConsent =
-            data['consents']?['marketing']?['accepted'] ?? false;
-        final role = AppUserRoleX.fromValue(data['role'] as String?);
-        final premiumUntil = _dateFromFirestoreValue(data['premiumUntil']);
-        final premiumSource = data['premiumSource'] as String?;
-        final userDashboardRole =
-            DashboardAccessRoleX.fromValue(data['dashboardRole'] as String?);
-
-        // 🔥 Ottimizzazione: non chiamare _loadDashboardAccessRoleForEmail se non necessario
-        DashboardAccessRole dashboardRole = userDashboardRole;
-        if (userDashboardRole == DashboardAccessRole.none) {
-          final dashboardAccessRole = await _loadDashboardAccessRoleForEmail(
-            (data['email'] as String?) ?? _currentUser?.email ?? '',
-          );
-          dashboardRole = dashboardAccessRole;
-        }
-
-        final isBlocked = data['isBlocked'] ?? false;
-        final blockedReason = data['blockedReason'] as String?;
-        final blockedAtValue = data['blockedAt'];
-        final blockedAt = blockedAtValue is Timestamp
-            ? blockedAtValue.toDate()
-            : (blockedAtValue is String
-                ? DateTime.tryParse(blockedAtValue)
-                : null);
+            data['consents']?['marketing']?['accepted'] ?? true;
 
         if (kDebugMode) {
           print('DEBUG: Consenso da Firestore: $marketingConsent');
           print('DEBUG: Consenso locale: ${_currentUser?.acceptedMarketing}');
         }
 
-        // Firestore è la fonte di verità
         if (_currentUser != null &&
-            (_currentUser!.acceptedMarketing != marketingConsent ||
-                _currentUser!.role != role ||
-                _currentUser!.dashboardRole != dashboardRole ||
-                _currentUser!.isBlocked != isBlocked ||
-                _currentUser!.blockedReason != blockedReason ||
-                _currentUser!.premiumUntil != premiumUntil ||
-                _currentUser!.premiumSource != premiumSource)) {
-          if (kDebugMode)
-            print('DEBUG: ⚠️ Consenso diverso, sincronizzando da cloud...');
+            _currentUser!.acceptedMarketing != marketingConsent) {
+          if (kDebugMode) {
+            print('DEBUG: ⚠️ Consenso marketing diverso, sincronizzando...');
+          }
 
-          _currentUser = _currentUser!.copyWith(
-            acceptedMarketing: marketingConsent,
-            role: role,
-            dashboardRole: dashboardRole,
-            isBlocked: isBlocked,
-            blockedReason: blockedReason,
-            blockedAt: blockedAt,
-            premiumUntil: premiumUntil,
-            premiumSource: premiumSource,
-          );
+          _currentUser =
+              _currentUser!.copyWith(acceptedMarketing: marketingConsent);
 
           await _saveUserLocally(_currentUser!);
           notifyListeners();
 
-          if (kDebugMode)
-            print('DEBUG: ✅ Consenso sincronizzato da cloud a locale');
+          if (kDebugMode) {
+            print('DEBUG: ✅ Consenso marketing sincronizzato da cloud');
+          }
         } else {
-          if (kDebugMode) print('DEBUG: ✅ Consensi già sincronizzati');
+          if (kDebugMode)
+            print('DEBUG: ✅ Consenso marketing già sincronizzato');
         }
       } else {
         if (kDebugMode)
-          print('DEBUG: ℹ️ Nessun documento Firestore, creando...');
+          print('DEBUG: ℹ️ Nessun documento Firestore, salvo solo metadata');
         if (_currentUser != null) {
-          await _saveUserToFirestore(_currentUser!);
+          await _saveUserProfileMetadataToFirestore(_currentUser!);
           await _syncDashboardAccessRoleFromFirestore();
         }
       }
@@ -1202,64 +1736,106 @@ class AuthService extends ChangeNotifier {
   // ========================================
 
   Future<void> _loadUserData(firebase_auth.User firebaseUser) async {
-    try {
-      print('DEBUG: 🔧 Caricamento dati utente: ${firebaseUser.email}');
+    final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
 
+    // Carica subito dalla cache locale per non mostrare Free durante il fetch Firestore
+    try {
       final prefs = await SharedPreferences.getInstance();
       final userData = prefs.getString('user_${firebaseUser.uid}');
-      final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
-
       if (userData != null) {
         final cachedUser = User.fromJson(jsonDecode(userData));
         if (cachedUser.id == firebaseUser.uid &&
             _normalizeEmail(cachedUser.email) == firebaseEmail) {
           _currentUser = cachedUser;
-          print('DEBUG: ✅ Dati utente caricati da storage locale');
-        } else {
-          await prefs.remove('user_${firebaseUser.uid}');
-          _currentUser = null;
-          print('DEBUG: ⚠️ Cache utente scartata: UID/email non coerenti');
+          print('DEBUG: ✅ Dati utente caricati da storage locale (anticipato)');
         }
       }
+    } catch (_) {}
 
-      if (_currentUser == null) {
-        final doc =
-            await _firestore.collection('users').doc(firebaseUser.uid).get();
-        final data = doc.data();
-        if (doc.exists && data != null) {
-          _currentUser = User.fromJson({
-            ...data,
-            'id': data['userId'] ?? doc.id,
-            'email': data['email'] ?? firebaseUser.email ?? '',
-            'createdAt': data['createdAt'] is Timestamp
-                ? (data['createdAt'] as Timestamp).toDate().toIso8601String()
-                : data['createdAt'],
-          });
-          await _saveUserLocally(_currentUser!);
-          print('DEBUG: ✅ Dati utente caricati da Firestore');
+    try {
+      print(
+          'DEBUG: 🔧 Caricamento dati utente da Firestore: ${firebaseUser.email}');
+
+      final (firestoreDoc, fromServer) =
+          await _fetchUserDocument(firebaseUser.uid);
+
+      // Completamente offline: usa la cache locale già caricata
+      if (firestoreDoc == null) {
+        print('DEBUG: ⚠️ Firestore non raggiungibile: uso cache locale');
+        if (_currentUser != null && _currentUser!.id == firebaseUser.uid) {
+          _ensureUserProfileSync(firebaseUser.uid);
+          return;
         }
-      } else {
-        // no-op, kept for readability of the cache/firestore/local fallback flow
-      }
-
-      if (_currentUser == null) {
+        // Nessuna cache disponibile: utente temporaneo Free, il listener aggiornerà
         _currentUser = User(
           id: firebaseUser.uid,
           name: firebaseUser.displayName ?? 'Utente',
           email: firebaseUser.email ?? '',
-          username:
-              '@${(firebaseUser.displayName ?? 'utente').toLowerCase().replaceAll(' ', '.')}',
+          username: null,
           role: AppUserRole.free,
           isBlocked: false,
           acceptedTerms: true,
           acceptedPrivacy: true,
-          acceptedMarketing: false,
-          createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
+          acceptedMarketing: true,
+          createdAt: DateTime.now(),
         );
-
-        await _saveUserLocally(_currentUser!);
-        print('DEBUG: ✅ Nuovo profilo locale creato');
+        _ensureUserProfileSync(firebaseUser.uid);
+        return;
       }
+
+      final firestoreData = firestoreDoc.data();
+
+      if (!firestoreDoc.exists || firestoreData == null) {
+        // Il documento non esiste secondo il server → account cancellato
+        // Disconnetti solo se il dato è dal server (non da cache stale)
+        if (!fromServer) {
+          print(
+              'DEBUG: ⚠️ Cache locale non ha il documento, ignoro (potrebbe essere stale)');
+          if (_currentUser != null && _currentUser!.id == firebaseUser.uid) {
+            _ensureUserProfileSync(firebaseUser.uid);
+            return;
+          }
+        }
+        print(
+            'DEBUG: ⚠️ Documento utente mancante su Firestore: sessione locale eliminata');
+        _currentUser = null;
+        await _clearLocalData();
+        try {
+          await _firebaseAuth.signOut();
+        } catch (_) {}
+        try {
+          await _googleSignIn.signOut();
+        } catch (_) {}
+        notifyListeners();
+        return;
+      }
+
+      final loadedUser = _userFromFirestoreData(
+        firebaseUser,
+        firestoreData,
+        firestoreDoc.id,
+        fallback: _currentUser,
+      );
+
+      // Protezione anti-downgrade: non ridurre il ruolo usando dati dalla cache
+      // locale (che potrebbe essere stale). Il listener real-time aggiornerà
+      // quando il server sarà raggiungibile.
+      final currentRole = _currentUser?.effectiveRole ?? AppUserRole.free;
+      final loadedRole = loadedUser.effectiveRole;
+      final isDowngrade =
+          currentRole == AppUserRole.premium && loadedRole == AppUserRole.free;
+      if (isDowngrade && !fromServer) {
+        print(
+            'DEBUG: ⚠️ Downgrade Premium→Free da cache stale ignorato, aspetto server');
+        _ensureUserProfileSync(firebaseUser.uid);
+        return;
+      }
+
+      _currentUser = loadedUser;
+      await _saveUserLocally(_currentUser!);
+      _startUserProfileSync(firebaseUser.uid);
+      print(
+          'DEBUG: ✅ Dati utente caricati/sincronizzati da Firestore (fromServer=$fromServer)');
 
       if (_currentUser?.id != firebaseUser.uid ||
           _normalizeEmail(_currentUser?.email ?? '') != firebaseEmail) {
@@ -1277,8 +1853,14 @@ class AuthService extends ChangeNotifier {
       await _loadMarketingConsentFromFirestore();
       await _syncDashboardAccessRoleFromFirestore();
       await _claimPendingSmartChefLaunchPromoIfAvailable();
+      await syncNewSignupPremiumPromoFromServer();
     } catch (e) {
       print('ERRORE caricamento dati utente: $e');
+      if (_currentUser != null && _currentUser!.id == firebaseUser.uid) {
+        _ensureUserProfileSync(firebaseUser.uid);
+        return;
+      }
+      // Anche nel catch, mai creare utente Free se c'è già un utente valido in cache
       _currentUser = User(
         id: firebaseUser.uid,
         name: firebaseUser.displayName ?? 'Utente',
@@ -1288,9 +1870,10 @@ class AuthService extends ChangeNotifier {
         isBlocked: false,
         acceptedTerms: true,
         acceptedPrivacy: true,
-        acceptedMarketing: false,
+        acceptedMarketing: true,
         createdAt: DateTime.now(),
       );
+      _ensureUserProfileSync(firebaseUser.uid);
     }
   }
 
@@ -1304,16 +1887,40 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<void> _clearLocalData() async {
+  Future<void> _clearLocalData({
+    bool preserveUserProfileCache = false,
+    String? deletedUserId,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final keys = prefs
-          .getKeys()
-          .where((key) =>
-              key.startsWith('user_') ||
-              key == 'last_user_id' ||
-              key == 'is_logged_in')
-          .toList();
+      final uid = (deletedUserId ?? '').trim();
+      final userScopedPrefixes = uid.isEmpty
+          ? const <String>[]
+          : <String>[
+              'user_$uid',
+              'sc_stats_v1_$uid',
+              'simple_stats_$uid',
+              'analytics_$uid',
+              'advanced_analytics_$uid',
+              'folder_stats_$uid',
+              'migration_$uid',
+            ];
+      final keys = prefs.getKeys().where((key) {
+        if (preserveUserProfileCache && key.startsWith('user_')) {
+          return false;
+        }
+        return key.startsWith('user_') ||
+            userScopedPrefixes.any((prefix) => key.startsWith(prefix)) ||
+            key == 'simple_analytics_events' ||
+            key == 'total_time_milliseconds' ||
+            key == 'last_session_end_time' ||
+            key == 'advanced_analytics_events' ||
+            key == 'user_sessions' ||
+            key == 'content_interactions' ||
+            key == 'cached_advanced_stats' ||
+            key == 'last_user_id' ||
+            key == 'is_logged_in';
+      }).toList();
 
       for (String key in keys) {
         await prefs.remove(key);
@@ -1325,44 +1932,21 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateOwnRole(AppUserRole role) async {
-    if (_currentUser == null) return false;
-    if (role == AppUserRole.admin) {
-      throw Exception('Il ruolo admin può essere assegnato solo da un admin.');
-    }
-    if (_currentUser!.isAdmin) {
-      throw Exception(
-          'Gli admin non possono modificare il proprio piano da questa schermata.');
-    }
-
+  Future<void> _clearAnalyticsServices() async {
     try {
-      _currentUser = _currentUser!.copyWith(role: role);
-      await _saveUserLocally(_currentUser!);
+      await SimpleAnalyticsService().clearLocalAnalyticsData();
+    } catch (_) {}
+    try {
+      await AdvancedAnalyticsService().clearLocalAnalyticsData();
+    } catch (_) {}
+  }
 
-      await _firestore.collection('users').doc(_currentUser!.id).set({
-        'role': role.value,
-        'roleUpdatedAt': FieldValue.serverTimestamp(),
-        'roleUpdatedBy': _currentUser!.id,
-        'email': _currentUser!.email,
-        'normalizedEmail': _currentUser!.email.toLowerCase().trim(),
-        'name': _currentUser!.name,
-        'username': _currentUser!.username,
-      }, SetOptions(merge: true));
-
-      await _writeAdminLog(
-        action: 'self_role_changed',
-        targetUserId: _currentUser!.id,
-        details: {
-          'newRole': role.value,
-        },
-      );
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      if (kDebugMode) print('ERRORE aggiornamento ruolo utente: $e');
-      return false;
+  Future<bool> updateOwnRole(AppUserRole role) async {
+    if (kDebugMode) {
+      print(
+          'DEBUG: Cambio piano ignorato: il ruolo utente e gestito da dashboard/backend.');
     }
+    return false;
   }
 
   Future<CrossPromotionResult> activateSmartChefLaunchPromo() async {
@@ -1380,14 +1964,114 @@ class AuthService extends ChangeNotifier {
         raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
     final result = CrossPromotionResult.fromMap(data);
 
-    _currentUser = _currentUser!.copyWith(
+    return result;
+  }
+
+  Future<NewSignupPremiumPromoConfig?> getNewSignupPremiumPromoConfig() async {
+    final eligibility = await getNewSignupPremiumPromoEligibility();
+    return eligibility.active ? eligibility.config : null;
+  }
+
+  Future<bool> shouldShowNewSignupPremiumPromo() async {
+    final user = _currentUser;
+    if (user == null || user.effectiveRole != AppUserRole.free) return false;
+    final eligibility = await getNewSignupPremiumPromoEligibility();
+    if (eligibility.restored) return false;
+    if (!eligibility.canClaim) return false;
+
+    final doc = await _firestore.collection('users').doc(user.id).get();
+    final data = doc.data() ?? <String, dynamic>{};
+    final createdAt =
+        _dateFromFirestoreValue(data['createdAt']) ?? user.createdAt;
+    final age = DateTime.now().difference(createdAt);
+    if (age.inDays > 7) return false;
+
+    if (data['newSignupPremiumPromoClaimedAt'] != null ||
+        data['newSignupPremiumPromoDismissedAt'] != null) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> canClaimNewSignupPremiumPromo() async {
+    final eligibility = await getNewSignupPremiumPromoEligibility();
+    return eligibility.canClaim;
+  }
+
+  Future<NewSignupPremiumPromoEligibility>
+      getNewSignupPremiumPromoEligibility() async {
+    final firebaseUser = _firebaseAuth.currentUser;
+    if (firebaseUser == null || _currentUser == null) {
+      return const NewSignupPremiumPromoEligibility(
+        active: false,
+        canClaim: false,
+        alreadyClaimed: false,
+        restored: false,
+        expired: false,
+        durationDays: 30,
+        priceAfterTrial: '2.99',
+      );
+    }
+
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'getNewSignupPremiumPromoEligibility',
+    );
+    final response = await callable.call(<String, dynamic>{});
+    final raw = response.data;
+    final data =
+        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final eligibility = NewSignupPremiumPromoEligibility.fromMap(data);
+
+    if (eligibility.restored && eligibility.premiumUntil != null) {
+      _currentUser = _currentUser!.copyWith(
+        role: AppUserRole.premium,
+        premiumUntil: eligibility.premiumUntil,
+        premiumSource: 'new_signup_promo',
+      );
+      await _saveUserLocally(_currentUser!);
+      notifyListeners();
+    }
+    return eligibility;
+  }
+
+  Future<void> syncNewSignupPremiumPromoFromServer() async {
+    final user = _currentUser;
+    if (user == null || user.isAdmin) return;
+    await getNewSignupPremiumPromoEligibility();
+  }
+
+  Future<DateTime> activateNewSignupPremiumPromo() async {
+    final user = _currentUser;
+    if (user == null) {
+      throw Exception('Devi essere autenticato per attivare la promo.');
+    }
+
+    final callable = FirebaseFunctions.instance.httpsCallable(
+      'activateNewSignupPremiumPromo',
+    );
+    final response = await callable.call(<String, dynamic>{});
+    final raw = response.data;
+    final data =
+        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final premiumUntil =
+        DateTime.parse(data['premiumUntil'].toString()).toLocal();
+
+    _currentUser = user.copyWith(
       role: AppUserRole.premium,
-      premiumUntil: result.premiumUntil,
-      premiumSource: 'cross_promo_savein_to_smartchef',
+      premiumUntil: premiumUntil,
+      premiumSource: 'new_signup_promo',
     );
     await _saveUserLocally(_currentUser!);
     notifyListeners();
-    return result;
+    return premiumUntil;
+  }
+
+  Future<void> dismissNewSignupPremiumPromo() async {
+    final user = _currentUser;
+    if (user == null) return;
+    await _firestore.collection('users').doc(user.id).set({
+      'newSignupPremiumPromoDismissedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Future<PromotionBanner?> getActivePromotionBanner() async {
@@ -1397,11 +2081,6 @@ class AuthService extends ChangeNotifier {
         print('DEBUG: banner promo non caricato: utente Firebase nullo');
       return null;
     }
-    if (_currentUser?.isAdmin == true) {
-      if (kDebugMode) print('DEBUG: banner promo nascosto per utente admin');
-      return null;
-    }
-
     final callable = FirebaseFunctions.instance.httpsCallable(
       'getActivePromotionBanner',
     );
@@ -1551,6 +2230,106 @@ class AuthService extends ChangeNotifier {
       role: role,
       normalizedEmail: normalizedEmail,
     );
+    return true;
+  }
+
+  Future<bool> updateUserPremiumUntil({
+    required String userId,
+    required DateTime? premiumUntil,
+  }) async {
+    if (_currentUser == null || !_currentUser!.canManageUserRoles) {
+      throw Exception('Solo un admin può gestire la scadenza Premium.');
+    }
+
+    final userDoc = await _firestore.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      throw Exception('Utente non trovato.');
+    }
+
+    final userData = userDoc.data() ?? <String, dynamic>{};
+    final previousRole = AppUserRoleX.fromValue(userData['role'] as String?);
+    final willBecomePremium =
+        premiumUntil != null && previousRole != AppUserRole.premium;
+    final update = <String, dynamic>{
+      'premiumUntil': premiumUntil == null
+          ? FieldValue.delete()
+          : Timestamp.fromDate(premiumUntil),
+      'premiumSource':
+          premiumUntil == null ? FieldValue.delete() : 'admin_dashboard',
+      'premiumUpdatedAt': FieldValue.serverTimestamp(),
+      'premiumUpdatedBy': _currentUser!.id,
+      if (premiumUntil != null) 'role': AppUserRole.premium.value,
+      if (premiumUntil != null) 'roleUpdatedAt': FieldValue.serverTimestamp(),
+      if (premiumUntil != null) 'roleUpdatedBy': _currentUser!.id,
+    };
+
+    await _firestore.collection('users').doc(userId).set(
+          update,
+          SetOptions(merge: true),
+        );
+
+    await _writeAccountHistory(
+      targetUserId: userId,
+      type: 'premium_expiry_changed',
+      title: premiumUntil == null
+          ? 'Scadenza Premium rimossa'
+          : 'Scadenza Premium aggiornata',
+      before: {
+        'role': (userData['role'] as String?) ?? '',
+        'premiumUntil': userData['premiumUntil'],
+      },
+      after: {
+        'role': premiumUntil == null
+            ? ((userData['role'] as String?) ?? '')
+            : AppUserRole.premium.value,
+        'premiumUntil':
+            premiumUntil == null ? null : Timestamp.fromDate(premiumUntil),
+      },
+      source: 'admin_dashboard',
+    );
+
+    if (willBecomePremium) {
+      await _writeAccountHistory(
+        targetUserId: userId,
+        type: 'role_changed',
+        title: 'Passaggio a premium',
+        before: {
+          'role': previousRole.value,
+          'premiumUntil': userData['premiumUntil'],
+        },
+        after: {
+          'role': AppUserRole.premium.value,
+          'premiumUntil': Timestamp.fromDate(premiumUntil),
+        },
+        source: 'admin_dashboard',
+      );
+      await _writeAdminLog(
+        action: 'role_changed',
+        targetUserId: userId,
+        details: {
+          'oldRole': previousRole.value,
+          'newRole': AppUserRole.premium.value,
+          'premiumUntil': premiumUntil.toIso8601String(),
+        },
+      );
+    }
+
+    await _writeAdminLog(
+      action: 'premium_expiry_changed',
+      targetUserId: userId,
+      details: {
+        'oldRole': previousRole.value,
+        'newRole': premiumUntil == null
+            ? ((userData['role'] as String?) ?? '')
+            : AppUserRole.premium.value,
+        'premiumUntil': premiumUntil?.toIso8601String(),
+      },
+    );
+
+    if (userId == _currentUser!.id) {
+      await reloadCurrentUserFromFirestore();
+    }
+
     return true;
   }
 
@@ -1761,26 +2540,67 @@ class AuthService extends ChangeNotifier {
           targetData['dashboardRole'] as String?),
     );
 
+    final currentPremiumUntil =
+        _dateFromFirestoreValue(targetData['premiumUntil']);
+    final hasActivePremiumUntil = User._isPremiumExpiryActive(
+      currentPremiumUntil,
+    );
+
     await _firestore.collection('users').doc(userId).set({
       'role': role.value,
+      if (role == AppUserRole.free) 'premiumUntil': FieldValue.delete(),
+      if (role == AppUserRole.free) 'premiumSource': FieldValue.delete(),
+      if (role == AppUserRole.premium && !hasActivePremiumUntil)
+        'premiumUntil': FieldValue.delete(),
+      if (role == AppUserRole.premium && !hasActivePremiumUntil)
+        'premiumSource': FieldValue.delete(),
       'roleUpdatedAt': FieldValue.serverTimestamp(),
       'roleUpdatedBy': _currentUser!.id,
       if (normalizedEmail != null && normalizedEmail.isNotEmpty)
         'normalizedEmail': normalizedEmail,
     }, SetOptions(merge: true));
 
+    await _writeAccountHistory(
+      targetUserId: userId,
+      type: 'role_changed',
+      title: 'Passaggio a ${role.value}',
+      before: {
+        'role': targetData['role'],
+        'premiumUntil': targetData['premiumUntil'],
+      },
+      after: {
+        'role': role.value,
+        if (role == AppUserRole.free) 'premiumUntil': null,
+      },
+      source: 'admin_dashboard',
+    );
+
     await _writeAdminLog(
       action: 'role_changed',
       targetUserId: userId,
       details: {
+        'oldRole': (targetData['role'] as String?) ?? '',
         'newRole': role.value,
       },
     );
 
     if (userId == _currentUser!.id) {
-      _currentUser = _currentUser!.copyWith(role: role);
+      _currentUser = _currentUser!.copyWith(
+        role: role,
+        clearPremiumUntil: role == AppUserRole.free ||
+            (role == AppUserRole.premium && !hasActivePremiumUntil),
+        clearPremiumSource: role == AppUserRole.free ||
+            (role == AppUserRole.premium && !hasActivePremiumUntil),
+        premiumUntil: role == AppUserRole.premium && hasActivePremiumUntil
+            ? currentPremiumUntil
+            : null,
+        premiumSource: role == AppUserRole.premium && hasActivePremiumUntil
+            ? targetData['premiumSource'] as String?
+            : null,
+      );
       await _saveUserLocally(_currentUser!);
       notifyListeners();
+      onUserProfileChanged?.call();
     }
   }
 
@@ -1835,6 +2655,35 @@ class AuthService extends ChangeNotifier {
     return true;
   }
 
+  Future<void> _writeAccountHistory({
+    required String targetUserId,
+    required String type,
+    required String title,
+    String source = '',
+    Map<String, dynamic>? before,
+    Map<String, dynamic>? after,
+  }) async {
+    try {
+      final actor = _currentUser;
+      await _firestore
+          .collection('users')
+          .doc(targetUserId)
+          .collection('account_history')
+          .add({
+        'type': type,
+        'title': title,
+        'source': source,
+        'actorUserId': actor?.id,
+        'actorEmail': actor?.email,
+        'before': before ?? <String, dynamic>{},
+        'after': after ?? <String, dynamic>{},
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Lo storico non deve bloccare l'azione admin principale.
+    }
+  }
+
   Future<void> _writeAdminLog({
     required String action,
     required String targetUserId,
@@ -1845,14 +2694,18 @@ class AuthService extends ChangeNotifier {
       return;
     }
 
-    await _firestore.collection('admin_logs').add({
-      'action': action,
-      'targetUserId': targetUserId,
-      'actorUserId': actor.id,
-      'actorEmail': actor.email,
-      'timestamp': FieldValue.serverTimestamp(),
-      'details': details ?? <String, dynamic>{},
-    });
+    try {
+      await _firestore.collection('admin_logs').add({
+        'action': action,
+        'targetUserId': targetUserId,
+        'actorUserId': actor.id,
+        'actorEmail': actor.email,
+        'timestamp': FieldValue.serverTimestamp(),
+        'details': details ?? <String, dynamic>{},
+      });
+    } catch (_) {
+      // Il log non deve bloccare l'azione admin principale.
+    }
   }
 
   String _getFirebaseErrorMessage(firebase_auth.FirebaseAuthException e) {
@@ -1886,6 +2739,8 @@ class AuthService extends ChangeNotifier {
   Future<bool> updateUserProfile({
     String? name,
     String? username,
+    DateTime? birthDate,
+    String? gender,
   }) async {
     if (_currentUser == null) return false;
 
@@ -1894,9 +2749,16 @@ class AuthService extends ChangeNotifier {
         await _firebaseAuth.currentUser?.updateDisplayName(name);
       }
 
+      final lockedBirthDate = _currentUser!.birthDate;
+      final lockedGender = (_currentUser!.gender ?? '').trim().isNotEmpty
+          ? _currentUser!.gender
+          : null;
+
       _currentUser = _currentUser!.copyWith(
         name: name,
         username: username,
+        birthDate: lockedBirthDate ?? birthDate,
+        gender: lockedGender ?? gender,
       );
 
       await _saveUserLocally(_currentUser!);
@@ -1907,6 +2769,10 @@ class AuthService extends ChangeNotifier {
           'name': _currentUser!.name,
           'username': _currentUser!.username,
           'normalizedEmail': _currentUser!.email.toLowerCase().trim(),
+          'birthDate': _currentUser!.birthDate != null
+              ? Timestamp.fromDate(_currentUser!.birthDate!)
+              : null,
+          'gender': _currentUser!.gender,
         });
       }
 
@@ -1924,13 +2790,20 @@ class AuthService extends ChangeNotifier {
   Future<bool> updateUserProfileAndPassword({
     String? name,
     String? username,
+    DateTime? birthDate,
+    String? gender,
     required String newPassword,
   }) async {
     if (_currentUser == null || _firebaseAuth.currentUser == null) return false;
 
     try {
       await _firebaseAuth.currentUser!.updatePassword(newPassword);
-      await updateUserProfile(name: name, username: username);
+      await updateUserProfile(
+        name: name,
+        username: username,
+        birthDate: birthDate,
+        gender: gender,
+      );
 
       if (kDebugMode) print('DEBUG: ✔ Password e profilo aggiornati');
       return true;

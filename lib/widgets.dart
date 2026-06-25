@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'models.dart';
+import 'package:savein/models.dart';
 import 'url_metadata_service.dart';
 
 // Custom App Bar per le pagine interne

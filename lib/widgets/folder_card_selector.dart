@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../models/folder.dart';
-import '../services/access_control_service.dart';
-import '../services/folder_service.dart';
-import '../data_service.dart';
-import '../utils/folder_management.dart';
-import '../utils/constants.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/services/access_control_service.dart';
+import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/plan_limits_service.dart';
+import 'package:savein/data_service.dart';
+import 'package:savein/utils/folder_management.dart';
 
 class FolderCardSelector extends StatefulWidget {
   final Function(String) onFolderSelected;
@@ -77,6 +77,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
     }
 
     try {
+      await PlanLimitsService.getFeatureRules(forceRefresh: true);
       await _folderService.syncWithDataService();
       final allFolders = _folderService.folders;
 
@@ -525,8 +526,10 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
       return false;
     }
 
+    final maxFolderLevels =
+        _accessService.cachedMaxFolderLevelsForCurrentTier();
     final isAtMax =
-        _accessService.validateSubfolderCreation(currentFolder) != null;
+        maxFolderLevels > 0 && currentFolder.level >= maxFolderLevels - 1;
 
     if (isAtMax) {
       print(
@@ -540,25 +543,36 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: EdgeInsets.all(16),
-      child: Container(
-        width: MediaQuery.of(context).size.width * 0.95,
-        height: MediaQuery.of(context).size.height * 0.85,
-        decoration: BoxDecoration(
-          color: _mainBackgroundColor,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          children: [
-            _buildMiniHeader(),
-            Expanded(
-              child: _buildMiniHomeContent(),
+    // La tastiera deve sovrapporsi al popup senza spostare footer e pulsanti.
+    return MediaQuery.removeViewInsets(
+      context: context,
+      removeBottom: true,
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          resizeToAvoidBottomInset: false,
+          body: Center(
+            child: Container(
+              width: MediaQuery.of(context).size.width * 0.95,
+              height: MediaQuery.of(context).size.height * 0.85,
+              decoration: BoxDecoration(
+                color: _mainBackgroundColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                children: [
+                  _buildMiniHeader(),
+                  Expanded(
+                    child: _buildMiniHomeContent(),
+                  ),
+                  _buildBreadcrumbSection(),
+                  _buildSelectionFooter(),
+                ],
+              ),
             ),
-            _buildBreadcrumbSection(),
-            _buildSelectionFooter(),
-          ],
+          ),
         ),
       ),
     );
@@ -759,9 +773,12 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
     final isTemporary = _isTemporaryFolder(folder);
 
     // Per utenti Free, le cartelle oltre il limite di profondità non sono selezionabili
+    final maxFolderLevels =
+        _accessService.cachedMaxFolderLevelsForCurrentTier();
     final bool isLockedForFree = !folder.isSpecial &&
         _accessService.isFree &&
-        folder.level > AppAccessService.freeMaxFolderLevel;
+        maxFolderLevels > 0 &&
+        folder.level >= maxFolderLevels;
 
     return GestureDetector(
       onTap: () async {
@@ -799,7 +816,8 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
           decoration: BoxDecoration(
             color: folder.color,
             borderRadius: BorderRadius.circular(12),
-            border: isSelected ? Border.all(color: Colors.green, width: 3) : null,
+            border:
+                isSelected ? Border.all(color: Colors.green, width: 3) : null,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.1),
@@ -866,7 +884,8 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.workspace_premium, color: Colors.white, size: 10),
+                        Icon(Icons.workspace_premium,
+                            color: Colors.white, size: 10),
                         SizedBox(width: 3),
                         Text(
                           'Premium',
@@ -922,36 +941,42 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.folder_off,
-            size: 48,
-            color: Colors.grey,
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.folder_off,
+                size: 48,
+                color: Colors.grey,
+              ),
+              SizedBox(height: 16),
+              Text(
+                _isSearching ? 'Nessun risultato' : 'Nessuna cartella',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                _isSearching
+                    ? 'Prova con altri termini di ricerca'
+                    : 'Crea la tua prima cartella',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
-          SizedBox(height: 16),
-          Text(
-            _isSearching ? 'Nessun risultato' : 'Nessuna cartella',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            _isSearching
-                ? 'Prova con altri termini di ricerca'
-                : 'Crea la tua prima cartella',
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 12,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1181,9 +1206,13 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
 
   Widget _buildSelectionFooter() {
     final isAtMaxLevel = _isAtMaxLevel();
+    final maxFolderLevels =
+        _accessService.cachedMaxFolderLevelsForCurrentTier();
     final currentLevelText = _currentPath.isEmpty
         ? "Livello principale"
-        : "Livello ${_currentPath.length + 1}/5";
+        : maxFolderLevels > 0
+            ? "Livello ${_currentPath.length + 1}/$maxFolderLevels"
+            : "Livello ${_currentPath.length + 1}";
 
     return Container(
       padding: EdgeInsets.all(16),
@@ -1213,7 +1242,9 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
                       if (_isAtMaxLevel()) {
                         print(
                             'DEBUG: ⛔ PULSANTE - Tentativo bloccato, siamo al limite!');
-                        _showValidationError('Limite di 5 livelli raggunto');
+                        _showValidationError(maxFolderLevels > 0
+                            ? 'Limite di $maxFolderLevels livelli raggiunto'
+                            : 'Limite livelli raggiunto');
                         return;
                       }
                       print(
@@ -1438,8 +1469,11 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
       if (_isAtMaxLevel()) {
         print('DEBUG: ⛔ BLOCCATO - Limite livelli raggiunto');
         _showDebugMessage('BLOCCATO: Limite livelli raggiunto');
-        _showValidationError(
-            'Raggiunto il limite massimo di 5 livelli totali (livelli 0-4)');
+        final maxFolderLevels =
+            _accessService.cachedMaxFolderLevelsForCurrentTier();
+        _showValidationError(maxFolderLevels > 0
+            ? 'Raggiunto il limite massimo di $maxFolderLevels livelli'
+            : 'Raggiunto il limite massimo di livelli');
         return;
       }
 
@@ -1481,13 +1515,14 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
             'DEBUG: Parent trovata: ${parentFolder.name} (livello ${parentFolder.level})');
         print('DEBUG: Nuovo livello calcolato: $newLevel');
 
-        if (newLevel > AppConstants.maxFolderLevels) {
+        final maxFolderLevels =
+            _accessService.cachedMaxFolderLevelsForCurrentTier();
+        if (maxFolderLevels > 0 && newLevel >= maxFolderLevels) {
           print(
               'DEBUG: ⛔ BLOCCATO - Doppio controllo limite fallito (newLevel: $newLevel)');
-          _showDebugMessage(
-              'BLOCCATO: newLevel $newLevel > ${AppConstants.maxFolderLevels}');
+          _showDebugMessage('BLOCCATO: newLevel $newLevel >= $maxFolderLevels');
           _showValidationError(
-              'Raggiunto il limite massimo di 5 livelli totali (livelli 0-4)');
+              'Raggiunto il limite massimo di $maxFolderLevels livelli');
           return;
         }
       }

@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import '../utils/theme_helpers.dart';
 import '../services/auth_service.dart';
 import 'registration_page.dart';
+import '../main.dart';
 
 // PAGINA DI LOGIN CORRETTA - NON SERVE PIÃ™ NAVIGAZIONE MANUALE
 class LoginPage extends StatefulWidget {
@@ -599,7 +600,21 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         _showSuccessSnackBar(
             'Login Google completato! Benvenuto ${userName.split(' ').first}!');
 
-        // AuthWrapper sta ascoltando AuthService e mostrerÃ  automaticamente WebHomePage
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => WebHomePage(
+              isDarkTheme: widget.isDarkTheme,
+              marketingProfileEnabled: false,
+              marketingCommsEnabled: false,
+              onThemeChanged: widget.onThemeChanged,
+              onMarketingProfileChanged: (value) {},
+              onMarketingCommsChanged: (value) {},
+              onSharedContent: (content) {},
+            ),
+          ),
+          (route) => false,
+        );
       } else {
         print('DEBUG: GOOGLE SIGN-IN FALLITO: ${result.message}');
         final pendingGoogleEmail = AuthService().pendingGoogleEmail;
@@ -618,6 +633,21 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       if (firebaseHasUser) {
         print('DEBUG: Errore nell\'UI ma Firebase Auth Google ha successo');
         _showSuccessSnackBar('Login Google completato!');
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => WebHomePage(
+              isDarkTheme: widget.isDarkTheme,
+              marketingProfileEnabled: false,
+              marketingCommsEnabled: false,
+              onThemeChanged: widget.onThemeChanged,
+              onMarketingProfileChanged: (value) {},
+              onMarketingCommsChanged: (value) {},
+              onSharedContent: (content) {},
+            ),
+          ),
+          (route) => false,
+        );
       } else {
         _showErrorDialog(
             'Errore durante l\'autenticazione con Google. Verifica la connessione.');
@@ -646,7 +676,8 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             Expanded(
               child: Text(
                 'Password Dimenticata',
-                style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Colors.black87, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -722,7 +753,8 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             Expanded(
               child: Text(
                 'Email Inviata!',
-                style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Colors.black87, fontWeight: FontWeight.bold),
               ),
             ),
           ],

@@ -4,7 +4,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'models/folder.dart' show MockFolder;
+import 'package:savein/models/folder.dart' show MockFolder;
 
 // ============================================================================
 // SAVED POST
@@ -27,6 +27,9 @@ class SavedPost {
   final DateTime createdAt;
   final DateTime? updatedAt;
   final bool isShared; // 🆕 NUOVO: Indica se il post è condiviso
+  final String? globalPostId;
+  final String? urlHash;
+  final String? normalizedUrl;
 
   SavedPost({
     required this.id,
@@ -42,6 +45,9 @@ class SavedPost {
     required this.createdAt,
     this.updatedAt,
     this.isShared = false,
+    this.globalPostId,
+    this.urlHash,
+    this.normalizedUrl,
   });
 
   Map<String, dynamic> toJson() {
@@ -59,6 +65,9 @@ class SavedPost {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'isShared': isShared,
+      'globalPostId': globalPostId,
+      'urlHash': urlHash,
+      'normalizedUrl': normalizedUrl,
     };
   }
 
@@ -80,6 +89,9 @@ class SavedPost {
       updatedAt:
           json['updatedAt'] != null ? DateTime.parse(json['updatedAt']) : null,
       isShared: json['isShared'] ?? false,
+      globalPostId: json['globalPostId'],
+      urlHash: json['urlHash'],
+      normalizedUrl: json['normalizedUrl'],
     );
   }
 
@@ -97,6 +109,9 @@ class SavedPost {
     DateTime? createdAt,
     DateTime? updatedAt,
     bool? isShared,
+    String? globalPostId,
+    String? urlHash,
+    String? normalizedUrl,
   }) {
     return SavedPost(
       id: id ?? this.id,
@@ -112,6 +127,9 @@ class SavedPost {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       isShared: isShared ?? this.isShared,
+      globalPostId: globalPostId ?? this.globalPostId,
+      urlHash: urlHash ?? this.urlHash,
+      normalizedUrl: normalizedUrl ?? this.normalizedUrl,
     );
   }
 
@@ -405,6 +423,7 @@ class UrlMetadata {
 
 class Reminder {
   final String id;
+
   /// 'post' oppure 'folder'
   final String targetType;
   final String postId;
@@ -515,8 +534,18 @@ class Reminder {
 
   String get monthName {
     const months = [
-      'Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu',
-      'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'
+      'gennaio',
+      'febbraio',
+      'marzo',
+      'aprile',
+      'maggio',
+      'giugno',
+      'luglio',
+      'agosto',
+      'settembre',
+      'ottobre',
+      'novembre',
+      'dicembre',
     ];
     return months[reminderMonth - 1];
   }
@@ -524,8 +553,17 @@ class Reminder {
   String get displayTime =>
       '${reminderHour.toString().padLeft(2, '0')}:${reminderMinute.toString().padLeft(2, '0')}';
 
-  String get displayDate =>
-      isYearly ? '$reminderDay $monthName alle $displayTime (ogni anno)' : '$reminderDay $monthName alle $displayTime';
+  bool get isPast {
+    if (isYearly) return false;
+    final now = DateTime.now();
+    final reminderDate = DateTime(
+        now.year, reminderMonth, reminderDay, reminderHour, reminderMinute);
+    return reminderDate.isBefore(now);
+  }
+
+  String get displayDate => isYearly
+      ? '$reminderDay $monthName alle $displayTime (ripetuto ogni anno)'
+      : '$reminderDay $monthName alle $displayTime (una sola volta)';
 }
 
 // ============================================================================

@@ -4,13 +4,20 @@
 class PostPreviewRemoteStorage {
   const PostPreviewRemoteStorage();
 
+  Future<String?> resolveExistingPreviewUrl({
+    String? sourceUrl,
+    String? imageUrl,
+  }) async {
+    return null;
+  }
+
   Future<String?> uploadCachedPreview({
     required String userId,
     required String postId,
     required String localPath,
     String? sourceUrl,
+    String? imageUrl,
   }) async {
     return null;
   }
 }
-

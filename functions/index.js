@@ -10,6 +10,44 @@ admin.initializeApp();
 
 const db = admin.firestore();
 const SHARED_LINKS_COLLECTION = "shared_links";
+const PLAN_LIMITS_DOC = "config/plan_limits";
+const DEFAULT_STORAGE_BUCKET = "saveit-app-1784d.firebasestorage.app";
+
+  const _default_feature_rules = () => ({
+  "root_folders": {
+    "free": {enabled: true, limit: 10, period: "total", requiresAd: false},
+    "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
+  },
+  "child_folders": {
+    "free": {enabled: true, limit: 4, period: "total", requiresAd: false},
+    "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
+  },
+  "folder_levels": {
+    "free": {enabled: true, limit: 1, period: "total", requiresAd: false},
+    "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
+  },
+  "manual_tags": {
+    "free": {enabled: false, limit: 0, period: "total", requiresAd: false},
+    "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
+  },
+  "share_folder": {
+    "free": {enabled: true, limit: 1, period: "day", requiresAd: true},
+    "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
+  },
+  "share_post": {
+    "free": {enabled: true, limit: 3, period: "day", requiresAd: true},
+    "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
+  },
+  "import_shared": {
+    "free": {enabled: true, limit: 5, period: "day", requiresAd: true},
+    "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
+  },
+});
+
+const _get_plan_limits = async () => {
+  const doc = await db.doc(PLAN_LIMITS_DOC).get();
+  return doc.exists ? doc.data() : {};
+};
 const SHARE_LINK_BASE_URL = (process.env.SHARE_LINK_BASE_URL || "https://savein.eu").replace(/\/$/, "");
 const PLAY_STORE_URL = process.env.PLAY_STORE_URL || "https://play.google.com/store/apps/details?id=eu.savein.app";
 const APP_STORE_URL = process.env.APP_STORE_URL || "";
@@ -780,18 +818,57 @@ exports.sendWelcomeEmail = functionsV1.auth.user().onCreate(async (user) => {
   return null;
 });
 
+exports.cleanupUserDataOnDelete = functionsV1.auth.user().onDelete(async (user) => {
+  const uid = user.uid;
+  const email = user.email || "";
+  console.info("User cleanup started", {uid, email});
+  const stats = await cleanupUserOwnedData({uid, email, dryRun: false});
+  console.info("User cleanup completed", {uid, email, stats});
+  return null;
+});
+
 const normalizeEmail = (email) => (email || "").toString().toLowerCase().trim();
 const CROSS_PROMO_DURATION_DAYS = 30;
 const CROSS_PROMO_CLAIM_WINDOW_DAYS = 14;
 const PROMOTION_BANNERS_COLLECTION = "promotion_banners";
 const PROMOTION_REDEMPTIONS_COLLECTION = "promotion_redemptions";
 const PROMOTION_EVENTS_COLLECTION = "promotion_banner_events";
-const SAVEIN_SMARTCHEF_PROMO_ID = "savein_smartchef_launch";
+const NEW_SIGNUP_PROMO_CONFIG_DOC = "new_signup_premium_promo";
+const NEW_SIGNUP_PROMO_CLAIMS_COLLECTION = "new_signup_premium_promo_claims";
+const SAVEIN_SMARTCHEF_PROMO_ID = "smartchef_savein_launch";
 
 const addDays = (date, days) => {
   const copy = new Date(date.getTime());
   copy.setDate(copy.getDate() + days);
   return copy;
+};
+
+const premiumUntilAfterGift = (userData, durationDays, now = new Date()) => {
+  const role = (userData?.role || "").toString().toLowerCase().trim();
+  const isCurrentlyPremium = role === "premium" || role === "admin";
+  if (!isCurrentlyPremium) {
+    return addDays(now, Number(durationDays || CROSS_PROMO_DURATION_DAYS));
+  }
+
+  const currentUntil = timestampToDate(userData?.premiumUntil);
+  const base = currentUntil && currentUntil > now ? currentUntil : now;
+  return addDays(base, Number(durationDays || CROSS_PROMO_DURATION_DAYS));
+};
+
+const writeAccountHistory = async ({userId, type, title, source, before = {}, after = {}}) => {
+  if (!userId) return;
+  try {
+    await db.collection("users").doc(userId).collection("account_history").add({
+      type,
+      title,
+      source: source || "",
+      before,
+      after,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    console.warn("writeAccountHistory skipped:", error.message);
+  }
 };
 
 const requireCrossPromoConfig = () => {
@@ -808,6 +885,174 @@ const requireCrossPromoConfig = () => {
 
 const promoRedemptionId = (email, promotionId) =>
   `${normalizeEmail(email)}|${(promotionId || "").toString().trim()}`;
+
+const emailDocId = (email) => normalizeEmail(email).replace(/\//g, "_");
+
+const deleteQuerySnapshotDocs = async (query, {label = "query", dryRun = false, batchSize = 450} = {}) => {
+  if (dryRun) {
+    const aggregate = await query.count().get();
+    const count = aggregate.data().count || 0;
+    if (count > 0) {
+      console.info(`User cleanup would delete ${count} docs from ${label}`);
+    }
+    return count;
+  }
+
+  let deleted = 0;
+  while (true) {
+    const snapshot = await query.limit(batchSize).get();
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+    deleted += snapshot.size;
+    if (snapshot.size < batchSize) break;
+  }
+  if (deleted > 0) {
+    console.info(`User cleanup ${dryRun ? "would delete" : "deleted"} ${deleted} docs from ${label}`);
+  }
+  return deleted;
+};
+
+const deleteDocumentTree = async (docRef, {dryRun = false} = {}) => {
+  let deleted = 0;
+  const collections = await docRef.listCollections();
+  for (const collection of collections) {
+    const snapshot = await collection.get();
+    for (const doc of snapshot.docs) {
+      deleted += await deleteDocumentTree(doc.ref, {dryRun});
+    }
+  }
+  const docSnap = await docRef.get();
+  if (docSnap.exists && !dryRun) {
+    await docRef.delete();
+  }
+  return deleted + (docSnap.exists ? 1 : 0);
+};
+
+const cleanupStoragePrefix = async (prefix, {dryRun = false} = {}) => {
+  const normalizedPrefix = (prefix || "").toString().replace(/^\/+/, "");
+  if (!normalizedPrefix) return 0;
+  const bucket = admin.storage().bucket(DEFAULT_STORAGE_BUCKET);
+  const [files] = await bucket.getFiles({prefix: normalizedPrefix});
+  if (!dryRun && files.length > 0) {
+    await Promise.all(files.map((file) => file.delete({ignoreNotFound: true})));
+  }
+  if (files.length > 0) {
+    console.info(`User cleanup ${dryRun ? "would delete" : "deleted"} ${files.length} storage files from ${normalizedPrefix}`);
+  }
+  return files.length;
+};
+
+const cleanupUserOwnedData = async ({uid, email, dryRun = false}) => {
+  const normalizedEmail = normalizeEmail(email);
+  const stats = {
+    userTreeDocs: 0,
+    sharedLinks: 0,
+    sharedItemsOwnedByUser: 0,
+    featureUsage: 0,
+    promotionRedemptions: 0,
+    newSignupClaims: 0,
+    crossAppPromos: 0,
+    supportMessages: 0,
+    dashboardAccesses: 0,
+    promotionEvents: 0,
+    adminLogs: 0,
+    storageFiles: 0,
+  };
+
+  if (uid) {
+    stats.userTreeDocs += await deleteDocumentTree(db.collection("users").doc(uid), {dryRun});
+    stats.featureUsage += await deleteDocumentTree(db.collection("feature_usage").doc(uid), {dryRun});
+    stats.sharedLinks += await deleteQuerySnapshotDocs(
+        db.collection(SHARED_LINKS_COLLECTION).where("ownerId", "==", uid),
+        {label: "shared_links.ownerId", dryRun}
+    );
+    stats.sharedItemsOwnedByUser += await deleteQuerySnapshotDocs(
+        db.collectionGroup("shared_items").where("ownerId", "==", uid),
+        {label: "users/*/shared_items.ownerId", dryRun}
+    );
+    stats.promotionRedemptions += await deleteQuerySnapshotDocs(
+        db.collection(PROMOTION_REDEMPTIONS_COLLECTION).where("userId", "==", uid),
+        {label: "promotion_redemptions.userId", dryRun}
+    );
+    stats.newSignupClaims += await deleteQuerySnapshotDocs(
+        db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).where("firstUserId", "==", uid),
+        {label: "new_signup_premium_promo_claims.firstUserId", dryRun}
+    );
+    stats.newSignupClaims += await deleteQuerySnapshotDocs(
+        db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).where("lastUserId", "==", uid),
+        {label: "new_signup_premium_promo_claims.lastUserId", dryRun}
+    );
+    stats.crossAppPromos += await deleteQuerySnapshotDocs(
+        db.collection("cross_app_promos").where("sourceUid", "==", uid),
+        {label: "cross_app_promos.sourceUid", dryRun}
+    );
+    stats.crossAppPromos += await deleteQuerySnapshotDocs(
+        db.collection("cross_app_promos").where("saveinUid", "==", uid),
+        {label: "cross_app_promos.saveinUid", dryRun}
+    );
+    stats.supportMessages += await deleteQuerySnapshotDocs(
+        db.collection("support_messages").where("userId", "==", uid),
+        {label: "support_messages.userId", dryRun}
+    );
+    stats.promotionEvents += await deleteQuerySnapshotDocs(
+        db.collection(PROMOTION_EVENTS_COLLECTION).where("userId", "==", uid),
+        {label: "promotion_banner_events.userId", dryRun}
+    );
+    stats.adminLogs += await deleteQuerySnapshotDocs(
+        db.collection("admin_logs").where("targetUserId", "==", uid),
+        {label: "admin_logs.targetUserId", dryRun}
+    );
+    stats.adminLogs += await deleteQuerySnapshotDocs(
+        db.collection("admin_logs").where("actorId", "==", uid),
+        {label: "admin_logs.actorId", dryRun}
+    );
+    stats.storageFiles += await cleanupStoragePrefix(`users/${uid}/`, {dryRun});
+  }
+
+  if (normalizedEmail) {
+    stats.dashboardAccesses += await deleteDocumentTree(
+        db.collection("dashboard_accesses").doc(normalizedEmail),
+        {dryRun}
+    );
+    stats.promotionRedemptions += await deleteDocumentTree(
+        db.collection(PROMOTION_REDEMPTIONS_COLLECTION).doc(promoRedemptionId(normalizedEmail, SAVEIN_SMARTCHEF_PROMO_ID)),
+        {dryRun}
+    );
+    stats.newSignupClaims += await deleteDocumentTree(
+        db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).doc(emailDocId(normalizedEmail)),
+        {dryRun}
+    );
+    stats.crossAppPromos += await deleteDocumentTree(
+        db.collection("cross_app_promos").doc(`${normalizedEmail}|savein_to_smartchef`),
+        {dryRun}
+    );
+    stats.crossAppPromos += await deleteDocumentTree(
+        db.collection("cross_app_promos").doc(`${normalizedEmail}|smartchef_to_savein`),
+        {dryRun}
+    );
+    stats.supportMessages += await deleteQuerySnapshotDocs(
+        db.collection("support_messages").where("userEmail", "==", normalizedEmail),
+        {label: "support_messages.userEmail", dryRun}
+    );
+    stats.promotionEvents += await deleteQuerySnapshotDocs(
+        db.collection(PROMOTION_EVENTS_COLLECTION).where("email", "==", normalizedEmail),
+        {label: "promotion_banner_events.email", dryRun}
+    );
+    stats.promotionEvents += await deleteQuerySnapshotDocs(
+        db.collection(PROMOTION_EVENTS_COLLECTION).where("normalizedEmail", "==", normalizedEmail),
+        {label: "promotion_banner_events.normalizedEmail", dryRun}
+    );
+    stats.adminLogs += await deleteQuerySnapshotDocs(
+        db.collection("admin_logs").where("actorEmail", "==", normalizedEmail),
+        {label: "admin_logs.actorEmail", dryRun}
+    );
+  }
+
+  return stats;
+};
 
 const timestampToDate = (value) => {
   if (!value) return null;
@@ -854,6 +1099,20 @@ const isPromotionUsableForUser = async ({email, promotionId, direction}) => {
   return true;
 };
 
+const userAlreadyInBothApps = async (email) => {
+  const directions = ["savein_to_smartchef", "smartchef_to_savein"];
+  for (const promoDirection of directions) {
+    const crossPromo = await db.collection("cross_app_promos")
+        .doc(`${email}|${promoDirection}`)
+        .get();
+    if (crossPromo.exists) {
+      const status = (crossPromo.data()?.status || "").toString();
+      if (status === "claimed") return true;
+    }
+  }
+  return false;
+};
+
 const getConfiguredPromotion = async ({promotionId, appId, email, direction}) => {
   const snap = await db.collection(PROMOTION_BANNERS_COLLECTION).doc(promotionId).get();
   if (!snap.exists) return null;
@@ -869,18 +1128,275 @@ const getConfiguredPromotion = async ({promotionId, appId, email, direction}) =>
   return promo;
 };
 
-const promotionBannerResponse = (promo) => ({
-  id: promo.id,
-  type: (promo.type || "generic_promo").toString(),
-  title: (promo.title || "").toString(),
-  message: (promo.message || "").toString(),
-  ctaLabel: (promo.ctaLabel || "Scopri").toString(),
-  secondaryCtaLabel: (promo.secondaryCtaLabel || "").toString(),
-  action: (promo.action || "open_url").toString(),
-  actionUrl: (promo.actionUrl || "").toString(),
-  imageUrl: (promo.imageUrl || "").toString(),
-  targetApp: (promo.targetApp || "").toString(),
-  priority: Number(promo.priority || 0),
+const promotionImageUrlForApp = (promo, appId) => {
+  const appImageField = appId === "smartchef" ?
+    "smartchefImageUrl" :
+    "saveinImageUrl";
+  return (promo[appImageField] || promo.imageUrl || "").toString();
+};
+
+const promotionBannerResponse = (promo, appId = "savein") => {
+  let message = (promo.message || "").toString();
+  if (appId === "smartchef") {
+    message = (promo.smartchefMessage || message).toString();
+  } else if (appId === "savein") {
+    message = (promo.saveinMessage || message).toString();
+  }
+  let secondaryCtaLabel = (promo.secondaryCtaLabel || "").toString();
+  if (appId === "smartchef") {
+    secondaryCtaLabel = (promo.smartchefSecondaryCtaLabel || secondaryCtaLabel).toString();
+  } else if (appId === "savein") {
+    secondaryCtaLabel = (promo.saveinSecondaryCtaLabel || secondaryCtaLabel).toString();
+  }
+
+  return {
+    id: promo.id,
+    type: (promo.type || "generic_promo").toString(),
+    title: (promo.title || "").toString(),
+    message: message,
+    ctaLabel: (promo.ctaLabel || "Scopri").toString(),
+    secondaryCtaLabel: secondaryCtaLabel,
+    action: (promo.action || "open_url").toString(),
+    actionUrl: (promo.actionUrl || "").toString(),
+    imageUrl: promotionImageUrlForApp(promo, appId),
+    saveinImageUrl: (promo.saveinImageUrl || "").toString(),
+    smartchefImageUrl: (promo.smartchefImageUrl || "").toString(),
+    targetApp: (promo.targetApp || "").toString(),
+    priority: Number(promo.priority || 0),
+    giftDays: Number(promo.giftDays || CROSS_PROMO_DURATION_DAYS),
+  };
+};
+
+const restoreNewSignupPremiumForUser = async ({uid, email, premiumUntil, source}) => {
+  // Se l'utente ha già Premium senza scadenza (admin-assegnato), non sovrascrivere
+  const userSnap = await db.collection("users").doc(uid).get();
+  if (userSnap.exists) {
+    const userData = userSnap.data() || {};
+    const currentRole = (userData.role || "").toString().toLowerCase().trim();
+    const currentPremiumUntil = timestampToDate(userData.premiumUntil);
+    const hasUnlimitedAdminPremium = currentRole === "premium" && !currentPremiumUntil;
+    if (hasUnlimitedAdminPremium) {
+      // Premium illimitato da admin: non sovrascrivere con la scadenza della promo
+      return;
+    }
+  }
+  await db.collection("users").doc(uid).set({
+    role: "premium",
+    premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+    premiumSource: "new_signup_promo",
+    newSignupPremiumPromoClaimedAt: admin.firestore.FieldValue.serverTimestamp(),
+    newSignupPremiumPromoRestoredAt: admin.firestore.FieldValue.serverTimestamp(),
+    roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    roleUpdatedBy: source || "new_signup_promo_restore",
+    email,
+    normalizedEmail: normalizeEmail(email),
+  }, {merge: true});
+};
+
+const getNewSignupPromoConfig = async () => {
+  const configSnap = await db.collection("app_config").doc(NEW_SIGNUP_PROMO_CONFIG_DOC).get();
+  const config = configSnap.exists ? configSnap.data() || {} : {};
+  return {
+    active: config.active === true,
+    durationDays: Number(config.durationDays || 30),
+    priceAfterTrial: (config.priceAfterTrial || "2.99").toString(),
+  };
+};
+
+exports.getNewSignupPremiumPromoEligibility = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) {
+    throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+  }
+
+  const email = normalizeEmail(auth.token?.email);
+  if (!email) {
+    throw new HttpsError("failed-precondition", "Email account non disponibile.");
+  }
+
+  const now = new Date();
+  const config = await getNewSignupPromoConfig();
+  const claimSnap = await db
+      .collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION)
+      .doc(emailDocId(email))
+      .get();
+
+  if (claimSnap.exists) {
+    const claim = claimSnap.data() || {};
+    const premiumUntil = timestampToDate(claim.premiumUntil);
+    const stillActive = premiumUntil && premiumUntil > now;
+    if (stillActive) {
+      await restoreNewSignupPremiumForUser({
+        uid: auth.uid,
+        email,
+        premiumUntil,
+        source: "new_signup_promo_existing_claim",
+      });
+    }
+
+    return {
+      canClaim: false,
+      alreadyClaimed: true,
+      restored: stillActive === true,
+      expired: stillActive !== true,
+      active: config.active,
+      durationDays: config.durationDays,
+      priceAfterTrial: config.priceAfterTrial,
+      premiumUntil: premiumUntil ? premiumUntil.toISOString() : null,
+      startedAt: timestampToDate(claim.startedAt)?.toISOString() || null,
+    };
+  }
+
+  if (!config.active) {
+    return {
+      canClaim: false,
+      alreadyClaimed: false,
+      restored: false,
+      expired: false,
+      active: false,
+      durationDays: config.durationDays,
+      priceAfterTrial: config.priceAfterTrial,
+      premiumUntil: null,
+      startedAt: null,
+    };
+  }
+
+  const userSnap = await db.collection("users").doc(auth.uid).get();
+  const userData = userSnap.exists ? userSnap.data() || {} : {};
+  const role = (userData.role || "").toString().toLowerCase().trim();
+  const currentPremiumUntil = timestampToDate(userData.premiumUntil);
+  const hasActivePremium = role === "premium" &&
+    (!currentPremiumUntil || currentPremiumUntil > now);
+
+  return {
+    canClaim: role !== "admin" && !hasActivePremium,
+    alreadyClaimed: false,
+    restored: false,
+    expired: false,
+    active: true,
+    durationDays: config.durationDays,
+    priceAfterTrial: config.priceAfterTrial,
+    premiumUntil: null,
+    startedAt: null,
+  };
+});
+
+exports.activateNewSignupPremiumPromo = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) {
+    throw new HttpsError("unauthenticated", "Devi essere autenticato.");
+  }
+
+  const email = normalizeEmail(auth.token?.email);
+  if (!email) {
+    throw new HttpsError("failed-precondition", "Email account non disponibile.");
+  }
+
+  const config = await getNewSignupPromoConfig();
+  if (!config.active) {
+    throw new HttpsError("failed-precondition", "Questa promo non è più attiva.");
+  }
+
+  const now = new Date();
+  const claimRef = db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).doc(emailDocId(email));
+  const userRef = db.collection("users").doc(auth.uid);
+
+  const result = await db.runTransaction(async (transaction) => {
+    const [claimSnap, userSnap] = await Promise.all([
+      transaction.get(claimRef),
+      transaction.get(userRef),
+    ]);
+
+    if (claimSnap.exists) {
+      const claim = claimSnap.data() || {};
+      const existingPremiumUntil = timestampToDate(claim.premiumUntil);
+      if (existingPremiumUntil && existingPremiumUntil > now) {
+        transaction.set(userRef, {
+          role: "premium",
+          premiumUntil: admin.firestore.Timestamp.fromDate(existingPremiumUntil),
+          premiumSource: "new_signup_promo",
+          newSignupPremiumPromoClaimedAt: admin.firestore.FieldValue.serverTimestamp(),
+          newSignupPremiumPromoRestoredAt: admin.firestore.FieldValue.serverTimestamp(),
+          roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          roleUpdatedBy: "new_signup_promo_existing_claim",
+          email,
+          normalizedEmail: email,
+        }, {merge: true});
+
+        return {
+          status: "restored",
+          premiumUntil: existingPremiumUntil,
+          startedAt: timestampToDate(claim.startedAt) || null,
+        };
+      }
+
+      throw new HttpsError("already-exists", "Hai già utilizzato questa promo.");
+    }
+
+    const userData = userSnap.exists ? userSnap.data() || {} : {};
+    const role = (userData.role || "").toString().toLowerCase().trim();
+    const currentPremiumUntil = timestampToDate(userData.premiumUntil);
+    const hasActivePremium = role === "premium" &&
+      (!currentPremiumUntil || currentPremiumUntil > now);
+    if (role === "admin" || hasActivePremium) {
+      throw new HttpsError("failed-precondition", "Questa promo è disponibile solo per utenti Free.");
+    }
+
+    const premiumUntil = addDays(now, config.durationDays);
+    const startedAtTs = admin.firestore.Timestamp.fromDate(now);
+    const premiumUntilTs = admin.firestore.Timestamp.fromDate(premiumUntil);
+
+    transaction.set(claimRef, {
+      email,
+      normalizedEmail: email,
+      firstUserId: auth.uid,
+      lastUserId: auth.uid,
+      startedAt: startedAtTs,
+      premiumUntil: premiumUntilTs,
+      durationDays: config.durationDays,
+      priceAfterTrial: config.priceAfterTrial,
+      status: "claimed",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: false});
+
+    transaction.set(userRef, {
+      role: "premium",
+      premiumUntil: premiumUntilTs,
+      premiumSource: "new_signup_promo",
+      newSignupPremiumPromoClaimedAt: startedAtTs,
+      roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      roleUpdatedBy: "new_signup_promo",
+      email,
+      normalizedEmail: email,
+    }, {merge: true});
+
+    return {
+      status: "claimed",
+      premiumUntil,
+      startedAt: now,
+    };
+  });
+
+  await writeAccountHistory({
+    userId: auth.uid,
+    type: "new_signup_promo_claimed",
+    title: "Promo nuovi iscritti: Premium attivato",
+    source: "new_signup_promo",
+    after: {
+      role: "premium",
+      premiumUntil: admin.firestore.Timestamp.fromDate(result.premiumUntil),
+      durationDays: config.durationDays,
+    },
+  });
+
+  return {
+    status: result.status,
+    premiumUntil: result.premiumUntil.toISOString(),
+    startedAt: result.startedAt ? result.startedAt.toISOString() : null,
+    durationDays: config.durationDays,
+    priceAfterTrial: config.priceAfterTrial,
+  };
 });
 
 exports.getActivePromotionBanner = onCall(async (request) => {
@@ -891,23 +1407,20 @@ exports.getActivePromotionBanner = onCall(async (request) => {
   const email = normalizeEmail(auth.token?.email);
   if (!email) return {banner: null};
 
-  const userSnap = await db.collection("users").doc(auth.uid).get();
-  const userData = userSnap.exists ? userSnap.data() || {} : {};
-  const role = (userData.role || "").toString().toLowerCase().trim();
-  if (role === "admin") return {banner: null};
-
   const snap = await db.collection(PROMOTION_BANNERS_COLLECTION)
       .where("active", "==", true)
       .limit(30)
       .get();
+  const alreadyInBothApps = await userAlreadyInBothApps(email);
   const candidates = [];
   for (const doc of snap.docs) {
     const promo = {id: doc.id, ...doc.data()};
     if (!promotionMatchesApp(promo, "savein")) continue;
     if (!isPromotionInWindow(promo)) continue;
-    const oncePerUser = promo.oncePerUser !== false;
-    const direction = promo.direction || (promo.id === SAVEIN_SMARTCHEF_PROMO_ID ? "savein_to_smartchef" : "");
-    if (oncePerUser) {
+    const isCrossPromo = (promo.type || "").toString() === "cross_promo";
+    if (isCrossPromo && alreadyInBothApps) continue;
+    if (!isCrossPromo && promo.oncePerUser !== false) {
+      const direction = promo.direction || "";
       const usable = await isPromotionUsableForUser({email, promotionId: promo.id, direction});
       if (!usable) continue;
     }
@@ -915,7 +1428,11 @@ exports.getActivePromotionBanner = onCall(async (request) => {
   }
 
   candidates.sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0));
-  return {banner: candidates.length ? promotionBannerResponse(candidates[0]) : null};
+  return {
+    banner: candidates.length ?
+      promotionBannerResponse(candidates[0], "savein") :
+      null,
+  };
 });
 
 exports.recordPromotionBannerEvent = onCall(async (request) => {
@@ -1050,6 +1567,135 @@ exports.deletePromotionBannerImage = onCall(
     }
 );
 
+exports.syncCentralPromotionBanner = functions.https.onRequest(async (req, res) => {
+  if (!["POST", "DELETE"].includes(req.method)) {
+    res.status(405).json({ok: false, error: "method_not_allowed"});
+    return;
+  }
+
+  const expectedSecret = process.env.CROSS_PROMO_SECRET || "";
+  const providedSecret = req.get("X-Cross-Promo-Secret") || "";
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    res.status(403).json({ok: false, error: "forbidden"});
+    return;
+  }
+
+  const body = req.body || {};
+  const docId = (body.docId || body.id || "").toString().trim();
+  if (!docId) {
+    res.status(400).json({ok: false, error: "missing_doc_id"});
+    return;
+  }
+
+  const ref = db.collection(PROMOTION_BANNERS_COLLECTION).doc(docId);
+  if (req.method === "DELETE" || body.delete === true) {
+    await ref.delete();
+    res.json({ok: true, deleted: true});
+    return;
+  }
+
+  const banner = body.banner || {};
+  await ref.set({
+    active: banner.active === true,
+    app: (banner.app || banner.targetApp || "savein").toString(),
+    apps: Array.isArray(banner.apps) ? banner.apps : ["savein"],
+    type: (banner.type || "generic_promo").toString(),
+    title: (banner.title || "").toString(),
+    message: (banner.message || "").toString(),
+    smartchefMessage: (banner.smartchefMessage || "").toString(),
+    saveinMessage: (banner.saveinMessage || "").toString(),
+    ctaLabel: (banner.ctaLabel || "").toString(),
+    secondaryCtaLabel: (banner.secondaryCtaLabel || "").toString(),
+    smartchefSecondaryCtaLabel: (banner.smartchefSecondaryCtaLabel || "").toString(),
+    saveinSecondaryCtaLabel: (banner.saveinSecondaryCtaLabel || "").toString(),
+    action: (banner.action || "open_url").toString(),
+    actionUrl: (banner.actionUrl || "").toString(),
+    imageUrl: (banner.imageUrl || "").toString(),
+    saveinImageUrl: (banner.saveinImageUrl || "").toString(),
+    smartchefImageUrl: (banner.smartchefImageUrl || "").toString(),
+    targetApp: (banner.targetApp || banner.app || "savein").toString(),
+    direction: (banner.direction || "").toString(),
+    giftDays: Number(banner.giftDays || CROSS_PROMO_DURATION_DAYS),
+    priority: Number(banner.priority || 0),
+    oncePerUser: banner.oncePerUser !== false,
+    startsAt: banner.startsAt || null,
+    endsAt: banner.endsAt || null,
+    sourceAdmin: "smartchef_central_promo_admin",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: (banner.updatedBy || "smartchef-central-admin").toString(),
+    createdAt: banner.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  res.json({ok: true, id: docId});
+});
+
+exports.syncCentralNewSignupPremiumPromo = functions.https.onRequest(async (req, res) => {
+  if (!["GET", "POST"].includes(req.method)) {
+    res.status(405).json({ok: false, error: "method_not_allowed"});
+    return;
+  }
+
+  const expectedSecret = process.env.CROSS_PROMO_SECRET || "";
+  const providedSecret = req.get("X-Cross-Promo-Secret") || "";
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    res.status(403).json({ok: false, error: "forbidden"});
+    return;
+  }
+
+  if (req.method === "GET") {
+    const doc = await db.collection("app_config").doc(NEW_SIGNUP_PROMO_CONFIG_DOC).get();
+    if (!doc.exists) {
+      res.json({ok: true, config: null});
+      return;
+    }
+    const data = doc.data() || {};
+    const serializeTs = (value) => {
+      if (!value) return null;
+      if (value.toDate) return value.toDate().toISOString();
+      if (value instanceof Date) return value.toISOString();
+      return value;
+    };
+    res.json({
+      ok: true,
+      config: {
+        ...data,
+        startsAt: serializeTs(data.startsAt),
+        endsAt: serializeTs(data.endsAt),
+        updatedAt: serializeTs(data.updatedAt),
+      },
+    });
+    return;
+  }
+
+  const body = req.body || {};
+  const durationDays = Math.max(1, Math.min(Number(body.durationDays || 30), 365));
+  const startsAt = body.startsAt ? new Date(body.startsAt) : null;
+  const endsAt = body.endsAt ? new Date(body.endsAt) : null;
+
+  const payload = {
+    active: body.active === true,
+    app: "savein",
+    durationDays,
+    priceAfterTrial: (body.priceAfterTrial || "2.99").toString().trim() || "2.99",
+    startsAt: startsAt && !Number.isNaN(startsAt.getTime()) ?
+      admin.firestore.Timestamp.fromDate(startsAt) :
+      null,
+    endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ?
+      admin.firestore.Timestamp.fromDate(endsAt) :
+      null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: (body.updatedBy || "smartchef-central-admin").toString(),
+    sourceAdmin: "smartchef_central_promo_admin",
+  };
+
+  await db.collection("app_config").doc(NEW_SIGNUP_PROMO_CONFIG_DOC).set(
+      payload,
+      {merge: true}
+  );
+
+  res.json({ok: true, config: {...payload, updatedAt: null}});
+});
+
 exports.activateSmartChefLaunchPromo = onCall(
     async (request) => {
       const auth = request.auth;
@@ -1083,10 +1729,10 @@ exports.activateSmartChefLaunchPromo = onCall(
 
       const {smartChefBackendUrl, secret} = requireCrossPromoConfig();
       const now = new Date();
-      const premiumUntil = addDays(now, CROSS_PROMO_DURATION_DAYS);
+      const durationDays = Number(configuredPromo.giftDays || configuredPromo.durationDays || CROSS_PROMO_DURATION_DAYS);
+      const premiumUntil = addDays(now, durationDays);
       const claimBy = addDays(now, CROSS_PROMO_CLAIM_WINDOW_DAYS);
       const promoId = `${email}|savein_to_smartchef`;
-      const userRef = db.collection("users").doc(auth.uid);
       const promoRef = db.collection("cross_app_promos").doc(promoId);
       const redemptionRef = db.collection(PROMOTION_REDEMPTIONS_COLLECTION)
           .doc(promoRedemptionId(email, SAVEIN_SMARTCHEF_PROMO_ID));
@@ -1108,16 +1754,6 @@ exports.activateSmartChefLaunchPromo = onCall(
           );
         }
 
-        transaction.set(userRef, {
-          role: "premium",
-          premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
-          premiumSource: "cross_promo_savein_to_smartchef",
-          roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          roleUpdatedBy: "cross_promo_savein_to_smartchef",
-          email,
-          normalizedEmail: email,
-        }, {merge: true});
-
         transaction.set(promoRef, {
           email,
           normalizedEmail: email,
@@ -1125,10 +1761,11 @@ exports.activateSmartChefLaunchPromo = onCall(
           targetApp: "smartchef",
           status: "pending",
           sourceUid: auth.uid,
-          durationDays: CROSS_PROMO_DURATION_DAYS,
+          durationDays,
           claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
-          saveinActivatedAt: admin.firestore.Timestamp.fromDate(now),
-          saveinPremiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+          saveinStartedAt: admin.firestore.Timestamp.fromDate(now),
+          saveinActivatedAt: null,
+          saveinPremiumUntil: null,
           targetClaimBy: admin.firestore.Timestamp.fromDate(claimBy),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           createdAt: existing?.createdAt || admin.firestore.FieldValue.serverTimestamp(),
@@ -1144,7 +1781,7 @@ exports.activateSmartChefLaunchPromo = onCall(
           status: "started",
           userId: auth.uid,
           redeemedAt: admin.firestore.FieldValue.serverTimestamp(),
-          premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
+          premiumUntil: null,
         }, {merge: true});
       });
 
@@ -1157,10 +1794,10 @@ exports.activateSmartChefLaunchPromo = onCall(
         body: JSON.stringify({
           email,
           sourceUid: auth.uid,
-          durationDays: CROSS_PROMO_DURATION_DAYS,
+          durationDays,
           claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
           saveinActivatedAt: now.toISOString(),
-          saveinPremiumUntil: premiumUntil.toISOString(),
+          saveinPremiumUntil: null,
           claimBy: claimBy.toISOString(),
         }),
       });
@@ -1181,7 +1818,7 @@ exports.activateSmartChefLaunchPromo = onCall(
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         details: {
           promoId,
-          premiumUntil: premiumUntil.toISOString(),
+          premiumUntil: null,
           claimBy: claimBy.toISOString(),
         },
       });
@@ -1190,7 +1827,7 @@ exports.activateSmartChefLaunchPromo = onCall(
         success: true,
         status: "pending",
         targetApp: "smartchef",
-        durationDays: CROSS_PROMO_DURATION_DAYS,
+        durationDays,
         claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
         premiumUntil: premiumUntil.toISOString(),
         claimBy: claimBy.toISOString(),
@@ -1222,8 +1859,45 @@ exports.confirmSmartChefCrossPromo = functions.https.onRequest(async (req, res) 
   const smartchefPremiumUntil = body.smartchefPremiumUntil ?
     new Date(body.smartchefPremiumUntil) :
     null;
+  const promoRef = db.collection("cross_app_promos").doc(promoId);
+  const promoSnap = await promoRef.get();
+  const existing = promoSnap.exists ? promoSnap.data() || {} : {};
+  const durationDays = Number(existing.durationDays || CROSS_PROMO_DURATION_DAYS);
+  const sourceUid = (existing.sourceUid || "").toString();
+  let saveinPremiumUntil = addDays(new Date(), durationDays);
 
-  await db.collection("cross_app_promos").doc(promoId).set({
+  if (sourceUid) {
+    const sourceUserSnap = await db.collection("users").doc(sourceUid).get();
+    const sourceUserData = sourceUserSnap.exists ? sourceUserSnap.data() || {} : {};
+    saveinPremiumUntil = premiumUntilAfterGift(sourceUserData, durationDays, new Date());
+    await db.collection("users").doc(sourceUid).set({
+      role: "premium",
+      premiumUntil: admin.firestore.Timestamp.fromDate(saveinPremiumUntil),
+      premiumSource: "cross_promo_savein_to_smartchef",
+      roleUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      roleUpdatedBy: "cross_promo_savein_to_smartchef",
+      email,
+      normalizedEmail: email,
+    }, {merge: true});
+    await writeAccountHistory({
+      userId: sourceUid,
+      type: "cross_promo_claimed",
+      title: "Cross-promo completata: Premium attivato",
+      source: "cross_promo_savein_to_smartchef",
+      before: {
+        role: sourceUserData.role || "",
+        premiumUntil: sourceUserData.premiumUntil || null,
+      },
+      after: {
+        role: "premium",
+        premiumUntil: admin.firestore.Timestamp.fromDate(saveinPremiumUntil),
+        durationDays,
+        email,
+      },
+    });
+  }
+
+  await promoRef.set({
     status: "claimed",
     smartchefUid: (body.smartchefUid || "").toString(),
     smartchefClaimedAt: body.smartchefClaimedAt ?
@@ -1232,6 +1906,8 @@ exports.confirmSmartChefCrossPromo = functions.https.onRequest(async (req, res) 
     smartchefPremiumUntil: smartchefPremiumUntil && !Number.isNaN(smartchefPremiumUntil.getTime()) ?
       admin.firestore.Timestamp.fromDate(smartchefPremiumUntil) :
       null,
+    saveinActivatedAt: sourceUid ? admin.firestore.FieldValue.serverTimestamp() : null,
+    saveinPremiumUntil: sourceUid ? admin.firestore.Timestamp.fromDate(saveinPremiumUntil) : null,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, {merge: true});
 
@@ -1244,6 +1920,8 @@ exports.confirmSmartChefCrossPromo = functions.https.onRequest(async (req, res) 
       promoId,
       smartchefUid: (body.smartchefUid || "").toString(),
       smartchefPremiumUntil: body.smartchefPremiumUntil || null,
+      saveinUid: sourceUid || null,
+      saveinPremiumUntil: sourceUid ? saveinPremiumUntil.toISOString() : null,
     },
   });
 
@@ -1272,6 +1950,8 @@ exports.receiveSmartChefLaunchPromo = functions.https.onRequest(async (req, res)
 
   const now = new Date();
   const claimBy = body.claimBy ? new Date(body.claimBy) : addDays(now, CROSS_PROMO_CLAIM_WINDOW_DAYS);
+  const durationDays = Math.max(1, Number(body.durationDays || CROSS_PROMO_DURATION_DAYS));
+  const claimWindowDays = Math.max(1, Number(body.claimWindowDays || CROSS_PROMO_CLAIM_WINDOW_DAYS));
   const smartchefPremiumUntil = body.smartchefPremiumUntil ?
     new Date(body.smartchefPremiumUntil) :
     null;
@@ -1292,8 +1972,8 @@ exports.receiveSmartChefLaunchPromo = functions.https.onRequest(async (req, res)
     targetApp: "savein",
     status: "pending",
     smartchefUid: (body.smartchefUid || "").toString(),
-    durationDays: CROSS_PROMO_DURATION_DAYS,
-    claimWindowDays: CROSS_PROMO_CLAIM_WINDOW_DAYS,
+    durationDays,
+    claimWindowDays,
     smartchefActivatedAt: body.smartchefActivatedAt ?
       admin.firestore.Timestamp.fromDate(new Date(body.smartchefActivatedAt)) :
       admin.firestore.Timestamp.fromDate(now),
@@ -1321,6 +2001,7 @@ exports.receiveSmartChefLaunchPromo = functions.https.onRequest(async (req, res)
     ok: true,
     status: "pending",
     email,
+    durationDays,
     claimBy: claimBy.toISOString(),
   });
 });
@@ -1344,13 +2025,14 @@ exports.claimPendingSmartChefLaunchPromo = onCall(
       }
 
       const now = new Date();
-      const premiumUntil = addDays(now, CROSS_PROMO_DURATION_DAYS);
       const promoId = `${email}|smartchef_to_savein`;
       const promoRef = db.collection("cross_app_promos").doc(promoId);
       const userRef = db.collection("users").doc(auth.uid);
       let claimed = false;
       let reason = "not_found";
       let claimBy = null;
+      let claimedPremiumUntil = null;
+      let claimedDurationDays = CROSS_PROMO_DURATION_DAYS;
 
       await db.runTransaction(async (transaction) => {
         const promoSnap = await transaction.get(promoRef);
@@ -1378,6 +2060,12 @@ exports.claimPendingSmartChefLaunchPromo = onCall(
           return;
         }
 
+        const durationDays = Number(promo.durationDays || CROSS_PROMO_DURATION_DAYS);
+        claimedDurationDays = durationDays;
+        const userSnap = await transaction.get(userRef);
+        const userData = userSnap.exists ? userSnap.data() || {} : {};
+        const premiumUntil = premiumUntilAfterGift(userData, durationDays, now);
+
         transaction.set(userRef, {
           role: "premium",
           premiumUntil: admin.firestore.Timestamp.fromDate(premiumUntil),
@@ -1398,9 +2086,24 @@ exports.claimPendingSmartChefLaunchPromo = onCall(
 
         claimed = true;
         reason = "claimed";
+        claimBy = targetClaimBy;
+        claimedPremiumUntil = premiumUntil;
       });
 
       if (claimed) {
+        await writeAccountHistory({
+          userId: auth.uid,
+          type: "cross_promo_claimed",
+          title: "Cross-promo completata: Premium attivato",
+          source: "cross_promo_smartchef_to_savein",
+          after: {
+            role: "premium",
+            premiumUntil: admin.firestore.Timestamp.fromDate(claimedPremiumUntil),
+            durationDays: claimedDurationDays,
+            email,
+          },
+        });
+
         const smartChefConfirmUrl = (process.env.SMARTCHEF_CROSS_PROMO_CONFIRM_URL || "").trim();
         const secret = process.env.CROSS_PROMO_SECRET || "";
         if (smartChefConfirmUrl && secret) {
@@ -1414,7 +2117,7 @@ exports.claimPendingSmartChefLaunchPromo = onCall(
               email,
               saveinUid: auth.uid,
               saveinClaimedAt: now.toISOString(),
-              saveinPremiumUntil: premiumUntil.toISOString(),
+              saveinPremiumUntil: claimedPremiumUntil.toISOString(),
             }),
           }).catch(() => null);
         }
@@ -1427,7 +2130,7 @@ exports.claimPendingSmartChefLaunchPromo = onCall(
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           details: {
             promoId,
-            premiumUntil: premiumUntil.toISOString(),
+            premiumUntil: claimedPremiumUntil.toISOString(),
           },
         });
       }
@@ -1438,8 +2141,8 @@ exports.claimPendingSmartChefLaunchPromo = onCall(
         reason,
         sourceApp: "smartchef",
         targetApp: "savein",
-        durationDays: CROSS_PROMO_DURATION_DAYS,
-        premiumUntil: claimed ? premiumUntil.toISOString() : null,
+        durationDays: claimedDurationDays,
+        premiumUntil: claimed ? claimedPremiumUntil.toISOString() : null,
         claimBy: claimBy ? claimBy.toISOString() : null,
       };
     }
@@ -1606,6 +2309,9 @@ exports.sendDashboardNotification = onCall(
         [];
       const sendInApp = data.sendInApp !== false;
       const sendPush = data.sendPush === true;
+      const systemCommunication = data.systemCommunication === true ||
+        data.system === true ||
+        data.forceSystem === true;
 
       if (!title || !body) {
         throw new HttpsError(
@@ -1644,6 +2350,27 @@ exports.sendDashboardNotification = onCall(
         );
       }
 
+      const deliveryUserIds = [];
+      let skippedConsentCount = 0;
+      const chunkSize = 10;
+      for (let i = 0; i < userIds.length; i += chunkSize) {
+        const chunk = userIds.slice(i, i + chunkSize);
+        const snapshot = await db.collection("users")
+            .where(admin.firestore.FieldPath.documentId(), "in", chunk)
+            .get();
+        snapshot.forEach((doc) => {
+          const userData = doc.data() || {};
+          const marketingAccepted =
+            userData?.consents?.marketing?.accepted === true ||
+            userData?.acceptedMarketing === true;
+          if (!systemCommunication && !marketingAccepted) {
+            skippedConsentCount++;
+            return;
+          }
+          deliveryUserIds.push(doc.id);
+        });
+      }
+
       const now = admin.firestore.FieldValue.serverTimestamp();
       const senderEmail = auth.token.email || "";
       const campaignRef = db.collection("notification_campaigns").doc();
@@ -1652,9 +2379,12 @@ exports.sendDashboardNotification = onCall(
       batch.set(campaignRef, {
         title,
         body,
-        userIds,
+        userIds: deliveryUserIds,
+        requestedUserIds: userIds,
         sendInApp,
         sendPush,
+        systemCommunication,
+        skippedConsentCount,
         senderId: auth.uid,
         senderEmail,
         createdAt: now,
@@ -1662,7 +2392,7 @@ exports.sendDashboardNotification = onCall(
       });
 
       if (sendInApp) {
-        for (const userId of userIds) {
+        for (const userId of deliveryUserIds) {
           const notificationRef = db.collection("users")
               .doc(userId)
               .collection("notifications")
@@ -1675,6 +2405,7 @@ exports.sendDashboardNotification = onCall(
             readAt: null,
             senderId: auth.uid,
             senderEmail,
+            systemCommunication,
           });
         }
       }
@@ -1686,7 +2417,7 @@ exports.sendDashboardNotification = onCall(
       let pushFailureCount = 0;
 
       if (sendPush) {
-        for (const userId of userIds) {
+        for (const userId of deliveryUserIds) {
           const tokensSnapshot = await db.collection("users")
               .doc(userId)
               .collection("fcmTokens")
@@ -1708,6 +2439,7 @@ exports.sendDashboardNotification = onCall(
                   body,
                 },
                 android: {
+                  priority: "high",
                   notification: {
                     clickAction: "FLUTTER_NOTIFICATION_CLICK",
                   },
@@ -1721,6 +2453,11 @@ exports.sendDashboardNotification = onCall(
                   campaignId: campaignRef.id,
                   type: "dashboard_notification",
                   route: "home",
+                  title,
+                  body,
+                  notificationTitle: title,
+                  notificationBody: body,
+                  systemCommunication: systemCommunication ? "true" : "false",
                 },
               });
             } catch (error) {
@@ -1759,6 +2496,7 @@ exports.sendDashboardNotification = onCall(
         tokenCount,
         pushSuccessCount,
         pushFailureCount,
+        skippedConsentCount,
       }, {merge: true});
 
       await db.collection("admin_logs").add({
@@ -1769,9 +2507,12 @@ exports.sendDashboardNotification = onCall(
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         details: {
           campaignId: campaignRef.id,
-          recipients: userIds.length,
+          recipients: deliveryUserIds.length,
+          requestedRecipients: userIds.length,
           sendInApp,
           sendPush,
+          systemCommunication,
+          skippedConsentCount,
           tokenCount,
           pushSuccessCount,
           pushFailureCount,
@@ -1781,7 +2522,9 @@ exports.sendDashboardNotification = onCall(
       return {
         success: true,
         campaignId: campaignRef.id,
-        recipients: userIds.length,
+        recipients: deliveryUserIds.length,
+        requestedRecipients: userIds.length,
+        skippedConsentCount,
         tokenCount,
         pushSuccessCount,
         pushFailureCount,
@@ -1817,6 +2560,9 @@ exports.sendBulkEmail = onCall(
         [];
       const subject = (data.subject || "").toString().trim();
       const emailBody = (data.emailBody || "").toString().trim();
+      const systemCommunication = data.systemCommunication === true ||
+        data.system === true ||
+        data.forceSystem === true;
 
       if (userIds.length === 0) {
         throw new HttpsError("invalid-argument", "Seleziona almeno un utente");
@@ -1844,6 +2590,7 @@ exports.sendBulkEmail = onCall(
 
       // Recupera le email degli utenti da Firestore
       const emailAddresses = [];
+      let skippedConsentCount = 0;
       const chunkSize = 10;
       for (let i = 0; i < userIds.length; i += chunkSize) {
         const chunk = userIds.slice(i, i + chunkSize);
@@ -1851,7 +2598,15 @@ exports.sendBulkEmail = onCall(
             .where(admin.firestore.FieldPath.documentId(), "in", chunk)
             .get();
         snapshot.forEach((doc) => {
-          const email = doc.data()?.email;
+          const userData = doc.data() || {};
+          const marketingAccepted =
+            userData?.consents?.marketing?.accepted === true ||
+            userData?.acceptedMarketing === true;
+          if (!systemCommunication && !marketingAccepted) {
+            skippedConsentCount++;
+            return;
+          }
+          const email = userData?.email;
           if (email && typeof email === "string" && email.includes("@")) {
             emailAddresses.push({userId: doc.id, email});
           }
@@ -1882,6 +2637,7 @@ exports.sendBulkEmail = onCall(
                     .replace(/\n/g, "<br>")
                     .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
                 "Hai ricevuto questa email perché sei registrato su SaveIn!. " +
+                (systemCommunication ? "Questa è una comunicazione di sistema. " : "") +
                 "Per assistenza o per cancellarti: " +
                 "<a href='mailto:support@savein.eu' style='color:#888;'>support@savein.eu</a>"
             ),
@@ -1898,6 +2654,7 @@ exports.sendBulkEmail = onCall(
             targetUserId: userId,
             targetEmail: email,
             subject: subject,
+            systemCommunication,
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
           });
 
@@ -1919,6 +2676,8 @@ exports.sendBulkEmail = onCall(
         sentCount,
         failCount,
         totalRequested: emailAddresses.length,
+        requestedRecipients: userIds.length,
+        skippedConsentCount,
         failedEmails: failedEmails.slice(0, 10), // max 10 in risposta
       };
     }
@@ -1938,6 +2697,571 @@ const sanitizeSharePayload = (type, payload) => {
   return source;
 };
 
+const normalizeShareId = (value) => (value || "").toString().trim();
+
+const resolveShareResourceId = (type, payload, fallback) => {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const candidate = type === "folder" ?
+    (source.rootId || source.id || fallback) :
+    (source.id || source.postId || fallback);
+  return normalizeShareId(candidate);
+};
+
+const userFoldersRef = (userId) =>
+  db.collection("users").doc(userId).collection("folders");
+
+const userPostsRef = (userId) =>
+  db.collection("users").doc(userId).collection("posts");
+
+const assertSharedResourceExists = async ({ownerId, resourceId, type}) => {
+  const normalizedResourceId = normalizeShareId(resourceId);
+  if (!ownerId || !normalizedResourceId || !["post", "folder"].includes(type)) {
+    throw new HttpsError("invalid-argument", "Riferimento condivisione non valido");
+  }
+
+  const doc = type === "folder" ?
+    await userFoldersRef(ownerId).doc(normalizedResourceId).get() :
+    await userPostsRef(ownerId).doc(normalizedResourceId).get();
+  if (!doc.exists) {
+    throw new HttpsError(
+        "not-found",
+        type === "folder" ? "Cartella da condividere non trovata" : "Post da condividere non trovato"
+    );
+  }
+  return doc;
+};
+
+const validateTargetFolder = async (targetUserId, folderId) => {
+  const normalized = normalizeShareId(folderId);
+  if (!normalized || normalized === "all_folder") return null;
+
+  const doc = await userFoldersRef(targetUserId).doc(normalized).get();
+  if (!doc.exists) {
+    throw new HttpsError("not-found", "Cartella di destinazione non trovata");
+  }
+  return normalized;
+};
+
+const resolveDefaultTargetFolder = async (targetUserId) => {
+  const snapshot = await userFoldersRef(targetUserId)
+      .where("isDefault", "==", true)
+      .limit(1)
+      .get();
+  if (!snapshot.empty) return snapshot.docs[0].id;
+
+  const ref = userFoldersRef(targetUserId).doc();
+  await ref.set({
+    name: "Tutti",
+    color: "#BB86FC",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    isDefault: true,
+    parentId: null,
+    isShared: false,
+  });
+  return ref.id;
+};
+
+const appendSharedTag = (tags) => {
+  const list = Array.isArray(tags) ?
+    tags.map((tag) => tag.toString()).filter((tag) => tag.trim()) :
+    [];
+  return list.includes("condiviso") ? list : [...list, "condiviso"];
+};
+
+const sharedPreviewStorageUrl = (value) => {
+  const url = (value || "").toString().trim();
+  if (!url) return null;
+  const normalized = url.toLowerCase();
+  const isUserScoped = normalized.includes("/users/") ||
+    normalized.includes("users%2f");
+  return isUserScoped && normalized.includes("post_previews") ? null : url;
+};
+
+const normalizePostUrlForHash = (value) => {
+  const raw = (value || "").toString().trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    parsed.hash = "";
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if ((parsed.protocol === "https:" && parsed.port === "443") ||
+        (parsed.protocol === "http:" && parsed.port === "80")) {
+      parsed.port = "";
+    }
+    const removableParams = [
+      "fbclid",
+      "gclid",
+      "igsh",
+      "igshid",
+      "mc_cid",
+      "mc_eid",
+      "si",
+      "utm_campaign",
+      "utm_content",
+      "utm_medium",
+      "utm_source",
+      "utm_term",
+    ];
+    removableParams.forEach((param) => parsed.searchParams.delete(param));
+    parsed.searchParams.sort();
+    return parsed.toString().replace(/\/$/, "").toLowerCase();
+  } catch (_) {
+    return raw.toLowerCase();
+  }
+};
+
+const postUrlHash = (value) =>
+  crypto.createHash("sha256").update(value).digest("hex");
+
+const globalPostPayload = (source, ownerId, normalizedUrl, urlHash) => ({
+  urlHash,
+  normalizedUrl,
+  url: (source.url || "").toString().trim(),
+  title: (source.title || "Post salvato").toString(),
+  description: (source.description || "").toString(),
+  imageUrl: source.imageUrl || null,
+  previewStorageUrl: sharedPreviewStorageUrl(source.previewStorageUrl),
+  creatorName: source.creatorName || null,
+  creatorUsername: source.creatorUsername || null,
+  firstOwnerId: ownerId || null,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  saveCount: 1,
+});
+
+const ensureGlobalPost = async ({source, ownerId}) => {
+  const safeSource = source || {};
+  const normalizedUrl = normalizePostUrlForHash(safeSource.url);
+  if (!normalizedUrl) {
+    throw new HttpsError("invalid-argument", "URL post mancante");
+  }
+  const urlHash = postUrlHash(normalizedUrl);
+  const ref = db.collection("global_posts").doc(urlHash);
+
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (snap.exists) {
+      const existing = snap.data() || {};
+      const patch = {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        saveCount: admin.firestore.FieldValue.increment(1),
+      };
+      if (!existing.previewStorageUrl && safeSource.previewStorageUrl) {
+        patch.previewStorageUrl = sharedPreviewStorageUrl(safeSource.previewStorageUrl);
+      }
+      if (!existing.imageUrl && safeSource.imageUrl) patch.imageUrl = safeSource.imageUrl;
+      transaction.set(ref, patch, {merge: true});
+      return {
+        globalPostId: ref.id,
+        urlHash,
+        normalizedUrl,
+        canonical: {
+          url: existing.url || safeSource.url || "",
+          title: existing.title || safeSource.title || "Post salvato",
+          description: existing.description || safeSource.description || "",
+          imageUrl: existing.imageUrl || safeSource.imageUrl || null,
+          previewStorageUrl: existing.previewStorageUrl ||
+            sharedPreviewStorageUrl(safeSource.previewStorageUrl) ||
+            null,
+          creatorName: existing.creatorName || safeSource.creatorName || null,
+          creatorUsername: existing.creatorUsername || safeSource.creatorUsername || null,
+        },
+        reused: true,
+      };
+    }
+
+    const payload = globalPostPayload(safeSource, ownerId, normalizedUrl, urlHash);
+    transaction.set(ref, payload);
+    return {
+      globalPostId: ref.id,
+      urlHash,
+      normalizedUrl,
+      canonical: {
+        url: payload.url,
+        title: payload.title,
+        description: payload.description,
+        imageUrl: payload.imageUrl,
+        previewStorageUrl: payload.previewStorageUrl,
+        creatorName: payload.creatorName,
+        creatorUsername: payload.creatorUsername,
+      },
+      reused: false,
+    };
+  });
+
+  return result;
+};
+
+const maybeEnsureGlobalPost = async ({source, ownerId}) => {
+  const safeSource = source || {};
+  if (!normalizePostUrlForHash(safeSource.url)) return null;
+  return ensureGlobalPost({source, ownerId});
+};
+
+const createBatchWriter = () => {
+  let batch = db.batch();
+  let count = 0;
+
+  return {
+    set: async (ref, data) => {
+      batch.set(ref, data);
+      count++;
+      if (count >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        count = 0;
+      }
+    },
+    delete: async (ref) => {
+      batch.delete(ref);
+      count++;
+      if (count >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        count = 0;
+      }
+    },
+    commit: async () => {
+      if (count > 0) {
+        await batch.commit();
+      }
+    },
+  };
+};
+
+const copiedFolderData = (source, parentId, ownerId) => ({
+  name: source.name || "Cartella condivisa",
+  color: source.color || "#BB86FC",
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  isDefault: false,
+  parentId: parentId || null,
+  isShared: true,
+  importedFromOwnerId: ownerId,
+});
+
+const copiedPostData = (source, folderId, ownerId, globalPost = null) => {
+  const canonical = globalPost && globalPost.canonical ? globalPost.canonical : {};
+  return {
+    url: canonical.url || source.url || "",
+    title: canonical.title || source.title || "Post condiviso",
+    description: canonical.description || source.description || "",
+    imageUrl: canonical.imageUrl || source.imageUrl || null,
+    previewStorageUrl: canonical.previewStorageUrl ||
+    sharedPreviewStorageUrl(source.previewStorageUrl),
+    creatorName: canonical.creatorName || source.creatorName || null,
+    creatorUsername: canonical.creatorUsername ||
+    source.creatorUsername ||
+    null,
+    tags: appendSharedTag(source.tags),
+    folderId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    isShared: true,
+    importedFromOwnerId: ownerId,
+    globalPostId: globalPost ? globalPost.globalPostId : null,
+    urlHash: globalPost ? globalPost.urlHash : null,
+    normalizedUrl: globalPost ? globalPost.normalizedUrl : null,
+  };
+};
+
+const copySharedPostFromSource = async ({
+  ownerId,
+  resourceId,
+  targetUserId,
+  targetFolderId,
+}) => {
+  const finalFolderId = await validateTargetFolder(targetUserId, targetFolderId) ||
+    await resolveDefaultTargetFolder(targetUserId);
+  const sourceDoc = await userPostsRef(ownerId).doc(resourceId).get();
+  if (!sourceDoc.exists) {
+    throw new HttpsError("not-found", "Post condiviso non trovato");
+  }
+
+  const destRef = userPostsRef(targetUserId).doc();
+  const source = sourceDoc.data() || {};
+  const globalPost = await maybeEnsureGlobalPost({source, ownerId});
+  await destRef.set(copiedPostData(source, finalFolderId, ownerId, globalPost));
+  return {
+    importedPostId: destRef.id,
+    importedFolderId: finalFolderId,
+    foldersCopied: 0,
+    postsCopied: 1,
+  };
+};
+
+const copySharedFolderFromSource = async ({
+  ownerId,
+  resourceId,
+  targetUserId,
+  targetParentFolderId,
+}) => {
+  const rootId = normalizeShareId(resourceId);
+  const sourceRootDoc = await userFoldersRef(ownerId).doc(rootId).get();
+  const foldersSnapshot = await userFoldersRef(ownerId).get();
+  const sourceFolders = foldersSnapshot.docs.map((doc) => ({
+    id: doc.id,
+    data: doc.data() || {},
+  }));
+  const postsSnapshot = await userPostsRef(ownerId).get();
+  const sourcePosts = postsSnapshot.docs.map((doc) => doc.data() || {});
+  const folderById = new Map(sourceFolders.map((folder) => [folder.id, folder]));
+
+  if (!sourceRootDoc.exists) {
+    throw new HttpsError("not-found", "Cartella condivisa non trovata");
+  }
+
+  const finalParentId = await validateTargetFolder(targetUserId, targetParentFolderId);
+  if (!folderById.has(rootId)) {
+    folderById.set(rootId, {id: rootId, data: sourceRootDoc.data() || {}});
+  }
+
+  const includedIds = new Set([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of sourceFolders) {
+      const parentId = normalizeShareId(folder.data.parentId);
+      if (parentId && includedIds.has(parentId) && !includedIds.has(folder.id)) {
+        includedIds.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+
+  const depthOf = (folder) => {
+    let depth = 0;
+    let parentId = normalizeShareId(folder.data.parentId);
+    const seen = new Set();
+    while (parentId && includedIds.has(parentId) && !seen.has(parentId)) {
+      seen.add(parentId);
+      depth++;
+      parentId = normalizeShareId(folderById.get(parentId)?.data?.parentId);
+    }
+    return depth;
+  };
+
+  const foldersToCopy = sourceFolders
+      .filter((folder) => includedIds.has(folder.id))
+      .sort((a, b) => {
+        if (a.id === rootId) return -1;
+        if (b.id === rootId) return 1;
+        return depthOf(a) - depthOf(b);
+      });
+
+  const idMap = new Map();
+  const writer = createBatchWriter();
+  for (const folder of foldersToCopy) {
+    const sourceParentId = normalizeShareId(folder.data.parentId);
+    const parentId = folder.id === rootId ?
+      finalParentId :
+      (idMap.get(sourceParentId) || idMap.get(rootId) || finalParentId);
+    const destRef = userFoldersRef(targetUserId).doc();
+    idMap.set(folder.id, destRef.id);
+    await writer.set(destRef, copiedFolderData(folder.data, parentId, ownerId));
+  }
+
+  let postsCopied = 0;
+  for (const post of sourcePosts) {
+    const sourceFolderId = normalizeShareId(post.folderId);
+    if (!includedIds.has(sourceFolderId)) continue;
+
+    const mappedFolderId = idMap.get(sourceFolderId) || idMap.get(rootId);
+    if (!mappedFolderId) continue;
+
+    const destRef = userPostsRef(targetUserId).doc();
+    const globalPost = await maybeEnsureGlobalPost({source: post, ownerId});
+    await writer.set(destRef, copiedPostData(post, mappedFolderId, ownerId, globalPost));
+    postsCopied++;
+  }
+
+  await writer.commit();
+  console.info("Import folder source copy completato", {
+    ownerId,
+    targetUserId,
+    rootId,
+    importedRootId: idMap.get(rootId) || null,
+    foldersCopied: foldersToCopy.length,
+    postsCopied,
+  });
+  return {
+    importedRootId: idMap.get(rootId) || null,
+    importedFolderId: idMap.get(rootId) || null,
+    foldersCopied: foldersToCopy.length,
+    postsCopied,
+  };
+};
+
+const copySharedResourceFromSource = async ({
+  ownerId,
+  resourceId,
+  type,
+  targetUserId,
+  targetFolderId,
+  targetParentFolderId,
+}) => {
+  if (!ownerId || !resourceId || !["post", "folder"].includes(type)) {
+    throw new HttpsError("invalid-argument", "Riferimento condivisione non valido");
+  }
+  if (ownerId === targetUserId) {
+    throw new HttpsError("failed-precondition", "Non puoi importare un contenuto tuo");
+  }
+
+  if (type === "post") {
+    return await copySharedPostFromSource({
+      ownerId,
+      resourceId,
+      targetUserId,
+      targetFolderId,
+    });
+  }
+
+  return await copySharedFolderFromSource({
+    ownerId,
+    resourceId,
+    targetUserId,
+    targetParentFolderId,
+  });
+};
+
+const findUserDocByEmail = async (email) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+
+  const users = db.collection("users");
+  const queries = [
+    users.where("normalizedEmail", "==", normalizedEmail).limit(1),
+    users.where("emailLower", "==", normalizedEmail).limit(1),
+    users.where("email_lower", "==", normalizedEmail).limit(1),
+    users.where("email", "==", email.toString().trim()).limit(1),
+    users.where("email", "==", normalizedEmail).limit(1),
+  ];
+
+  for (const query of queries) {
+    const snapshot = await query.get();
+    if (!snapshot.empty) return snapshot.docs[0];
+  }
+
+  try {
+    const authUser = await admin.auth().getUserByEmail(normalizedEmail);
+    const userDoc = await users.doc(authUser.uid).get();
+    if (userDoc.exists) return userDoc;
+  } catch (error) {
+    if (error.code !== "auth/user-not-found") {
+      console.warn("Errore lookup Auth utente condivisione:", error);
+    }
+  }
+
+  return null;
+};
+
+exports.findShareRecipientByEmail = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+
+      const email = (request.data?.email || "").toString().trim();
+      if (!email) {
+        throw new HttpsError("invalid-argument", "Email destinatario mancante");
+      }
+
+      const doc = await findUserDocByEmail(email);
+      if (!doc) {
+        throw new HttpsError("not-found", "Utente non trovato");
+      }
+
+      const data = doc.data() || {};
+      return {
+        id: doc.id,
+        name: data.name || data.username || "Utente",
+        email: data.email || email,
+      };
+    }
+);
+
+exports.ensureGlobalPost = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+
+      const data = request.data || {};
+      const source = data.post && typeof data.post === "object" ? data.post : data;
+      const result = await ensureGlobalPost({
+        source,
+        ownerId: request.auth.uid,
+      });
+
+      return {
+        ok: true,
+        ...result,
+      };
+    }
+);
+
+exports.shareItemWithUser = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+
+      const data = request.data || {};
+      const recipientId = (data.recipientId || "").toString().trim();
+      const resourceId = (data.resourceId || "").toString().trim();
+      const type = (data.type || "").toString().trim();
+      const originalData = data.originalData && typeof data.originalData === "object" ?
+        data.originalData :
+        {};
+
+      if (!recipientId || !resourceId || !["post", "folder"].includes(type)) {
+        throw new HttpsError("invalid-argument", "Dati condivisione non validi");
+      }
+      if (recipientId === request.auth.uid) {
+        throw new HttpsError("failed-precondition", "Non puoi condividere con te stesso");
+      }
+      await assertSharedResourceExists({
+        ownerId: request.auth.uid,
+        resourceId,
+        type,
+      });
+
+      const recipientDoc = await db.collection("users").doc(recipientId).get();
+      if (!recipientDoc.exists) {
+        throw new HttpsError("not-found", "Destinatario non trovato");
+      }
+
+      await recipientDoc.ref.collection("shared_items").add({
+        resourceId,
+        type,
+        ownerId: request.auth.uid,
+        ownerName: request.auth.token.name || request.auth.token.email || "Un utente",
+        ownerEmail: request.auth.token.email || "",
+        importMode: "source_copy",
+        sharedAt: admin.firestore.FieldValue.serverTimestamp(),
+        originalData,
+      });
+
+      return {ok: true};
+    }
+);
+
 exports.createShareLink = onCall(
     {
       region: "us-central1",
@@ -1950,6 +3274,15 @@ exports.createShareLink = onCall(
       }
       const type = (request.data?.type || "").toString().trim();
       const payload = sanitizeSharePayload(type, request.data?.payload);
+      const resourceId = resolveShareResourceId(type, payload);
+      if (!resourceId) {
+        throw new HttpsError("invalid-argument", "Risorsa condivisione mancante");
+      }
+      await assertSharedResourceExists({
+        ownerId: request.auth.uid,
+        resourceId,
+        type,
+      });
       const title = (payload.title || payload.name || "contenuto SaveIn").toString();
       const token = createShareToken();
       const now = admin.firestore.FieldValue.serverTimestamp();
@@ -1961,10 +3294,12 @@ exports.createShareLink = onCall(
         token,
         type,
         title,
+        resourceId,
         payload,
         ownerId: request.auth.uid,
         ownerEmail: request.auth.token.email || "",
         ownerName: request.auth.token.name || request.auth.token.email || "Utente SaveIn",
+        importMode: "source_copy",
         createdAt: now,
         updatedAt: now,
         expiresAt,
@@ -2033,6 +3368,98 @@ exports.trackShareLinkImport = onCall(
         lastImportedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
       return {ok: true};
+    }
+);
+
+exports.importSharedResource = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 120,
+      memory: "512MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+
+      const data = request.data || {};
+      const targetUserId = request.auth.uid;
+      const shareId = normalizeShareId(data.shareId);
+      const token = normalizeShareId(data.token);
+      const targetFolderId = normalizeShareId(data.targetFolderId);
+      const targetParentFolderId = normalizeShareId(data.targetParentFolderId);
+
+      let source;
+      let sharedItemRef = null;
+      let shareLinkRef = null;
+
+      if (shareId) {
+        sharedItemRef = db.collection("users")
+            .doc(targetUserId)
+            .collection("shared_items")
+            .doc(shareId);
+        const sharedItemDoc = await sharedItemRef.get();
+        if (!sharedItemDoc.exists) {
+          throw new HttpsError("not-found", "Condivisione non trovata");
+        }
+
+        const sharedItem = sharedItemDoc.data() || {};
+        source = {
+          ownerId: normalizeShareId(sharedItem.ownerId),
+          resourceId: normalizeShareId(
+              sharedItem.resourceId ||
+              resolveShareResourceId(normalizeShareId(sharedItem.type), sharedItem.originalData)
+          ),
+          type: normalizeShareId(sharedItem.type),
+        };
+      } else if (token) {
+        shareLinkRef = db.collection(SHARED_LINKS_COLLECTION).doc(token);
+        const shareLinkDoc = await shareLinkRef.get();
+        if (!shareLinkDoc.exists) {
+          throw new HttpsError("not-found", "Condivisione non trovata");
+        }
+
+        const shareLink = shareLinkDoc.data() || {};
+        const expiresAt = shareLink.expiresAt?.toDate?.();
+        if (shareLink.status !== "active" || (expiresAt && expiresAt < new Date())) {
+          throw new HttpsError("failed-precondition", "Condivisione non disponibile");
+        }
+
+        const type = normalizeShareId(shareLink.type);
+        source = {
+          ownerId: normalizeShareId(shareLink.ownerId),
+          resourceId: normalizeShareId(
+              shareLink.resourceId ||
+              resolveShareResourceId(type, shareLink.payload)
+          ),
+          type,
+        };
+      } else {
+        throw new HttpsError("invalid-argument", "Condivisione mancante");
+      }
+
+      const result = await copySharedResourceFromSource({
+        ...source,
+        targetUserId,
+        targetFolderId,
+        targetParentFolderId,
+      });
+
+      if (sharedItemRef) {
+        await sharedItemRef.delete();
+      }
+      if (shareLinkRef) {
+        await shareLinkRef.set({
+          importCount: admin.firestore.FieldValue.increment(1),
+          lastImportedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+
+      return {
+        ok: true,
+        type: source.type,
+        ...result,
+      };
     }
 );
 
@@ -2254,6 +3681,151 @@ const dashPage = (user, stats, admins) => `${dashHtmlHead("SaveIn! Admin · Dash
   </div>
 </body></html>`;
 
+const dashLimitsPage = (user, featureRules) => {
+  const features = [
+    {id: "root_folders", name: "Cartelle nella Home"},
+    {id: "child_folders", name: "Sottocartelle per cartella"},
+    {id: "folder_levels", name: "Livelli di profondità"},
+    {id: "share_folder", name: "Condivisione Cartella"},
+    {id: "share_post", name: "Condivisione Post"},
+    {id: "import_shared", name: "Importazione Contenuti"},
+  ];
+
+  const periods = [
+    {id: "total", name: "Totale"},
+    {id: "day", name: "Giorno"},
+    {id: "week", name: "Settimana"},
+    {id: "month", name: "Mese"},
+  ];
+
+  return `${dashHtmlHead("SaveIn! Admin · Limiti Piani")}
+<body>
+  <nav style="background:#2C7A7B;color:#fff;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15);">
+    <div style="display:flex;align-items:center;gap:24px;">
+      <div style="font-weight:800;font-size:17px;display:flex;align-items:center;gap:10px;"><span>📌</span> SaveIn! Admin</div>
+      <div style="display:flex;align-items:center;gap:16px;font-size:14px;font-weight:600;">
+        <a href="/dashboard" style="color:#fff;opacity:.9;">Home</a>
+        <a href="/dashboard/limits" style="color:#fff;opacity:.9;border-bottom:2px solid #fff;">Limiti Piani</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;font-size:13px;">
+      <span style="opacity:.85;">${escapeHtml(user.email)}</span>
+      <a href="/dashboard/logout" style="background:rgba(255,255,255,.2);color:#fff;padding:5px 14px;border-radius:6px;font-weight:600;">Esci</a>
+    </div>
+  </nav>
+
+  <div style="max-width:1100px;margin:32px auto;padding:0 20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+      <h2 style="margin:0;font-size:24px;font-weight:800;">Configurazione Limiti Piani</h2>
+      <button type="button" onclick="saveLimits()" class="btn btn-primary">Salva Modifiche</button>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <thead>
+          <tr style="background:#F7FAFC;border-bottom:2px solid #E2E8F0;">
+            <th style="text-align:left;padding:16px 20px;color:#4A5568;width:250px;">Funzionalità</th>
+            <th style="text-align:center;padding:16px 20px;color:#4A5568;background:rgba(44,122,123,0.05);">Piano FREE</th>
+            <th style="text-align:center;padding:16px 20px;color:#4A5568;background:rgba(44,122,123,0.1);">Piano PREMIUM</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${features.map((f) => {
+    const free = featureRules[f.id]?.free || {enabled: true, limit: 0, period: "total", requiresAd: false};
+    const premium = featureRules[f.id]?.premium || {enabled: true, limit: 0, period: "total", requiresAd: false};
+    return `
+            <tr style="border-bottom:1px solid #EDF2F7;">
+              <td style="padding:20px;font-weight:700;color:#2D3748;">
+                ${f.name}
+                <div style="font-size:11px;font-weight:400;color:#718096;margin-top:4px;">ID: ${f.id}</div>
+              </td>
+              <!-- FREE -->
+              <td style="padding:20px;background:rgba(44,122,123,0.02);">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;">
+                    <input type="checkbox" data-feature="${f.id}" data-tier="free" data-field="enabled" ${free.enabled ? "checked" : ""} style="width:auto;">
+                    Abilitato
+                  </label>
+                  <div>
+                    <label>Limite (0 = illimitato)</label>
+                    <input type="number" data-feature="${f.id}" data-tier="free" data-field="limit" value="${free.limit}" style="padding:6px 10px;">
+                  </div>
+                  <div>
+                    <label>Periodo</label>
+                    <select data-feature="${f.id}" data-tier="free" data-field="period" style="width:100%;padding:6px 10px;border-radius:8px;border:1.5px solid #E2E8F0;">
+                      ${periods.map((p) => `<option value="${p.id}" ${free.period === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
+                    </select>
+                  </div>
+                  <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;">
+                    <input type="checkbox" data-feature="${f.id}" data-tier="free" data-field="requiresAd" ${free.requiresAd ? "checked" : ""} style="width:auto;">
+                    Richiede Pubblicità
+                  </label>
+                </div>
+              </td>
+              <!-- PREMIUM -->
+              <td style="padding:20px;background:rgba(44,122,123,0.05);">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;">
+                    <input type="checkbox" data-feature="${f.id}" data-tier="premium" data-field="enabled" ${premium.enabled ? "checked" : ""} style="width:auto;">
+                    Abilitato
+                  </label>
+                  <div>
+                    <label>Limite (0 = illimitato)</label>
+                    <input type="number" data-feature="${f.id}" data-tier="premium" data-field="limit" value="${premium.limit}" style="padding:6px 10px;">
+                  </div>
+                  <div>
+                    <label>Periodo</label>
+                    <select data-feature="${f.id}" data-tier="premium" data-field="period" style="width:100%;padding:6px 10px;border-radius:8px;border:1.5px solid #E2E8F0;">
+                      ${periods.map((p) => `<option value="${p.id}" ${premium.period === p.id ? "selected" : ""}>${p.name}</option>`).join("")}
+                    </select>
+                  </div>
+                  <label style="display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;">
+                    <input type="checkbox" data-feature="${f.id}" data-tier="premium" data-field="requiresAd" ${premium.requiresAd ? "checked" : ""} style="width:auto;">
+                    Richiede Pubblicità
+                  </label>
+                </div>
+              </td>
+            </tr>`;
+  }).join("")}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function saveLimits() {
+      const rules = {};
+      document.querySelectorAll("[data-feature]").forEach(el => {
+        const feat = el.dataset.feature;
+        const tier = el.dataset.tier;
+        const field = el.dataset.field;
+        
+        if (!rules[feat]) rules[feat] = { free: {}, premium: {} };
+        
+        let val;
+        if (el.type === "checkbox") val = el.checked;
+        else if (el.type === "number") val = parseInt(el.value) || 0;
+        else val = el.value;
+        
+        rules[feat][tier][field] = val;
+      });
+
+      try {
+        const r = await fetch("/dashboard/limits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rules })
+        });
+        if (r.ok) alert("Limiti salvati con successo!");
+        else alert("Errore durante il salvataggio.");
+      } catch (e) {
+        alert("Errore: " + e.message);
+      }
+    }
+  </script>
+</body></html>`;
+};
+
 exports.adminDashboard = onRequest(
     {
       region: "us-central1",
@@ -2341,6 +3913,40 @@ exports.adminDashboard = onRequest(
           res.send(dashPage(user, stats, admins));
         } catch (e) {
           res.status(500).send("Errore interno: " + e.message);
+        }
+        return;
+      }
+
+      // GET /limits → configurazione limiti
+      if (seg === "/limits" && method === "GET") {
+        try {
+          const limits = await _get_plan_limits();
+          const featureRules = limits.featureRules || _default_feature_rules();
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.send(dashLimitsPage(user, featureRules));
+        } catch (e) {
+          res.status(500).send("Errore interno: " + e.message);
+        }
+        return;
+      }
+
+      // POST /limits → salva configurazione limiti
+      if (seg === "/limits" && method === "POST") {
+        try {
+          const body = req.body || {};
+          const rules = body.rules;
+          if (!rules) {
+            res.status(400).json({error: "Dati mancanti"});
+            return;
+          }
+          await db.doc(PLAN_LIMITS_DOC).set({
+            featureRules: rules,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedBy: user.email,
+          }, {merge: true});
+          res.json({ok: true});
+        } catch (e) {
+          res.status(500).json({error: e.message});
         }
         return;
       }

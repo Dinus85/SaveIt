@@ -4,12 +4,13 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
-import '../models.dart';
+import 'package:savein/models.dart';
 
 class ReminderService {
   ReminderService._internal();
@@ -25,10 +26,12 @@ class ReminderService {
       'Notifiche per i reminder di post e cartelle in SaveIn!';
 
   /// Callback impostato da main.dart per gestire il tap su notifica post.
-  static Function(String postUrl, String postTitle)? onNotificationTapped;
+  static Function(String postId, String postTitle, String? folderId)?
+      onNotificationTapped;
 
   /// Callback impostato da main.dart per gestire il tap su notifica cartella.
-  static Function(String folderId, String folderName)? onFolderNotificationTapped;
+  static Function(String folderId, String folderName)?
+      onFolderNotificationTapped;
 
   // -----------------------------------------------------------------------
   // Inizializzazione
@@ -64,11 +67,19 @@ class ReminderService {
     );
 
     _initialized = true;
+
+    final launchDetails = await _notifications.getNotificationAppLaunchDetails();
+    final launchResponse = launchDetails?.notificationResponse;
+    if (launchDetails?.didNotificationLaunchApp == true &&
+        launchResponse?.payload != null) {
+      Future<void>.delayed(const Duration(milliseconds: 900), () {
+        _handlePayload(launchResponse!.payload);
+      });
+    }
   }
 
   @pragma('vm:entry-point')
-  static void _onBackgroundNotificationResponse(
-      NotificationResponse response) {
+  static void _onBackgroundNotificationResponse(NotificationResponse response) {
     _handlePayload(response.payload);
   }
 
@@ -90,20 +101,21 @@ class ReminderService {
           onFolderNotificationTapped?.call(folderId, folderName);
         }
       } else {
-        final postUrl = data['postUrl'] as String? ?? '';
+        final postId = data['postId'] as String? ?? '';
         final postTitle = data['postTitle'] as String? ?? '';
-        if (postUrl.isNotEmpty) {
-          onNotificationTapped?.call(postUrl, postTitle);
+        final folderId = data['folderId'] as String?;
+        if (postId.isNotEmpty) {
+          onNotificationTapped?.call(postId, postTitle, folderId);
         }
       }
 
       if (reminderId.isNotEmpty) {
-        _rescheduleYearlyAfterTap(reminderId);
+        _consumeReminderAfterTap(reminderId);
       }
     } catch (_) {}
   }
 
-  static Future<void> _rescheduleYearlyAfterTap(String reminderId) async {
+  static Future<void> _consumeReminderAfterTap(String reminderId) async {
     try {
       final userId = FirebaseAuth.instance.currentUser?.uid;
       if (userId == null) return;
@@ -119,6 +131,9 @@ class ReminderService {
         await instance._scheduleNotification(reminder);
         await doc.reference
             .update({'lastTriggeredAt': FieldValue.serverTimestamp()});
+      } else {
+        await instance._notifications.cancel(id: reminder.notificationId);
+        await doc.reference.delete();
       }
     } catch (_) {}
   }
@@ -248,14 +263,35 @@ class ReminderService {
     await _remindersCollection.doc(reminder.id).delete();
   }
 
+  Future<void> markReminderOpened(Reminder reminder) async {
+    if (reminder.isYearly && reminder.isActive) {
+      await _scheduleNotification(reminder);
+      await _remindersCollection
+          .doc(reminder.id)
+          .update({'lastTriggeredAt': FieldValue.serverTimestamp()});
+    } else {
+      await deleteReminder(reminder);
+    }
+  }
+
   Stream<List<Reminder>> getPostReminders(String postId) {
     if (_userId == null) return const Stream.empty();
     return _remindersCollection
         .where('postId', isEqualTo: postId)
         .where('isActive', isEqualTo: true)
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => Reminder.fromFirestore(d)).toList());
+        .asyncMap((snap) async {
+      final list = snap.docs.map((d) => Reminder.fromFirestore(d)).toList();
+      final valid = <Reminder>[];
+      for (final r in list) {
+        if (r.isPast) {
+          await deleteReminder(r);
+        } else {
+          valid.add(r);
+        }
+      }
+      return valid;
+    });
   }
 
   Stream<List<Reminder>> getFolderReminders(String folderId) {
@@ -265,8 +301,18 @@ class ReminderService {
         .where('targetType', isEqualTo: 'folder')
         .where('isActive', isEqualTo: true)
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => Reminder.fromFirestore(d)).toList());
+        .asyncMap((snap) async {
+      final list = snap.docs.map((d) => Reminder.fromFirestore(d)).toList();
+      final valid = <Reminder>[];
+      for (final r in list) {
+        if (r.isPast) {
+          await deleteReminder(r);
+        } else {
+          valid.add(r);
+        }
+      }
+      return valid;
+    });
   }
 
   Future<List<Reminder>> getAllActiveReminders() async {
@@ -284,7 +330,17 @@ class ReminderService {
         .where('reminderMonth', isEqualTo: now.month)
         .where('isActive', isEqualTo: true)
         .get();
-    return snap.docs.map((d) => Reminder.fromFirestore(d)).toList();
+
+    final list = snap.docs.map((d) => Reminder.fromFirestore(d)).toList();
+    final valid = <Reminder>[];
+    for (final r in list) {
+      if (r.isPast) {
+        await deleteReminder(r);
+      } else {
+        valid.add(r);
+      }
+    }
+    return valid;
   }
 
   Future<void> rescheduleAllReminders() async {
@@ -302,8 +358,12 @@ class ReminderService {
   Future<void> _scheduleNotification(Reminder reminder) async {
     if (kIsWeb || !_initialized) return;
 
-    final scheduledDate = _nextScheduledDate(reminder.reminderDay,
-        reminder.reminderMonth, reminder.reminderHour, reminder.reminderMinute, reminder.isYearly);
+    final scheduledDate = _nextScheduledDate(
+        reminder.reminderDay,
+        reminder.reminderMonth,
+        reminder.reminderHour,
+        reminder.reminderMinute,
+        reminder.isYearly);
     if (scheduledDate == null) return;
 
     final payload = jsonEncode({
@@ -318,7 +378,9 @@ class ReminderService {
 
     final String body;
     if (reminder.isFolderReminder) {
-      final name = reminder.folderName?.isNotEmpty == true ? reminder.folderName! : 'una cartella';
+      final name = reminder.folderName?.isNotEmpty == true
+          ? reminder.folderName!
+          : 'una cartella';
       body = 'Dai un\'occhiata alla cartella "$name"';
     } else if (reminder.postTitle.isNotEmpty) {
       body = 'Hai un contenuto da rivedere: "${reminder.postTitle}"';
@@ -326,36 +388,48 @@ class ReminderService {
       body = 'Hai un contenuto salvato da rivedere!';
     }
 
-    await _notifications.zonedSchedule(
-      id: reminder.notificationId,
-      title: '📌 Reminder SaveIn!',
-      body: body,
-      scheduledDate: scheduledDate,
-      notificationDetails: NotificationDetails(
-        android: AndroidNotificationDetails(
-          _channelId,
-          _channelName,
-          channelDescription: _channelDesc,
-          importance: Importance.high,
-          priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
-        ),
-        iOS: const DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
+    final notificationDetails = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _channelId,
+        _channelName,
+        channelDescription: _channelDesc,
+        importance: Importance.max,
+        priority: Priority.high,
+        ticker: 'Reminder SaveIn!',
+        category: AndroidNotificationCategory.reminder,
+        icon: '@mipmap/ic_launcher',
       ),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      payload: payload,
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
     );
+
+    Future<void> schedule(AndroidScheduleMode mode) {
+      return _notifications.zonedSchedule(
+        id: reminder.notificationId,
+        title: '📌 Reminder SaveIn!',
+        body: body,
+        scheduledDate: scheduledDate,
+        notificationDetails: notificationDetails,
+        androidScheduleMode: mode,
+        payload: payload,
+      );
+    }
+
+    try {
+      await schedule(AndroidScheduleMode.exactAllowWhileIdle);
+    } on PlatformException catch (error) {
+      if (error.code != 'exact_alarms_not_permitted') rethrow;
+      await schedule(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
   }
 
   tz.TZDateTime? _nextScheduledDate(
       int day, int month, int hour, int minute, bool isYearly) {
     final now = tz.TZDateTime.now(tz.local);
-    var candidate =
-        tz.TZDateTime(tz.local, now.year, month, day, hour, minute);
+    var candidate = tz.TZDateTime(tz.local, now.year, month, day, hour, minute);
 
     if (candidate.isBefore(now)) {
       candidate =

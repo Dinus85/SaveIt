@@ -66,8 +66,8 @@ class AppConstants {
   static const String buildDate = '2025.01.08';
   
   // ✅ FIX PRINCIPALE: Sistema livelli cartelle (5 livelli totali: 0, 1, 2, 3, 4)
-  static const int maxFolderLevels = 3;        // Livello massimo raggiungibile (0-4)
-  static const int totalFolderLevels = 4;      // Numero totale di livelli (0-4)
+  static const int maxFolderLevels = 4;        // Livello massimo raggiungibile (0-4)
+  static const int totalFolderLevels = 5;      // Numero totale di livelli (0-4)
   static const int maxMessageLength = 250;
 
   // Helper method per controllo livelli

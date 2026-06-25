@@ -10,7 +10,8 @@ import 'services/simple_analytics_service.dart';
 import 'advanced_analytics_models.dart';
 
 class AdvancedAnalyticsService {
-  static final AdvancedAnalyticsService _instance = AdvancedAnalyticsService._internal();
+  static final AdvancedAnalyticsService _instance =
+      AdvancedAnalyticsService._internal();
   factory AdvancedAnalyticsService() => _instance;
   AdvancedAnalyticsService._internal();
 
@@ -25,13 +26,13 @@ class AdvancedAnalyticsService {
   List<SessionData> _sessions = [];
   Map<String, ContentInteraction> _contentInteractions = {};
   AdvancedAnalyticsData? _cachedStats;
-  
+
   // Stato sessione corrente
   SessionData? _currentSession;
   DateTime? _lastActionTime;
   Timer? _inactivityTimer;
   Map<String, DateTime> _actionStartTimes = {};
-  
+
   bool _isInitialized = false;
   final SimpleAnalyticsService _baseAnalytics = SimpleAnalyticsService();
 
@@ -43,42 +44,49 @@ class AdvancedAnalyticsService {
   /// ✅ Inizializza il service avanzato CON CARICAMENTO DA STORAGE
   Future<void> initialize() async {
     if (_isInitialized) return;
-    
+
     await _baseAnalytics.initialize();
     await _loadAdvancedData(); // ✅ CARICA DA SHARED PREFERENCES
     _startSmartSession();
-    
+
     _isInitialized = true;
-    print('DEBUG: AdvancedAnalyticsService inizializzato con ${_events.length} eventi avanzati');
+    print(
+        'DEBUG: AdvancedAnalyticsService inizializzato con ${_events.length} eventi avanzati');
   }
 
   /// ✅ CARICA DATI DA SHARED PREFERENCES
   Future<void> _loadAdvancedData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Carica eventi avanzati
       final eventsJson = prefs.getStringList(_advancedEventsKey) ?? [];
-      _events = eventsJson.map((json) {
-        try {
-          return AdvancedEvent.fromJson(jsonDecode(json));
-        } catch (e) {
-          print('ERRORE: Parsing evento avanzato fallito: $e');
-          return null;
-        }
-      }).whereType<AdvancedEvent>().toList();
-      
+      _events = eventsJson
+          .map((json) {
+            try {
+              return AdvancedEvent.fromJson(jsonDecode(json));
+            } catch (e) {
+              print('ERRORE: Parsing evento avanzato fallito: $e');
+              return null;
+            }
+          })
+          .whereType<AdvancedEvent>()
+          .toList();
+
       // Carica sessioni
       final sessionsJson = prefs.getStringList(_sessionsKey) ?? [];
-      _sessions = sessionsJson.map((json) {
-        try {
-          return SessionData.fromJson(jsonDecode(json));
-        } catch (e) {
-          print('ERRORE: Parsing sessione fallita: $e');
-          return null;
-        }
-      }).whereType<SessionData>().toList();
-      
+      _sessions = sessionsJson
+          .map((json) {
+            try {
+              return SessionData.fromJson(jsonDecode(json));
+            } catch (e) {
+              print('ERRORE: Parsing sessione fallita: $e');
+              return null;
+            }
+          })
+          .whereType<SessionData>()
+          .toList();
+
       // Carica interazioni contenuti
       final interactionsJson = prefs.getString(_contentInteractionsKey);
       if (interactionsJson != null) {
@@ -97,19 +105,21 @@ class AdvancedAnalyticsService {
           _contentInteractions = {};
         }
       }
-      
+
       // Carica stats cache
       final cachedStatsJson = prefs.getString(_cachedStatsKey);
       if (cachedStatsJson != null) {
         try {
-          _cachedStats = AdvancedAnalyticsData.fromJson(jsonDecode(cachedStatsJson));
+          _cachedStats =
+              AdvancedAnalyticsData.fromJson(jsonDecode(cachedStatsJson));
         } catch (e) {
           print('ERRORE: Parsing cached stats fallito: $e');
           _cachedStats = null;
         }
       }
-      
-      print('DEBUG: Dati avanzati caricati - ${_events.length} eventi, ${_sessions.length} sessioni, ${_contentInteractions.length} interactions');
+
+      print(
+          'DEBUG: Dati avanzati caricati - ${_events.length} eventi, ${_sessions.length} sessioni, ${_contentInteractions.length} interactions');
     } catch (e) {
       print('ERRORE: Caricamento dati avanzati fallito: $e');
       _resetToEmpty();
@@ -120,27 +130,33 @@ class AdvancedAnalyticsService {
   Future<void> _saveAdvancedData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Salva eventi (mantieni solo gli ultimi per performance)
       final recentEvents = _events.take(_maxEventsInMemory).toList();
-      final eventsJson = recentEvents.map((event) => jsonEncode(event.toJson())).toList();
+      final eventsJson =
+          recentEvents.map((event) => jsonEncode(event.toJson())).toList();
       await prefs.setStringList(_advancedEventsKey, eventsJson);
-      
+
       // Salva sessioni (mantieni ultime 50)
       final recentSessions = _sessions.take(50).toList();
-      final sessionsJson = recentSessions.map((session) => jsonEncode(session.toJson())).toList();
+      final sessionsJson = recentSessions
+          .map((session) => jsonEncode(session.toJson()))
+          .toList();
       await prefs.setStringList(_sessionsKey, sessionsJson);
-      
+
       // Salva interazioni contenuti
-      final interactionsJson = jsonEncode(_contentInteractions.map((k, v) => MapEntry(k, v.toJson())));
+      final interactionsJson = jsonEncode(
+          _contentInteractions.map((k, v) => MapEntry(k, v.toJson())));
       await prefs.setString(_contentInteractionsKey, interactionsJson);
-      
+
       // Salva stats cache se disponibili
       if (_cachedStats != null) {
-        await prefs.setString(_cachedStatsKey, jsonEncode(_cachedStats!.toJson()));
+        await prefs.setString(
+            _cachedStatsKey, jsonEncode(_cachedStats!.toJson()));
       }
-      
-      print('DEBUG: Dati avanzati salvati - ${recentEvents.length} eventi, ${recentSessions.length} sessioni');
+
+      print(
+          'DEBUG: Dati avanzati salvati - ${recentEvents.length} eventi, ${recentSessions.length} sessioni');
     } catch (e) {
       print('ERRORE: Salvataggio dati avanzati fallito: $e');
     }
@@ -154,11 +170,30 @@ class AdvancedAnalyticsService {
     _cachedStats = null;
   }
 
+  Future<void> clearLocalAnalyticsData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_advancedEventsKey);
+      await prefs.remove(_sessionsKey);
+      await prefs.remove(_contentInteractionsKey);
+      await prefs.remove(_cachedStatsKey);
+    } catch (e) {
+      debugPrint('ERRORE: Pulizia analytics avanzata locale fallita: $e');
+    }
+    _resetToEmpty();
+    _currentSession = null;
+    _lastActionTime = null;
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+    _actionStartTimes = {};
+    _isInitialized = false;
+  }
+
   /// Avvia sessione intelligente
   void _startSmartSession() {
     final sessionId = _generateId();
     final now = DateTime.now();
-    
+
     _currentSession = SessionData(
       sessionId: sessionId,
       startTime: now,
@@ -209,7 +244,7 @@ class AdvancedAnalyticsService {
     );
 
     _sessions.insert(0, finalSession);
-    
+
     trackAdvancedEvent(
       AdvancedEventType.sessionEnded,
       properties: {
@@ -225,8 +260,9 @@ class AdvancedAnalyticsService {
     _currentSession = null;
     _stopInactivityMonitoring();
     await _saveAdvancedData();
-    
-    print('DEBUG: Sessione terminata: ${session.sessionId} (${session.totalDuration.inMinutes}min, produttiva: $wasProductive)');
+
+    print(
+        'DEBUG: Sessione terminata: ${session.sessionId} (${session.totalDuration.inMinutes}min, produttiva: $wasProductive)');
   }
 
   /// Calcola se una sessione è produttiva
@@ -252,7 +288,7 @@ class AdvancedAnalyticsService {
     });
   }
 
-  /// Ferma monitoraggio inattività  
+  /// Ferma monitoraggio inattività
   void _stopInactivityMonitoring() {
     _inactivityTimer?.cancel();
     _inactivityTimer = null;
@@ -299,36 +335,44 @@ class AdvancedAnalyticsService {
   }
 
   /// Aggiorna sessione corrente con nuova azione
-  void _updateCurrentSession(AdvancedEventType type, Map<String, dynamic> properties, Duration? actionDuration) {
+  void _updateCurrentSession(AdvancedEventType type,
+      Map<String, dynamic> properties, Duration? actionDuration) {
     if (_currentSession == null) return;
 
     final actionName = type.name;
-    final updatedActions = List<String>.from(_currentSession!.actionsPerformed)..add(actionName);
-    
+    final updatedActions = List<String>.from(_currentSession!.actionsPerformed)
+      ..add(actionName);
+
     var updatedActiveDuration = _currentSession!.activeDuration;
     if (actionDuration != null) {
       updatedActiveDuration += actionDuration;
     }
 
-    final updatedFolderInteractions = Map<String, int>.from(_currentSession!.folderInteractions);
+    final updatedFolderInteractions =
+        Map<String, int>.from(_currentSession!.folderInteractions);
     if (properties.containsKey('folderId')) {
       final folderId = properties['folderId'] as String;
-      updatedFolderInteractions[folderId] = (updatedFolderInteractions[folderId] ?? 0) + 1;
+      updatedFolderInteractions[folderId] =
+          (updatedFolderInteractions[folderId] ?? 0) + 1;
     }
 
-    final updatedContentInteractions = Map<String, int>.from(_currentSession!.contentInteractions);
+    final updatedContentInteractions =
+        Map<String, int>.from(_currentSession!.contentInteractions);
     if (properties.containsKey('postId')) {
       final postId = properties['postId'] as String;
-      updatedContentInteractions[postId] = (updatedContentInteractions[postId] ?? 0) + 1;
+      updatedContentInteractions[postId] =
+          (updatedContentInteractions[postId] ?? 0) + 1;
     }
 
-    final updatedTimePerAction = Map<String, Duration>.from(_currentSession!.timePerAction);
+    final updatedTimePerAction =
+        Map<String, Duration>.from(_currentSession!.timePerAction);
     if (actionDuration != null) {
       final currentAvg = updatedTimePerAction[actionName] ?? Duration.zero;
       final actionCount = updatedActions.where((a) => a == actionName).length;
-      final newAvg = Duration(milliseconds: 
-        ((currentAvg.inMilliseconds * (actionCount - 1)) + actionDuration.inMilliseconds) ~/ actionCount
-      );
+      final newAvg = Duration(
+          milliseconds: ((currentAvg.inMilliseconds * (actionCount - 1)) +
+                  actionDuration.inMilliseconds) ~/
+              actionCount);
       updatedTimePerAction[actionName] = newAvg;
     }
 
@@ -361,7 +405,7 @@ class AdvancedAnalyticsService {
   }) {
     final now = DateTime.now();
     final existing = _contentInteractions[postId];
-    
+
     if (existing == null && isNewSave) {
       _contentInteractions[postId] = ContentInteraction(
         postId: postId,
@@ -372,7 +416,7 @@ class AdvancedAnalyticsService {
         tags: tags ?? [],
         socialNetwork: socialNetwork,
       );
-      
+
       trackAdvancedEvent(AdvancedEventType.contentRevisited, properties: {
         'postId': postId,
         'postTitle': postTitle,
@@ -380,15 +424,15 @@ class AdvancedAnalyticsService {
         'socialNetwork': socialNetwork,
         'action': 'saved',
       });
-      
     } else if (existing != null && isOpening) {
       final isFirstOpen = existing.wasNeverOpened;
-      final updatedOpenTimes = List<DateTime>.from(existing.openTimes)..add(now);
+      final updatedOpenTimes = List<DateTime>.from(existing.openTimes)
+        ..add(now);
       final updatedViewDurations = List<Duration>.from(existing.viewDurations);
       if (viewDuration != null) {
         updatedViewDurations.add(viewDuration);
       }
-      
+
       _contentInteractions[postId] = ContentInteraction(
         postId: existing.postId,
         postTitle: existing.postTitle,
@@ -405,15 +449,18 @@ class AdvancedAnalyticsService {
         tags: existing.tags,
         socialNetwork: existing.socialNetwork,
       );
-      
+
       trackAdvancedEvent(
-        isFirstOpen ? AdvancedEventType.contentRevisited : AdvancedEventType.contentRevisited,
+        isFirstOpen
+            ? AdvancedEventType.contentRevisited
+            : AdvancedEventType.contentRevisited,
         properties: {
           'postId': postId,
           'postTitle': postTitle,
           'openCount': existing.openCount + 1,
           'isFirstOpen': isFirstOpen,
-          'timeToFirstOpen': isFirstOpen ? now.difference(existing.savedDate).inMinutes : null,
+          'timeToFirstOpen':
+              isFirstOpen ? now.difference(existing.savedDate).inMinutes : null,
           'viewDuration': viewDuration?.inSeconds,
         },
       );
@@ -442,23 +489,24 @@ class AdvancedAnalyticsService {
   double _calculateSimilarity(String a, String b) {
     if (a == b) return 1.0;
     if (a.isEmpty || b.isEmpty) return 0.0;
-    
+
     final longer = a.length > b.length ? a : b;
     final shorter = a.length > b.length ? b : a;
-    
+
     if (longer.length == 0) return 1.0;
-    
+
     final editDistance = _levenshteinDistance(longer, shorter);
     return (longer.length - editDistance) / longer.length;
   }
 
   /// ✅ Calcola distanza di Levenshtein
   int _levenshteinDistance(String a, String b) {
-    final matrix = List.generate(a.length + 1, (i) => List.filled(b.length + 1, 0));
-    
+    final matrix =
+        List.generate(a.length + 1, (i) => List.filled(b.length + 1, 0));
+
     for (int i = 0; i <= a.length; i++) matrix[i][0] = i;
     for (int j = 0; j <= b.length; j++) matrix[0][j] = j;
-    
+
     for (int i = 1; i <= a.length; i++) {
       for (int j = 1; j <= b.length; j++) {
         final cost = a[i - 1] == b[j - 1] ? 0 : 1;
@@ -469,7 +517,7 @@ class AdvancedAnalyticsService {
         ].reduce(math.min);
       }
     }
-    
+
     return matrix[a.length][b.length];
   }
 
@@ -490,12 +538,16 @@ class AdvancedAnalyticsService {
       );
     }
 
-    final totalSessionTime = _sessions.fold<Duration>(Duration.zero, (sum, s) => sum + s.sessionLength);
-    final avgSessionTime = Duration(milliseconds: totalSessionTime.inMilliseconds ~/ _sessions.length);
+    final totalSessionTime = _sessions.fold<Duration>(
+        Duration.zero, (sum, s) => sum + s.sessionLength);
+    final avgSessionTime = Duration(
+        milliseconds: totalSessionTime.inMilliseconds ~/ _sessions.length);
 
     final totalContent = _contentInteractions.length;
-    final revisitedContent = _contentInteractions.values.where((c) => !c.wasNeverOpened).length;
-    final revisitationRate = totalContent > 0 ? revisitedContent / totalContent : 0.0;
+    final revisitedContent =
+        _contentInteractions.values.where((c) => !c.wasNeverOpened).length;
+    final revisitationRate =
+        totalContent > 0 ? revisitedContent / totalContent : 0.0;
     final abandonmentRate = 1.0 - revisitationRate;
 
     final saveToOpenTimes = _contentInteractions.values
@@ -503,18 +555,25 @@ class AdvancedAnalyticsService {
         .map((c) => c.timeToFirstOpen!)
         .toList();
     final avgSaveToOpenTime = saveToOpenTimes.isNotEmpty
-        ? Duration(milliseconds: saveToOpenTimes.fold<int>(0, (sum, d) => sum + d.inMilliseconds) ~/ saveToOpenTimes.length)
+        ? Duration(
+            milliseconds: saveToOpenTimes.fold<int>(
+                    0, (sum, d) => sum + d.inMilliseconds) ~/
+                saveToOpenTimes.length)
         : Duration.zero;
 
     var actionIntervals = <Duration>[];
     for (final session in _sessions) {
       if (session.actionsPerformed.length > 1) {
-        final intervalMs = session.sessionLength.inMilliseconds ~/ session.actionsPerformed.length;
+        final intervalMs = session.sessionLength.inMilliseconds ~/
+            session.actionsPerformed.length;
         actionIntervals.add(Duration(milliseconds: intervalMs));
       }
     }
     final avgActionInterval = actionIntervals.isNotEmpty
-        ? Duration(milliseconds: actionIntervals.fold<int>(0, (sum, d) => sum + d.inMilliseconds) ~/ actionIntervals.length)
+        ? Duration(
+            milliseconds: actionIntervals.fold<int>(
+                    0, (sum, d) => sum + d.inMilliseconds) ~/
+                actionIntervals.length)
         : Duration.zero;
 
     final actionEfficiency = <String, double>{};
@@ -523,7 +582,7 @@ class AdvancedAnalyticsService {
     for (final action in allActions) {
       actionCounts[action] = (actionCounts[action] ?? 0) + 1;
     }
-    
+
     for (final action in actionCounts.keys) {
       final count = actionCounts[action]!;
       final efficiency = count / allActions.length;
@@ -533,19 +592,30 @@ class AdvancedAnalyticsService {
     final usagePatterns = <String>[];
     if (avgSessionTime.inMinutes > 5) usagePatterns.add('Sessioni lunghe');
     if (revisitationRate > 0.7) usagePatterns.add('Alta revisitazione');
-    if (actionCounts.containsKey('folderCreated') && actionCounts['folderCreated']! > 5) {
+    if (actionCounts.containsKey('folderCreated') &&
+        actionCounts['folderCreated']! > 5) {
       usagePatterns.add('Organizzatore attivo');
     }
 
-    final sessionDurations = _sessions.map((s) => s.sessionLength.inMinutes).toList();
-    final meanDuration = sessionDurations.isEmpty ? 0.0 : sessionDurations.reduce((a, b) => a + b) / sessionDurations.length;
-    final variance = sessionDurations.isEmpty ? 0.0 : sessionDurations.fold<double>(0.0, (sum, d) => sum + math.pow(d - meanDuration, 2)) / sessionDurations.length;
-    final consistencyScore = variance > 0 ? math.max(0.0, 1.0 - (math.sqrt(variance) / meanDuration)) : 1.0;
+    final sessionDurations =
+        _sessions.map((s) => s.sessionLength.inMinutes).toList();
+    final meanDuration = sessionDurations.isEmpty
+        ? 0.0
+        : sessionDurations.reduce((a, b) => a + b) / sessionDurations.length;
+    final variance = sessionDurations.isEmpty
+        ? 0.0
+        : sessionDurations.fold<double>(
+                0.0, (sum, d) => sum + math.pow(d - meanDuration, 2)) /
+            sessionDurations.length;
+    final consistencyScore = variance > 0
+        ? math.max(0.0, 1.0 - (math.sqrt(variance) / meanDuration))
+        : 1.0;
 
     final preferredActions = Map<String, int>.from(actionCounts);
-    final batchSessions = _sessions.where((s) => 
-      s.actionsPerformed.length >= 5 && s.sessionLength.inMinutes <= 10
-    ).length;
+    final batchSessions = _sessions
+        .where((s) =>
+            s.actionsPerformed.length >= 5 && s.sessionLength.inMinutes <= 10)
+        .length;
 
     return BehavioralStats(
       avgSessionTime: avgSessionTime,
@@ -571,32 +641,41 @@ class AdvancedAnalyticsService {
 
     for (final event in _events) {
       final timestamp = event.timestamp;
-      
+
       final hour = timestamp.hour;
       final minute = timestamp.minute;
-      final window = minute < 15 ? '00-15' : minute < 30 ? '15-30' : minute < 45 ? '30-45' : '45-60';
+      final window = minute < 15
+          ? '00-15'
+          : minute < 30
+              ? '15-30'
+              : minute < 45
+                  ? '30-45'
+                  : '45-60';
       final preciseSlot = '$hour:$window';
-      hourlyPreciseUsage[preciseSlot] = (hourlyPreciseUsage[preciseSlot] ?? 0) + 1;
-      
+      hourlyPreciseUsage[preciseSlot] =
+          (hourlyPreciseUsage[preciseSlot] ?? 0) + 1;
+
       final isWeekend = timestamp.weekday >= 6;
-      weekdayVsWeekend[isWeekend ? 'weekend' : 'weekday'] = 
+      weekdayVsWeekend[isWeekend ? 'weekend' : 'weekday'] =
           (weekdayVsWeekend[isWeekend ? 'weekend' : 'weekday'] ?? 0) + 1;
-      
-      final monthKey = '${timestamp.year}-${timestamp.month.toString().padLeft(2, '0')}';
+
+      final monthKey =
+          '${timestamp.year}-${timestamp.month.toString().padLeft(2, '0')}';
       monthlyPatterns[monthKey] = (monthlyPatterns[monthKey] ?? 0) + 1;
-      
+
       final season = _getSeason(timestamp.month);
       seasonalTrends[season] = (seasonalTrends[season] ?? 0) + 1;
     }
 
     final sortedUsage = hourlyPreciseUsage.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    
+
     for (int i = 0; i < math.min(5, sortedUsage.length); i++) {
       final entry = sortedUsage[i];
-      final score = entry.value / (hourlyPreciseUsage.values.isNotEmpty 
-          ? hourlyPreciseUsage.values.reduce(math.max) 
-          : 1);
+      final score = entry.value /
+          (hourlyPreciseUsage.values.isNotEmpty
+              ? hourlyPreciseUsage.values.reduce(math.max)
+              : 1);
       peakUsageWindows[entry.key] = score;
     }
 
@@ -605,7 +684,10 @@ class AdvancedAnalyticsService {
         .map((s) => Duration(seconds: 30))
         .toList();
     final avgTimeToFirstAction = timeToFirstActions.isNotEmpty
-        ? Duration(milliseconds: timeToFirstActions.fold<int>(0, (sum, d) => sum + d.inMilliseconds) ~/ timeToFirstActions.length)
+        ? Duration(
+            milliseconds: timeToFirstActions.fold<int>(
+                    0, (sum, d) => sum + d.inMilliseconds) ~/
+                timeToFirstActions.length)
         : Duration.zero;
 
     final detectedSchedules = <String>[];
@@ -619,9 +701,8 @@ class AdvancedAnalyticsService {
 
     final totalEvents = _events.length;
     final uniqueTimeSlots = hourlyPreciseUsage.keys.length;
-    final temporalConsistency = totalEvents > 0 
-        ? (uniqueTimeSlots / (24 * 4)).clamp(0.0, 1.0)
-        : 0.0;
+    final temporalConsistency =
+        totalEvents > 0 ? (uniqueTimeSlots / (24 * 4)).clamp(0.0, 1.0) : 0.0;
 
     return MicroTimingStats(
       hourlyPreciseUsage: hourlyPreciseUsage,
@@ -638,20 +719,35 @@ class AdvancedAnalyticsService {
 
   String _getSeason(int month) {
     switch (month) {
-      case 12: case 1: case 2: return 'winter';
-      case 3: case 4: case 5: return 'spring';
-      case 6: case 7: case 8: return 'summer';
-      case 9: case 10: case 11: return 'autumn';
-      default: return 'unknown';
+      case 12:
+      case 1:
+      case 2:
+        return 'winter';
+      case 3:
+      case 4:
+      case 5:
+        return 'spring';
+      case 6:
+      case 7:
+      case 8:
+        return 'summer';
+      case 9:
+      case 10:
+      case 11:
+        return 'autumn';
+      default:
+        return 'unknown';
     }
   }
 
   /// Calcola metriche qualità contenuti
   ContentQualityMetrics calculateContentQualityMetrics() {
     final totalContent = _contentInteractions.length;
-    final neverOpenedContent = _contentInteractions.values.where((c) => c.wasNeverOpened).length;
-    final highEngagementContent = _contentInteractions.values.where((c) => c.isHighEngagement).length;
-    
+    final neverOpenedContent =
+        _contentInteractions.values.where((c) => c.wasNeverOpened).length;
+    final highEngagementContent =
+        _contentInteractions.values.where((c) => c.isHighEngagement).length;
+
     var duplicateContent = 0;
     final urlsChecked = <String>{};
     for (final interaction in _contentInteractions.values) {
@@ -663,26 +759,29 @@ class AdvancedAnalyticsService {
       }
     }
 
-    final contentEfficiencyScore = totalContent > 0 
-        ? (totalContent - neverOpenedContent) / totalContent 
+    final contentEfficiencyScore = totalContent > 0
+        ? (totalContent - neverOpenedContent) / totalContent
         : 0.0;
 
     final socialNetworkDistribution = <String, int>{};
     final socialNetworkEngagement = <String, double>{};
-    
+
     for (final interaction in _contentInteractions.values) {
       final network = interaction.socialNetwork ?? 'unknown';
-      socialNetworkDistribution[network] = (socialNetworkDistribution[network] ?? 0) + 1;
-      
+      socialNetworkDistribution[network] =
+          (socialNetworkDistribution[network] ?? 0) + 1;
+
       final currentEngagement = socialNetworkEngagement[network] ?? 0.0;
       final count = socialNetworkDistribution[network]!;
-      socialNetworkEngagement[network] = 
-          (currentEngagement * (count - 1) + interaction.engagementScore) / count;
+      socialNetworkEngagement[network] =
+          (currentEngagement * (count - 1) + interaction.engagementScore) /
+              count;
     }
 
     final recommendedCleanup = _contentInteractions.values
-        .where((c) => c.wasNeverOpened && 
-                     DateTime.now().difference(c.savedDate).inDays > 30)
+        .where((c) =>
+            c.wasNeverOpened &&
+            DateTime.now().difference(c.savedDate).inDays > 30)
         .map((c) => c.postId)
         .take(10)
         .toList();
@@ -690,8 +789,8 @@ class AdvancedAnalyticsService {
     final oldContent = _contentInteractions.values
         .where((c) => DateTime.now().difference(c.savedDate).inDays > 90);
     final retainedOldContent = oldContent.where((c) => !c.wasNeverOpened);
-    final contentRetentionRate = oldContent.isNotEmpty 
-        ? retainedOldContent.length / oldContent.length 
+    final contentRetentionRate = oldContent.isNotEmpty
+        ? retainedOldContent.length / oldContent.length
         : 0.0;
 
     return ContentQualityMetrics(
@@ -724,14 +823,17 @@ class AdvancedAnalyticsService {
     final microTiming = calculateMicroTimingStats();
 
     if (contentQuality.neverOpenedContent > 0) {
-      final abandonmentRate = contentQuality.neverOpenedContent / contentQuality.totalContent;
+      final abandonmentRate =
+          contentQuality.neverOpenedContent / contentQuality.totalContent;
       if (abandonmentRate > 0.5) {
         insights.add(AnalyticsInsight(
           id: _generateId(),
           type: 'content',
           title: 'Alto tasso di abbandono contenuti',
-          description: 'Il ${(abandonmentRate * 100).toInt()}% dei contenuti salvati non viene mai aperto.',
-          recommendation: 'Considera di rivedere i criteri di salvataggio o organizzare meglio i contenuti per trovarli facilmente.',
+          description:
+              'Il ${(abandonmentRate * 100).toInt()}% dei contenuti salvati non viene mai aperto.',
+          recommendation:
+              'Considera di rivedere i criteri di salvataggio o organizzare meglio i contenuti per trovarli facilmente.',
           confidence: 0.9,
           supportingData: {
             'abandonmentRate': abandonmentRate,
@@ -751,8 +853,10 @@ class AdvancedAnalyticsService {
         id: _generateId(),
         type: 'behavior',
         title: 'Utilizzo prevalentemente weekend',
-        description: 'Usi SaveIn! principalmente nei weekend (${((weekendUsage / (weekendUsage + weekdayUsage)) * 100).toInt()}% del tempo).',
-        recommendation: 'Considera di impostare promemoria per utilizzare SaveIn! anche durante la settimana.',
+        description:
+            'Usi SaveIn! principalmente nei weekend (${((weekendUsage / (weekendUsage + weekdayUsage)) * 100).toInt()}% del tempo).',
+        recommendation:
+            'Considera di impostare promemoria per utilizzare SaveIn! anche durante la settimana.',
         confidence: 0.8,
         supportingData: {
           'weekendUsage': weekendUsage,
@@ -769,8 +873,10 @@ class AdvancedAnalyticsService {
         id: _generateId(),
         type: 'productivity',
         title: 'Sessioni molto brevi',
-        description: 'Le tue sessioni durano in media ${behavioralStats.avgSessionTime.inSeconds} secondi.',
-        recommendation: 'Prova a dedicare più tempo per organizzare e rivedere i contenuti salvati.',
+        description:
+            'Le tue sessioni durano in media ${behavioralStats.avgSessionTime.inSeconds} secondi.',
+        recommendation:
+            'Prova a dedicare più tempo per organizzare e rivedere i contenuti salvati.',
         confidence: 0.7,
         supportingData: {
           'avgSessionSeconds': behavioralStats.avgSessionTime.inSeconds,
@@ -785,24 +891,24 @@ class AdvancedAnalyticsService {
   }
 
   String _generateId() {
-    return DateTime.now().millisecondsSinceEpoch.toString() + 
-           math.Random().nextInt(1000).toString();
+    return DateTime.now().millisecondsSinceEpoch.toString() +
+        math.Random().nextInt(1000).toString();
   }
 
   /// Pulisce dati vecchi per performance
   Future<void> cleanOldData({int maxDays = 90}) async {
     final cutoffDate = DateTime.now().subtract(Duration(days: maxDays));
-    
+
     _events.removeWhere((event) => event.timestamp.isBefore(cutoffDate));
     _sessions.removeWhere((session) => session.startTime.isBefore(cutoffDate));
-    
-    _contentInteractions.removeWhere((key, interaction) => 
-      interaction.savedDate.isBefore(cutoffDate) && 
-      interaction.wasNeverOpened
-    );
-    
+
+    _contentInteractions.removeWhere((key, interaction) =>
+        interaction.savedDate.isBefore(cutoffDate) &&
+        interaction.wasNeverOpened);
+
     await _saveAdvancedData();
-    print('DEBUG: Pulizia dati completata - eventi: ${_events.length}, sessioni: ${_sessions.length}');
+    print(
+        'DEBUG: Pulizia dati completata - eventi: ${_events.length}, sessioni: ${_sessions.length}');
   }
 
   /// Calcola e cache tutte le statistiche avanzate
@@ -837,7 +943,7 @@ class AdvancedAnalyticsService {
   }
 
   AdvancedAnalyticsData? get cachedStats => _cachedStats;
-  
+
   /// ✅ Reset completo
   Future<void> clearAllAdvancedData() async {
     _events.clear();
@@ -845,13 +951,13 @@ class AdvancedAnalyticsService {
     _contentInteractions.clear();
     _cachedStats = null;
     _currentSession = null;
-    
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_advancedEventsKey);
     await prefs.remove(_sessionsKey);
     await prefs.remove(_contentInteractionsKey);
     await prefs.remove(_cachedStatsKey);
-    
+
     print('DEBUG: Tutti i dati avanzati cancellati');
   }
 
@@ -861,7 +967,8 @@ class AdvancedAnalyticsService {
       'version': '1.0.0',
       'events': _events.map((e) => e.toJson()).toList(),
       'sessions': _sessions.map((s) => s.toJson()).toList(),
-      'contentInteractions': _contentInteractions.map((k, v) => MapEntry(k, v.toJson())),
+      'contentInteractions':
+          _contentInteractions.map((k, v) => MapEntry(k, v.toJson())),
       'cachedStats': _cachedStats?.toJson(),
     });
   }

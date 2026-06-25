@@ -126,9 +126,23 @@ service cloud.firestore {
       }
     }
 
+    match /{path=**}/posts/{postId} {
+      allow read: if isDashboardViewer();
+    }
+
+    match /{path=**}/folders/{folderId} {
+      allow read: if isDashboardViewer();
+    }
+
     match /admin_logs/{logId} {
       allow read: if isDashboardViewer();
       allow create: if isDashboardEditor();
+      allow update, delete: if false;
+    }
+
+    match /users/{userId}/account_history/{historyId} {
+      allow read: if isOwner(userId) || isDashboardViewer();
+      allow create: if isOwner(userId) || isDashboardAdmin();
       allow update, delete: if false;
     }
 
@@ -158,6 +172,11 @@ service cloud.firestore {
       allow create, update, delete: if isDashboardAdmin();
     }
 
+    match /app_config/{configId} {
+      allow read: if signedIn() || isDashboardViewer();
+      allow create, update, delete: if isDashboardAdmin();
+    }
+
     match /promotion_banner_events/{eventId} {
       allow read: if isDashboardViewer();
       allow write: if false;
@@ -166,6 +185,26 @@ service cloud.firestore {
     match /promotion_redemptions/{redemptionId} {
       allow read: if isDashboardViewer();
       allow write: if false;
+    }
+
+    match /new_signup_premium_promo_claims/{claimId} {
+      allow read: if isDashboardViewer();
+      allow write: if false;
+    }
+
+    match /birthday_offer_templates/{templateId} {
+      allow read: if isDashboardViewer();
+      allow write: if isDashboardAdmin();
+    }
+
+    match /config/plan_limits {
+      allow read: if signedIn() || isDashboardViewer();
+      allow write: if isDashboardAdmin();
+    }
+
+    match /feature_usage/{userId} {
+      allow read: if isOwner(userId) || isDashboardViewer();
+      allow write: if isOwner(userId);
     }
   }
 }

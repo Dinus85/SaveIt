@@ -3,22 +3,26 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Per HapticFeedback
 import 'package:cached_network_image/cached_network_image.dart';
-import '../models/folder.dart';
-import '../widgets/folder_card.dart';
-import '../widgets/post_preview_image.dart';
-import '../widgets/search_results_widget.dart';
-import '../widgets/multi_select_post_manager.dart'; // 🆕 NUOVO: Import per selezione multipla
-import '../services/access_control_service.dart';
-import '../services/folder_service.dart';
-import '../services/sharing_service.dart'; // AGGIUNTO: Import per apertura reale
-import '../services/share_link_service.dart';
-import '../utils/theme_helpers.dart';
-import '../utils/dialog_helpers.dart';
-import '../pages/account_page.dart';
-import '../pages/shared_items_page.dart'; // NUOVO
-import '../widgets/custom_bottom_nav.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/widgets/folder_card.dart';
+import 'package:savein/widgets/post_preview_image.dart';
+import 'package:savein/widgets/search_results_widget.dart';
+import 'package:savein/widgets/multi_select_post_manager.dart';
+import 'package:savein/services/access_control_service.dart';
+import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/sharing_service.dart';
+import 'package:savein/services/share_link_service.dart';
+import 'package:savein/services/reminder_service.dart';
+import 'package:savein/services/auth_service.dart';
+import 'package:savein/services/interstitial_ad_service.dart';
+import 'package:savein/utils/theme_helpers.dart';
+import 'package:savein/utils/dialog_helpers.dart';
+import 'package:savein/pages/account_page.dart';
+import 'package:savein/pages/auth_wrapper.dart';
+import 'package:savein/pages/shared_items_page.dart';
+import 'package:savein/widgets/custom_bottom_nav.dart';
 import 'package:savein/data_service.dart';
-import '../widgets/reminder_dialog.dart';
+import 'package:savein/widgets/reminder_dialog.dart';
 
 // Pagina dettaglio cartella CON APERTURA REALE DEI POST E SELEZIONE MULTIPLA
 class FolderDetailPage extends StatefulWidget {
@@ -27,6 +31,8 @@ class FolderDetailPage extends StatefulWidget {
   final List<MockFolder> allFolders;
   final VoidCallback onFolderUpdated;
   final Function(bool)? onThemeChanged;
+  final String? highlightPostId;
+  final String? highlightFolderId;
 
   const FolderDetailPage({
     Key? key,
@@ -35,6 +41,8 @@ class FolderDetailPage extends StatefulWidget {
     required this.allFolders,
     required this.onFolderUpdated,
     this.onThemeChanged,
+    this.highlightPostId,
+    this.highlightFolderId,
   }) : super(key: key);
 
   @override
@@ -42,7 +50,7 @@ class FolderDetailPage extends StatefulWidget {
 }
 
 class _FolderDetailPageState extends State<FolderDetailPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final AppAccessService _accessService = AppAccessService();
   final FolderService _folderService = FolderService();
   final TextEditingController _searchController = TextEditingController();
@@ -62,18 +70,30 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   // 🔥 FIX: Traccia i timer per cancellarli nel dispose
   Timer? _firstRefreshTimer;
   Timer? _secondRefreshTimer;
+  Timer? _highlightTimer;
+  Timer? _highlightRetryTimer;
+  bool _showReminderHighlight = false;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
+  // GlobalKey per trovare la posizione reale del post/subfolder evidenziato nello scroll
+  final GlobalKey _highlightedPostKey = GlobalKey();
+  final GlobalKey _highlightedFolderKey = GlobalKey();
 
-  // 🔥 LAZY LOAD: evita render di migliaia di widget insieme
-  static const int _postsPageSize = 30;
-  int _visiblePostsLimit = _postsPageSize;
-  bool _isLoadingMorePosts = false;
-
-  String? get _subfolderCreationError =>
-      _accessService.validateSubfolderCreation(_currentFolder);
+  String? get _subfolderCreationError => _currentFolder.isSpecial
+      ? 'Non puoi creare sottocartelle in "Tutti".'
+      : null;
 
   @override
   void initState() {
     super.initState();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _pulseAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
 
     // 🔥 NUOVO: Registra observer per lifecycle
     WidgetsBinding.instance.addObserver(this);
@@ -95,6 +115,10 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
     // 🔥 FIX: Carica i post DOPO aver impostato il callback, assicurando la sync
     _loadPostsEnsuringSync();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealReminderTarget();
+    });
   }
 
   @override
@@ -108,6 +132,9 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     // 🔥 FIX: Cancella i timer di refresh per evitare setState dopo dispose
     _firstRefreshTimer?.cancel();
     _secondRefreshTimer?.cancel();
+    _highlightTimer?.cancel();
+    _highlightRetryTimer?.cancel();
+    _pulseController.dispose();
     _folderService
         .setOnDataChangedCallback(null); // 🔥 NUOVO: Rimuovi il callback
     _contentScrollController.removeListener(_onContentScroll);
@@ -214,7 +241,6 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       setState(() {
         _currentFolder = updatedFolder;
         _posts = newPosts;
-        _resetVisiblePostsLimit();
       });
       print(
           'DEBUG: UI aggiornata: ${_currentFolder.name}, ${_posts.length} post');
@@ -237,7 +263,6 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     if (mounted) {
       setState(() {
         _posts = _folderService.getPostsForFolder(_currentFolder);
-        _resetVisiblePostsLimit();
       });
       print(
           'DEBUG: Caricati ${_posts.length} post per cartella: ${_currentFolder.name}');
@@ -252,26 +277,15 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     if (mounted) {
       setState(() {
         _posts = _folderService.getPostsForFolder(_currentFolder);
-        _resetVisiblePostsLimit();
       });
       print(
           'DEBUG: Caricati ${_posts.length} post per cartella: ${_currentFolder.name} (path: ${buildFullPathForFolder(_currentFolder)})');
     }
   }
 
-  void _resetVisiblePostsLimit() {
-    _visiblePostsLimit = math.min(_postsPageSize, _posts.length);
-    _isLoadingMorePosts = false;
-  }
-
   void _onContentScroll() {
     if (!_contentScrollController.hasClients) return;
-    // Trigger a ~600px dal fondo
-    final threshold = 600.0;
     final pos = _contentScrollController.position;
-    if (pos.pixels >= pos.maxScrollExtent - threshold) {
-      _loadMorePostsIfNeeded();
-    }
 
     // Mostra bottone "torna su" dopo un po' di scroll
     const showAfter = 450.0;
@@ -292,25 +306,6 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         curve: Curves.easeOutCubic,
       );
     } catch (_) {}
-  }
-
-  void _loadMorePostsIfNeeded() {
-    if (_isLoadingMorePosts) return;
-    if (_visiblePostsLimit >= _posts.length) return;
-
-    setState(() {
-      _isLoadingMorePosts = true;
-    });
-
-    // Piccolo delay per non "martellare" setState durante scroll veloce
-    Future.microtask(() {
-      if (!mounted) return;
-      setState(() {
-        _visiblePostsLimit =
-            math.min(_visiblePostsLimit + _postsPageSize, _posts.length);
-        _isLoadingMorePosts = false;
-      });
-    });
   }
 
   // Helper per costruire il path completo della cartella (per debug)
@@ -506,6 +501,144 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     return 'Home > ${path.join(' > ')}';
   }
 
+  void _revealReminderTarget() {
+    if (!mounted ||
+        (widget.highlightPostId == null && widget.highlightFolderId == null)) {
+      return;
+    }
+
+    setState(() => _showReminderHighlight = true);
+    _pulseController.repeat(reverse: true);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        _pulseController.stop();
+        setState(() => _showReminderHighlight = false);
+      }
+    });
+
+    final startedAt = DateTime.now();
+    void retryUntilFound() {
+      if (!mounted || !_showReminderHighlight) return;
+      final found = _scrollToReminderTargetIfAvailable();
+      if (found) return;
+      if (DateTime.now().difference(startedAt) >= const Duration(seconds: 5)) {
+        return;
+      }
+      _highlightRetryTimer?.cancel();
+      _highlightRetryTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted && widget.highlightPostId != null) {
+          _loadPosts();
+        }
+        retryUntilFound();
+      });
+    }
+
+    retryUntilFound();
+  }
+
+  bool _scrollToReminderTargetIfAvailable() {
+    final postId = widget.highlightPostId;
+    if (postId != null && postId.isNotEmpty) {
+      final postIndex = _posts.indexWhere((post) => post.id == postId);
+      if (postIndex < 0) return false;
+
+      // Prima passa: porta il post approssimativamente in vista con la stima
+      // (necessario perché SliverList non renderizza elementi fuori schermo)
+      if (!_contentScrollController.hasClients) return false;
+      final keyCtx = _highlightedPostKey.currentContext;
+      if (keyCtx == null) {
+        // Post non ancora costruito da SliverList → scroll approssimativo per metterlo in vista
+        final estimatedOffset = _estimatedPostOffset(postIndex);
+        _animateToCenteredOffset(estimatedOffset);
+        // Dopo l'animazione il widget sarà renderizzato, centratura esatta nel prossimo retry
+        return false;
+      }
+      // Seconda passa: usa la posizione reale per centratura precisa
+      _centerOnKey(_highlightedPostKey);
+      return true;
+    }
+
+    final folderId = widget.highlightFolderId;
+    if (folderId != null &&
+        folderId.isNotEmpty &&
+        folderId != _currentFolder.id) {
+      final index =
+          _getSortedSubfolders().indexWhere((folder) => folder.id == folderId);
+      if (index < 0) return false;
+
+      if (!_contentScrollController.hasClients) return false;
+      final keyCtx = _highlightedFolderKey.currentContext;
+      if (keyCtx == null) {
+        // Subfolder non ancora costruita dal SliverGrid → stima grossolana per portarla in vista
+        final row = index ~/ 2;
+        _animateToCenteredOffset(16.0 + (row * 190.0));
+        return false;
+      }
+      // Posizione reale nota → centrata precisa
+      _centerOnKey(_highlightedFolderKey);
+      return true;
+    }
+    return widget.highlightFolderId == _currentFolder.id;
+  }
+
+  /// Scrolla il CustomScrollView in modo che il widget con [key] sia centrato.
+  void _centerOnKey(GlobalKey key) {
+    final keyCtx = key.currentContext;
+    if (keyCtx == null || !_contentScrollController.hasClients) return;
+    final box = keyCtx.findRenderObject() as RenderBox?;
+    if (box == null) return;
+
+    // Trova il RenderBox del Scrollable
+    final scrollable = Scrollable.maybeOf(keyCtx);
+    if (scrollable == null) return;
+    final scrollableBox = scrollable.context.findRenderObject() as RenderBox?;
+    if (scrollableBox == null) return;
+
+    // Posizione dell'item relativa al viewport
+    final itemOffset = box.localToGlobal(Offset.zero, ancestor: scrollableBox);
+    final itemHeight = box.size.height;
+    final viewportHeight = _contentScrollController.position.viewportDimension;
+    final currentOffset = _contentScrollController.offset;
+
+    // itemOffset.dy è dove l'item si trova ATTUALMENTE nel viewport
+    // Vogliamo che il centro dell'item sia al centro del viewport
+    final itemTopInScroll = currentOffset + itemOffset.dy;
+    final centeredOffset = itemTopInScroll - (viewportHeight - itemHeight) / 2;
+
+    _contentScrollController.animateTo(
+      centeredOffset.clamp(
+          0.0, _contentScrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  double _estimatedPostOffset(int postIndex) {
+    final subfolderRows = (_currentFolder.children.length / 2).ceil();
+    final subfoldersHeight = _currentFolder.children.isNotEmpty
+        ? 16.0 + (subfolderRows * 190.0)
+        : 0.0;
+    const postsHeaderHeight = 76.0;
+    return subfoldersHeight + postsHeaderHeight + (postIndex * 150.0);
+  }
+
+  bool _animateToCenteredOffset(double itemOffset) {
+    if (!_contentScrollController.hasClients) return false;
+    final viewportHeight = _contentScrollController.position.viewportDimension;
+    final maxScroll = _contentScrollController.position.maxScrollExtent;
+    if (viewportHeight <= 0 || maxScroll <= 0) return false;
+    // Sottraggo metà viewport per centrare il post a schermo
+    final centeredOffset = itemOffset - (viewportHeight * 0.5);
+    final target = centeredOffset.clamp(0.0, maxScroll);
+    _contentScrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeColors = ThemeHelpers.getThemeColors(widget.isDarkTheme);
@@ -548,16 +681,24 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   }
 
   Widget _buildHeaderWithSearch(ThemeColors themeColors) {
+    final highlightCurrentFolder = _showReminderHighlight &&
+        widget.highlightFolderId != null &&
+        widget.highlightFolderId == _currentFolder.id;
+
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: themeColors.mainBackgroundColor,
+        color: highlightCurrentFolder
+            ? Colors.orange.withOpacity(0.16)
+            : themeColors.mainBackgroundColor,
         border: Border(
           bottom: BorderSide(
-            color: widget.isDarkTheme
-                ? Colors.grey.shade800
-                : Colors.grey.shade200,
-            width: 1,
+            color: highlightCurrentFolder
+                ? Colors.orange
+                : (widget.isDarkTheme
+                    ? Colors.grey.shade800
+                    : Colors.grey.shade200),
+            width: highlightCurrentFolder ? 2 : 1,
           ),
         ),
       ),
@@ -639,6 +780,10 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                         ],
                       ),
               ),
+              if (AuthService().currentUser != null && !_isSearching)
+                LogoutButton(
+                  onLogoutComplete: () {},
+                ),
             ],
           ),
           SizedBox(height: 16),
@@ -806,10 +951,9 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         color: Colors.blue,
         backgroundColor: widget.isDarkTheme ? Colors.grey[800] : Colors.white,
         child: SingleChildScrollView(
-          physics: AlwaysScrollableScrollPhysics(),
+          physics: const AlwaysScrollableScrollPhysics(),
           child: Container(
-            height: MediaQuery.of(context).size.height -
-                200, // Altezza minima per permettere scroll
+            height: MediaQuery.of(context).size.height - 200,
             child: _buildEmptyState(themeColors),
           ),
         ),
@@ -820,27 +964,149 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       onRefresh: _onPullToRefreshFolder,
       color: Colors.blue,
       backgroundColor: widget.isDarkTheme ? Colors.grey[800] : Colors.white,
-      child: SingleChildScrollView(
+      child: CustomScrollView(
         controller: _contentScrollController,
-        physics: AlwaysScrollableScrollPhysics(), // ✅ IMPORTANTE
-        child: Padding(
-          // ✅ Spazio extra per non finire sotto la bottom nav
-          padding: EdgeInsets.only(
-            bottom: 24 + 96 + MediaQuery.of(context).padding.bottom,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          // Sezione Sottocartelle
+          if (hasSubfolders)
+            SliverPadding(
+              padding: const EdgeInsets.only(top: 16),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.0,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final sortedChildren = _getSortedSubfolders();
+                    final subfolder = sortedChildren[index];
+                    final highlightSubfolder = _showReminderHighlight &&
+                        widget.highlightFolderId != null &&
+                        widget.highlightFolderId == subfolder.id;
+
+                    final card = MockFolderCard(
+                      folder: subfolder,
+                      onTap: () => _openSubfolder(subfolder),
+                      onRename: _showRenameSubfolderDialog,
+                      onDelete: _showDeleteSubfolderDialog,
+                      onMove: _showMoveSubfolderDialog,
+                      allFolders: widget.allFolders,
+                      isDarkTheme: widget.isDarkTheme,
+                    );
+
+                    if (highlightSubfolder) {
+                      return AnimatedBuilder(
+                        key: _highlightedFolderKey,
+                        animation: _pulseAnim,
+                        builder: (context, child) {
+                          final pulse = _pulseAnim.value;
+                          return Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: Colors.orange
+                                  .withOpacity(0.18 + pulse * 0.22),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: Colors.orange
+                                    .withOpacity(0.7 + pulse * 0.3),
+                                width: 2.5 + pulse * 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.orange
+                                      .withOpacity(0.25 + pulse * 0.35),
+                                  blurRadius: 10 + pulse * 12,
+                                  spreadRadius: 1 + pulse * 3,
+                                ),
+                              ],
+                            ),
+                            child: child,
+                          );
+                        },
+                        child: card,
+                      );
+                    }
+                    return card;
+                  },
+                  childCount: _currentFolder.children.length,
+                ),
+              ),
+            ),
+
+          // Spaziatore tra sottocartelle e post
+          if (hasSubfolders && hasPosts)
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
+
+          // Sezione Post
+          if (hasPosts)
+            SliverPadding(
+              padding: EdgeInsets.zero,
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.bookmark,
+                            color: themeColors.iconColor, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          _currentFolder.isSpecial
+                              ? 'Tutti i Post Salvati'
+                              : 'Post in questa cartella',
+                          style: ThemeHelpers.getSectionTitleStyle(
+                              widget.isDarkTheme),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${_posts.length} ${_posts.length == 1 ? 'post' : 'post'}',
+                          style: TextStyle(
+                            color: themeColors.subtitleColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            ),
+
+          if (hasPosts)
+            SliverPadding(
+              padding: EdgeInsets.zero,
+              sliver: MultiSelectPostManager(
+                scrollable: false,
+                asSliver: true,
+                posts: _posts,
+                isDarkTheme: widget.isDarkTheme,
+                folderService: _folderService,
+                onPostsUpdated: () => _loadPosts(),
+                childBuilder: (post, isSelected, onTap, onLongPress) {
+                  return SelectablePostTile(
+                    post: post,
+                    isSelected: isSelected,
+                    isDarkTheme: widget.isDarkTheme,
+                    onTap: onTap,
+                    onLongPress: onLongPress,
+                    child: _buildPostCard(post, themeColors),
+                  );
+                },
+              ),
+            ),
+
+          // Spazio extra in fondo per non finire sotto la bottom nav
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 24 + 96 + MediaQuery.of(context).padding.bottom,
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasSubfolders) ...[
-                _buildSubfoldersSection(themeColors),
-                if (hasPosts) SizedBox(height: 32),
-              ],
-              if (hasPosts) ...[
-                _buildPostsSection(themeColors),
-              ],
-            ],
-          ),
-        ),
+        ],
       ),
     );
   }
@@ -875,315 +1141,355 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     );
   }
 
-  Widget _buildPostsSection(ThemeColors themeColors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.bookmark, color: themeColors.iconColor, size: 20),
-            SizedBox(width: 8),
-            Text(
-              _currentFolder.isSpecial
-                  ? 'Tutti i Post Salvati'
-                  : 'Post in questa cartella',
-              style: ThemeHelpers.getSectionTitleStyle(widget.isDarkTheme),
-            ),
-            Spacer(),
-            Text(
-              '${_posts.length} ${_posts.length == 1 ? 'post' : 'post'}',
-              style: TextStyle(
-                color: themeColors.subtitleColor,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-        SizedBox(height: 16),
-
-        // 🆕 NUOVO: Usa MultiSelectPostManager per gestire la selezione multipla
-        MultiSelectPostManager(
-          // ✅ FIX: evita scroll annidato (che interferisce con pull-to-refresh e sezione cartelle)
-          scrollable: false,
-          posts: _posts,
-          isDarkTheme: widget.isDarkTheme,
-          folderService: _folderService,
-          onPostsUpdated: () => _loadPosts(),
-          childBuilder: (post, isSelected, onTap, onLongPress) {
-            return SelectablePostTile(
-              post: post,
-              isSelected: isSelected,
-              isDarkTheme: widget.isDarkTheme,
-              onTap: onTap,
-              onLongPress: onLongPress,
-              child: _buildPostCard(post, themeColors),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  // MODIFIED: Card post con fix per overflow
+  // MODIFIED: Card post con fix per overflow + highlight animato reminder
   Widget _buildPostCard(MockPost post, ThemeColors themeColors) {
-    return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      decoration: ThemeHelpers.getCardDecoration(widget.isDarkTheme).copyWith(
-        color: post.isShared
-            ? (widget.isDarkTheme
-                ? Colors.blue.withOpacity(0.15)
-                : Colors.blue.withOpacity(0.05))
-            : null,
-        border: post.isShared
-            ? Border.all(color: Colors.blue.withOpacity(0.5), width: 1.5)
-            : null,
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Immagine
-              _buildPostImage(post, themeColors),
+    final highlightPost = _showReminderHighlight &&
+        widget.highlightPostId != null &&
+        widget.highlightPostId == post.id;
 
-              SizedBox(width: 12),
+    Widget buildCard({double? pulseValue}) {
+      final pulse = pulseValue ?? 0.0;
+      final BoxDecoration baseDecoration =
+          ThemeHelpers.getCardDecoration(widget.isDarkTheme);
+      final BoxDecoration decoration = highlightPost
+          ? baseDecoration.copyWith(
+              color: Colors.orange.withOpacity(0.18 + pulse * 0.22),
+              border: Border.all(
+                color: Colors.orange.withOpacity(0.7 + pulse * 0.3),
+                width: 2.5 + pulse * 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.orange.withOpacity(0.25 + pulse * 0.35),
+                  blurRadius: 10 + pulse * 12,
+                  spreadRadius: 1 + pulse * 3,
+                ),
+              ],
+            )
+          : baseDecoration.copyWith(
+              color: post.isShared
+                  ? (widget.isDarkTheme
+                      ? Colors.blue.withOpacity(0.15)
+                      : Colors.blue.withOpacity(0.05))
+                  : null,
+              border: post.isShared
+                  ? Border.all(color: Colors.blue.withOpacity(0.5), width: 1.5)
+                  : null,
+            );
+      return Container(
+        key: highlightPost ? _highlightedPostKey : null,
+        margin: EdgeInsets.only(bottom: 12),
+        decoration: decoration,
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Immagine
+                _buildPostImage(post, themeColors),
 
-              // Contenuto testuale (occupa tutto lo spazio disponibile)
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      post.title.isNotEmpty ? post.title : post.description,
-                      style: TextStyle(
-                        color: themeColors.textColor,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        height: 1.3,
+                SizedBox(width: 12),
+
+                // Contenuto testuale (occupa tutto lo spazio disponibile)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        post.title.isNotEmpty ? post.title : post.description,
+                        style: TextStyle(
+                          color: themeColors.textColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
 
-                    SizedBox(height: 8),
-
-                    Text(
-                      post.description.isNotEmpty
-                          ? post.description
-                          : 'Nessuna descrizione disponibile',
-                      style: TextStyle(
-                        color: themeColors.subtitleColor,
-                        fontSize: 14,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-
-                    Spacer(),
-
-                    SizedBox(height: 12),
-
-                    // Data e percorso cartella
-                    Row(
-                      children: [
-                        Icon(Icons.schedule,
-                            color: themeColors.hintColor, size: 14),
-                        SizedBox(width: 4),
-                        Text(
-                          _formatDate(post.savedDate),
-                          style: TextStyle(
-                              color: themeColors.hintColor, fontSize: 12),
-                        ),
-                        SizedBox(width: 12),
-                        Icon(Icons.folder_outlined,
-                            color: themeColors.hintColor, size: 14),
-                        SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            _buildPostBreadcrumb(post.sourceFolder),
-                            style: TextStyle(
-                                color: themeColors.hintColor, fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    SizedBox(height: 6),
-
-                    // Dominio sorgente
-                    Row(
-                      children: [
-                        Icon(Icons.language,
-                            color: themeColors.hintColor, size: 14),
-                        SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            _extractDomain(post.url),
-                            style: TextStyle(
-                                color: themeColors.hintColor, fontSize: 12),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    // Badge "post importato"
-                    if (post.isShared) ...[
                       SizedBox(height: 8),
+
+                      Text(
+                        post.description.isNotEmpty
+                            ? post.description
+                            : 'Nessuna descrizione disponibile',
+                        style: TextStyle(
+                          color: themeColors.subtitleColor,
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+
+                      Spacer(),
+
+                      SizedBox(height: 12),
+
+                      // Data e percorso cartella
                       Row(
                         children: [
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade700.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                  color: Colors.blue.shade400, width: 1),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.download_rounded,
-                                    color: Colors.blue.shade600, size: 11),
-                                SizedBox(width: 4),
-                                Text(
-                                  'post importato',
-                                  style: TextStyle(
-                                    color: Colors.blue.shade600,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                              ],
+                          Icon(Icons.schedule,
+                              color: themeColors.hintColor, size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            _formatDate(post.savedDate),
+                            style: TextStyle(
+                                color: themeColors.hintColor, fontSize: 12),
+                          ),
+                          SizedBox(width: 12),
+                          Icon(Icons.folder_outlined,
+                              color: themeColors.hintColor, size: 14),
+                          SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _buildPostBreadcrumb(post.sourceFolder),
+                              style: TextStyle(
+                                  color: themeColors.hintColor, fontSize: 12),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
                       ),
+
+                      SizedBox(height: 6),
+
+                      // Dominio sorgente
+                      Row(
+                        children: [
+                          Icon(Icons.language,
+                              color: themeColors.hintColor, size: 14),
+                          SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _extractDomain(post.url),
+                              style: TextStyle(
+                                  color: themeColors.hintColor, fontSize: 12),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Badge "post importato"
+                      if (post.isShared) ...[
+                        SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade700.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: Colors.blue.shade400, width: 1),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.download_rounded,
+                                      color: Colors.blue.shade600, size: 11),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'post importato',
+                                    style: TextStyle(
+                                      color: Colors.blue.shade600,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
+                  ),
+                ),
+
+                SizedBox(width: 12),
+
+                // Colonna pulsanti destra — distanze uguali tra i tre
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (_accessService.canManageManualTags)
+                      GestureDetector(
+                        onTap: () =>
+                            _showEditHashtagsDialog(post, themeColors),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: widget.isDarkTheme
+                                ? Colors.grey.shade800
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: Colors.blue.withOpacity(0.5), width: 1.5),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2))
+                            ],
+                          ),
+                          child: Icon(Icons.tag, color: Colors.blue, size: 16),
+                        ),
+                      ),
+                    GestureDetector(
+                      onTap: () => _showPostActionsMenu(post, themeColors),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: widget.isDarkTheme
+                              ? Colors.grey.shade800
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: Colors.blue.withOpacity(0.5), width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 4,
+                                offset: Offset(0, 2))
+                          ],
+                        ),
+                        child:
+                            Icon(Icons.more_vert, color: Colors.blue, size: 16),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => _sharePost(post),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade600,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: widget.isDarkTheme
+                                  ? Colors.white70
+                                  : Colors.white,
+                              width: 1),
+                          boxShadow: [
+                            BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 4,
+                                offset: Offset(0, 1))
+                          ],
+                        ),
+                        child: Icon(Icons.share, color: Colors.white, size: 14),
+                      ),
+                    ),
+                    StreamBuilder(
+                      stream:
+                          ReminderService.instance.getPostReminders(post.id),
+                      builder: (context, snapshot) {
+                        final hasReminder =
+                            (snapshot.data as List?)?.isNotEmpty == true;
+                        return GestureDetector(
+                          onTap: () => _showReminderDialog(post),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: hasReminder
+                                      ? Colors.green.shade600
+                                      : (widget.isDarkTheme
+                                          ? Colors.grey.shade800
+                                          : Colors.white),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: hasReminder
+                                        ? Colors.yellow.shade300
+                                        : Colors.orange.withOpacity(0.7),
+                                    width: hasReminder ? 2 : 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: (hasReminder
+                                              ? Colors.green
+                                              : Colors.black)
+                                          .withOpacity(
+                                              hasReminder ? 0.35 : 0.1),
+                                      blurRadius: hasReminder ? 8 : 4,
+                                      offset: Offset(0, 2),
+                                    )
+                                  ],
+                                ),
+                                child: Icon(
+                                  hasReminder
+                                      ? Icons.notifications_active
+                                      : Icons.notifications_none,
+                                  color: hasReminder
+                                      ? Colors.white
+                                      : Colors.orange,
+                                  size: 16,
+                                ),
+                              ),
+                              if (hasReminder)
+                                Positioned(
+                                  right: -3,
+                                  top: -3,
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      color: Colors.yellow.shade300,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: widget.isDarkTheme
+                                            ? Colors.grey.shade900
+                                            : Colors.white,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                   ],
                 ),
-              ),
-
-              SizedBox(width: 12),
-
-              // Colonna pulsanti destra — distanze uguali tra i tre
-              Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  GestureDetector(
-                    onTap: () => _showEditHashtagsDialog(post, themeColors),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: widget.isDarkTheme
-                            ? Colors.grey.shade800
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.blue.withOpacity(0.5), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 4,
-                              offset: Offset(0, 2))
-                        ],
-                      ),
-                      child: Icon(Icons.tag, color: Colors.blue, size: 16),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => _showPostActionsMenu(post, themeColors),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: widget.isDarkTheme
-                            ? Colors.grey.shade800
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.blue.withOpacity(0.5), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 4,
-                              offset: Offset(0, 2))
-                        ],
-                      ),
-                      child:
-                          Icon(Icons.more_vert, color: Colors.blue, size: 16),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => _sharePost(post),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade600,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: widget.isDarkTheme
-                                ? Colors.white70
-                                : Colors.white,
-                            width: 1),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 4,
-                              offset: Offset(0, 1))
-                        ],
-                      ),
-                      child: Icon(Icons.share, color: Colors.white, size: 14),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => _showReminderDialog(post),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: widget.isDarkTheme
-                            ? Colors.grey.shade800
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                            color: Colors.orange.withOpacity(0.7), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 4,
-                              offset: Offset(0, 2))
-                        ],
-                      ),
-                      child: Icon(Icons.notifications_none,
-                          color: Colors.orange, size: 16),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } // end buildCard
+
+    if (highlightPost) {
+      return AnimatedBuilder(
+        animation: _pulseAnim,
+        builder: (context, _) => buildCard(pulseValue: _pulseAnim.value),
+      );
+    }
+    return buildCard();
   }
 
-  void _showReminderDialog(MockPost post) {
+  Future<void> _showReminderDialog(MockPost post) async {
+    await InterstitialAdService.instance.showReminderSetupGate(context);
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (_) => ReminderDialog.forPost(
         postId: post.id,
         postTitle: post.title,
         postUrl: post.url,
+        postFolderId: post.sourceFolder?.id ?? _currentFolder.id,
         isDarkTheme: widget.isDarkTheme,
       ),
     );
@@ -1191,6 +1497,10 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
   // ✅ DIALOG SENZA PULSANTI: Salvataggio immediato e fix overflow
   void _showEditHashtagsDialog(MockPost post, ThemeColors themeColors) {
+    if (!_accessService.canManageManualTags) {
+      return;
+    }
+
     final TextEditingController hashtagController = TextEditingController();
     List<String> currentTags =
         List.from(post.tags); // Copia modificabile dei tag
@@ -1874,6 +2184,17 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                       } catch (e) {
                         // 🔥 AGGIUNTO gestione errori
                         print('ERRORE: Creazione sottocartella fallita: $e');
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                e.toString().replaceFirst('Exception: ', ''),
+                              ),
+                              backgroundColor: Colors.orange.shade700,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
                         Navigator.pop(context);
                       }
                     }
@@ -2442,6 +2763,13 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         final postToShare = realPosts.firstWhere((p) => p.id == post.id);
         await DataService.instance.sharePost(postToShare, email);
       },
+      canStartShare: () async {
+        return AppAccessService().checkFeatureAvailable(
+          context,
+          'share_post',
+          'Condivisione Post',
+        );
+      },
       systemShareContentBuilder: () async {
         final realPosts = await DataService.instance.getPosts();
         final postToShare = realPosts.firstWhere((p) => p.id == post.id);
@@ -2451,6 +2779,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
             '$link\n\n'
             'Aprilo con SaveIn per salvarlo e ritrovarlo quando vuoi.';
       },
+      previewImageUrl: post.previewStorageUrl ?? post.imageUrl,
     );
   }
 }

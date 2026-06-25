@@ -3,15 +3,19 @@
 // ✨ AGGIORNATO: Ora usa UnifiedFolderManager
 
 import 'package:flutter/material.dart';
-import '../models/folder.dart';
+import 'package:savein/models.dart' show Folder;
+import 'package:savein/models/folder.dart';
 import 'package:savein/data_service.dart';
-import '../services/folder_service.dart';
-import '../services/folder_management_unified.dart'; // ⭐ NUOVO
-import '../services/share_link_service.dart';
+import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/folder_management_unified.dart';
+import 'package:savein/services/access_control_service.dart';
+import 'package:savein/services/reminder_service.dart';
+import 'package:savein/services/interstitial_ad_service.dart';
+import 'package:savein/services/share_link_service.dart';
 import 'package:savein/utils/dialog_helpers.dart';
-import 'custom_bottom_nav.dart';
-import 'post_preview_image.dart';
-import 'reminder_dialog.dart';
+import 'package:savein/widgets/custom_bottom_nav.dart';
+import 'package:savein/widgets/post_preview_image.dart';
+import 'package:savein/widgets/reminder_dialog.dart';
 
 class MockFolderCard extends StatelessWidget {
   final MockFolder folder;
@@ -229,33 +233,74 @@ class MockFolderCard extends StatelessWidget {
                         ),
                       ),
                       SizedBox(height: 8),
-                      GestureDetector(
-                        onTap: () => _showFolderReminderDialog(context),
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          padding: EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade600,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: Colors.white,
-                              width: 1.5,
+                      StreamBuilder(
+                        stream: (folder.id?.isNotEmpty == true)
+                            ? ReminderService.instance
+                                .getFolderReminders(folder.id!)
+                            : const Stream.empty(),
+                        builder: (context, snapshot) {
+                          final hasReminder =
+                              (snapshot.data as List?)?.isNotEmpty == true;
+                          return GestureDetector(
+                            onTap: () => _showFolderReminderDialog(context),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  padding: EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: hasReminder
+                                        ? Colors.green.shade600
+                                        : Colors.orange.shade600,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: hasReminder
+                                          ? Colors.yellow.shade300
+                                          : Colors.white,
+                                      width: hasReminder ? 2 : 1.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: (hasReminder
+                                                ? Colors.green
+                                                : Colors.black)
+                                            .withOpacity(0.35),
+                                        blurRadius: hasReminder ? 9 : 6,
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Icon(
+                                    hasReminder
+                                        ? Icons.notifications_active
+                                        : Icons.notifications_none,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                ),
+                                if (hasReminder)
+                                  Positioned(
+                                    right: -3,
+                                    top: -3,
+                                    child: Container(
+                                      width: 11,
+                                      height: 11,
+                                      decoration: BoxDecoration(
+                                        color: Colors.yellow.shade300,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.35),
-                                blurRadius: 6,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.notifications_none,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
+                          );
+                        },
                       ),
                       SizedBox(height: 8),
                       GestureDetector(
@@ -514,7 +559,10 @@ class MockFolderCard extends StatelessWidget {
     );
   }
 
-  void _showFolderReminderDialog(BuildContext context) {
+  Future<void> _showFolderReminderDialog(BuildContext context) async {
+    await InterstitialAdService.instance.showReminderSetupGate(context);
+    if (!context.mounted) return;
+
     showDialog(
       context: context,
       builder: (_) => ReminderDialog.forFolder(
@@ -550,6 +598,26 @@ class MockFolderCard extends StatelessWidget {
 
   void _shareFolder(BuildContext context) async {
     final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
+    final previewPosts =
+        FolderService().getLastPostsWithImagesForFolder(folder, maxPosts: 4);
+
+    Future<Folder> resolveFolderToShare() async {
+      final folderId = folder.id?.trim();
+      if (folderId == null || folderId.isEmpty) {
+        throw Exception(
+          'Impossibile condividere questa cartella: ID database mancante.',
+        );
+      }
+
+      final realFolders =
+          await DataService.instance.getFolders(forceRefresh: true);
+      return realFolders.firstWhere(
+        (f) => f.id == folderId,
+        orElse: () => throw Exception(
+          'Impossibile condividere "${folder.name}": cartella non trovata nel database.',
+        ),
+      );
+    }
 
     if (context.mounted) {
       DialogHelpers.showShareItemDialog(
@@ -558,21 +626,25 @@ class MockFolderCard extends StatelessWidget {
         'folder',
         folder.name,
         (email) async {
-          final realFolders = await DataService.instance.getFolders();
-          final folderToShare = realFolders
-              .firstWhere((f) => f.id == folder.id || f.name == folder.name);
+          final folderToShare = await resolveFolderToShare();
           await DataService.instance.shareFolder(folderToShare, email);
         },
+        canStartShare: () async {
+          return AppAccessService().checkFeatureAvailable(
+            context,
+            'share_folder',
+            'Condivisione Cartella',
+          );
+        },
         systemShareContentBuilder: () async {
-          final realFolders = await DataService.instance.getFolders();
-          final folderToShare = realFolders
-              .firstWhere((f) => f.id == folder.id || f.name == folder.name);
+          final folderToShare = await resolveFolderToShare();
           final link = await ShareLinkService.instance
               .createFolderShareLink(folderToShare);
           return 'Hai ricevuto una cartella SaveIn: ${folder.name}\n\n'
               '$link\n\n'
               'Aprila con SaveIn per importarla all’istante nella tua raccolta.';
         },
+        folderPreviewPosts: previewPosts,
       );
     }
   }

@@ -3,6 +3,7 @@
 
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -110,6 +111,7 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
           postId: widget.postId,
           localPath: localPath,
           sourceUrl: widget.postUrl,
+          imageUrl: widget.imageUrl,
         );
         if (downloadUrl == null || downloadUrl.trim().isEmpty) return;
 
@@ -162,6 +164,21 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
 
         if (snap.connectionState == ConnectionState.waiting) {
           return _buildPlaceholder();
+        }
+
+        final networkUrl = widget.remoteImageUrl?.trim().isNotEmpty == true
+            ? widget.remoteImageUrl!.trim()
+            : widget.imageUrl?.trim();
+        if (networkUrl != null && networkUrl.isNotEmpty) {
+          return CachedNetworkImage(
+            imageUrl: networkUrl,
+            fit: widget.fit,
+            alignment: Alignment.center,
+            width: double.infinity,
+            height: double.infinity,
+            placeholder: (context, _) => _buildPlaceholder(),
+            errorWidget: (context, _, __) => _buildBrokenImage(),
+          );
         }
 
         return _buildBrokenImage();

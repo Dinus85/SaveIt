@@ -7,10 +7,10 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/folder.dart';
-import '../models.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/models.dart';
 import '../utils/constants.dart';
-import '../data_service.dart' show DataService, DataChangeCallback;
+import 'package:savein/data_service.dart' show DataService, DataChangeCallback;
 import 'simple_analytics_service.dart';
 import '../advanced_analytics_service.dart';
 import 'auth_service.dart';

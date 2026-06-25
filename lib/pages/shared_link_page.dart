@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
+import '../services/access_control_service.dart';
 import '../services/share_link_service.dart';
 import '../utils/theme_helpers.dart';
 
@@ -62,6 +63,16 @@ class _SharedLinkPageState extends State<SharedLinkPage> {
     }
     setState(() => _working = true);
     try {
+      // Controllo limiti dinamici
+      if (mounted) {
+        final canImport = await AppAccessService().checkFeatureAvailable(
+          context,
+          'import_shared',
+          'Importazione Contenuti',
+        );
+        if (!canImport) return;
+      }
+
       if (link.isFolder) {
         await ShareLinkService.instance.importFolder(link);
       } else {

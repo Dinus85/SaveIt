@@ -3,12 +3,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/folder.dart';
-import '../services/folder_service.dart';
-import '../services/sharing_service.dart'; // 🆕 NUOVO: Import per apertura reale
-import '../data_service.dart';
-import '../utils/theme_helpers.dart';
-import '../utils/dialog_helpers.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/sharing_service.dart';
+import 'package:savein/data_service.dart';
+import 'package:savein/utils/theme_helpers.dart';
+import 'package:savein/utils/dialog_helpers.dart';
 
 /// Gestore dello stato per la selezione multipla dei post
 class MultiSelectPostState extends ChangeNotifier {
@@ -97,6 +97,7 @@ class MultiSelectPostManager extends StatefulWidget {
   /// Se `false` la lista diventa non-scrollabile (shrinkWrap) per evitare
   /// conflitti con scroll/RefreshIndicator del parent.
   final bool scrollable;
+  final bool asSliver;
 
   const MultiSelectPostManager({
     Key? key,
@@ -106,6 +107,7 @@ class MultiSelectPostManager extends StatefulWidget {
     required this.onPostsUpdated,
     required this.childBuilder,
     this.scrollable = true,
+    this.asSliver = false,
   }) : super(key: key);
 
   @override
@@ -136,6 +138,31 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.asSliver) {
+      return SliverMainAxisGroup(
+        slivers: [
+          if (_selectionState.isSelectionMode)
+            SliverToBoxAdapter(child: _buildSelectionActionBar()),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final post = widget.posts[index];
+                final isSelected = _selectionState.isSelected(post.id);
+
+                return widget.childBuilder(
+                  post,
+                  isSelected,
+                  () => _handlePostTap(post),
+                  () => _handlePostLongPress(post),
+                );
+              },
+              childCount: widget.posts.length,
+            ),
+          ),
+        ],
+      );
+    }
+
     final list = ListView.builder(
       itemCount: widget.posts.length,
       shrinkWrap: !widget.scrollable,

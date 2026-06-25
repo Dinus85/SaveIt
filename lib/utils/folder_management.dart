@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models/folder.dart';
+import 'package:savein/models/folder.dart';
 import '../utils/constants.dart';
 
 // Utility class per la gestione delle cartelle

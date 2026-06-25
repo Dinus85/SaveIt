@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
-import '../models/folder.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/services/plan_limits_service.dart';
 import '../services/folder_service.dart'; // Import per MockPost
 import 'folder_management.dart';
 
@@ -306,6 +308,9 @@ class DialogHelpers {
     Future<void> Function(String) onShare, {
     String? systemShareContent,
     Future<String> Function()? systemShareContentBuilder,
+    Future<bool> Function()? canStartShare,
+    String? previewImageUrl,
+    List<MockPost> folderPreviewPosts = const [],
   }) {
     final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
@@ -321,6 +326,11 @@ class DialogHelpers {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
+          scrollable: true,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           backgroundColor: backgroundColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -342,10 +352,12 @@ class DialogHelpers {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Condividi "$title" con un altro utente dell\'app tramite email o messaggio.',
-                style:
-                    TextStyle(color: textColor.withOpacity(0.7), fontSize: 14),
+              _ShareDialogPreview(
+                title: title,
+                type: type,
+                isDarkTheme: isDarkTheme,
+                previewImageUrl: previewImageUrl,
+                folderPreviewPosts: folderPreviewPosts,
               ),
               SizedBox(height: 16),
               if (systemShareContent != null ||
@@ -356,6 +368,10 @@ class DialogHelpers {
                     onPressed: isLoading
                         ? null
                         : () async {
+                            final allowed = await (canStartShare?.call() ??
+                                Future.value(true));
+                            if (!allowed) return;
+
                             setDialogState(() {
                               isLoading = true;
                               error = null;
@@ -364,13 +380,31 @@ class DialogHelpers {
                               final content = systemShareContentBuilder != null
                                   ? await systemShareContentBuilder()
                                   : systemShareContent!;
-                              await Share.share(content);
+                              final result = await SharePlus.instance.share(
+                                ShareParams(text: content),
+                              );
+                              if (result.status == ShareResultStatus.success) {
+                                await PlanLimitsService.recordFeatureSuccess(
+                                  type == 'post'
+                                      ? 'share_post'
+                                      : 'share_folder',
+                                );
+                              } else {
+                                if (context.mounted) {
+                                  setDialogState(() {
+                                    isLoading = false;
+                                  });
+                                }
+                                return;
+                              }
                               if (context.mounted) Navigator.pop(context);
                             } catch (e) {
                               if (context.mounted) {
                                 setDialogState(() {
                                   isLoading = false;
-                                  error = 'Errore creazione link';
+                                  error = e
+                                      .toString()
+                                      .replaceFirst('Exception: ', '');
                                 });
                               }
                             }
@@ -450,6 +484,10 @@ class DialogHelpers {
                         return;
                       }
 
+                      final allowed =
+                          await (canStartShare?.call() ?? Future.value(true));
+                      if (!allowed) return;
+
                       setDialogState(() {
                         isLoading = true;
                         error = null;
@@ -475,8 +513,14 @@ class DialogHelpers {
                               error = 'Utente non trovato';
                             } else if (errStr.contains('stesso')) {
                               error = 'Non puoi condividere con te stesso';
+                            } else if (errStr.contains('disabilitata')) {
+                              error =
+                                  e.toString().replaceFirst('Exception: ', '');
                             } else {
-                              error = 'Errore durante la condivisione';
+                              error = e
+                                  .toString()
+                                  .replaceFirst('FirebaseDataException: ', '')
+                                  .replaceFirst('Exception: ', '');
                             }
                           });
                         }
@@ -490,6 +534,185 @@ class DialogHelpers {
         ),
       ),
     );
+  }
+}
+
+class _ShareDialogPreview extends StatelessWidget {
+  final String title;
+  final String type;
+  final bool isDarkTheme;
+  final String? previewImageUrl;
+  final List<MockPost> folderPreviewPosts;
+
+  const _ShareDialogPreview({
+    required this.title,
+    required this.type,
+    required this.isDarkTheme,
+    required this.previewImageUrl,
+    required this.folderPreviewPosts,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor =
+        isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
+    final borderColor = isDarkTheme ? Colors.white12 : Colors.black12;
+    final textColor = isDarkTheme ? Colors.white : Colors.black87;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: type == 'folder'
+                  ? _buildFolderPreview()
+                  : _buildNetworkImage(previewImageUrl),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _truncateTitle(title),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  type == 'folder' ? 'Cartella SaveIn' : 'Post SaveIn',
+                  style: TextStyle(
+                    color: isDarkTheme ? Colors.white70 : Colors.black54,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFolderPreview() {
+    final postsWithImages = folderPreviewPosts
+        .where((post) =>
+            (post.previewStorageUrl ?? post.imageUrl)?.trim().isNotEmpty ==
+            true)
+        .take(4)
+        .toList();
+
+    if (postsWithImages.isEmpty) {
+      return Container(
+        color: Colors.amber.shade100,
+        child: Icon(Icons.folder, color: Colors.amber.shade700, size: 34),
+      );
+    }
+
+    Widget tile(MockPost post) {
+      return _buildNetworkImage(post.previewStorageUrl ?? post.imageUrl);
+    }
+
+    if (postsWithImages.length == 1) return tile(postsWithImages.first);
+    if (postsWithImages.length == 2) {
+      return Row(
+        children: [
+          Expanded(child: tile(postsWithImages[0])),
+          Container(width: 1, color: Colors.white30),
+          Expanded(child: tile(postsWithImages[1])),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: tile(postsWithImages[0])),
+              Container(width: 1, color: Colors.white30),
+              Expanded(child: tile(postsWithImages[1])),
+            ],
+          ),
+        ),
+        Container(height: 1, color: Colors.white30),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: tile(postsWithImages[2])),
+              Container(width: 1, color: Colors.white30),
+              Expanded(
+                child: postsWithImages.length > 3
+                    ? tile(postsWithImages[3])
+                    : Container(
+                        color: Colors.amber.shade100,
+                        child: Icon(
+                          Icons.folder,
+                          color: Colors.amber.shade700,
+                          size: 22,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNetworkImage(String? url) {
+    final imageUrl = url?.trim();
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return _buildFallbackImage();
+    }
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      placeholder: (context, _) => _buildFallbackImage(showLoader: true),
+      errorWidget: (context, _, __) => _buildFallbackImage(),
+    );
+  }
+
+  Widget _buildFallbackImage({bool showLoader = false}) {
+    return Container(
+      color: isDarkTheme ? Colors.grey.shade700 : Colors.grey.shade300,
+      child: Center(
+        child: showLoader
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(
+                type == 'folder' ? Icons.folder : Icons.article,
+                color: isDarkTheme ? Colors.white54 : Colors.black38,
+              ),
+      ),
+    );
+  }
+
+  String _truncateTitle(String value) {
+    final clean = value.trim();
+    if (clean.length <= 20) return clean;
+    return '${clean.substring(0, 20)}...';
   }
 }
 

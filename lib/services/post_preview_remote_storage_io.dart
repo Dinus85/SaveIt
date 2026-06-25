@@ -17,15 +17,43 @@ class PostPreviewRemoteStorage {
   static const int _maxDimension = 512;
   static const int _targetMaxBytes = 100 * 1024; // ~100KB
 
+  /// Cerca un'anteprima gia' salvata in Storage (condivisa tra tutti gli utenti).
+  Future<String?> resolveExistingPreviewUrl({
+    String? sourceUrl,
+    String? imageUrl,
+  }) async {
+    final storage = FirebaseStorage.instance;
+    for (final objectPath in _candidateObjectPaths(
+      sourceUrl: sourceUrl,
+      imageUrl: imageUrl,
+    )) {
+      try {
+        return await storage.ref(objectPath).getDownloadURL();
+      } catch (_) {
+        // Prova il path successivo.
+      }
+    }
+    return null;
+  }
+
   Future<String?> uploadCachedPreview({
     required String userId,
     required String postId,
     required String localPath,
     String? sourceUrl,
+    String? imageUrl,
   }) async {
     if (userId.isEmpty || postId.isEmpty) return null;
     final path = localPath.trim();
     if (path.isEmpty) return null;
+
+    final existing = await resolveExistingPreviewUrl(
+      sourceUrl: sourceUrl,
+      imageUrl: imageUrl,
+    );
+    if (existing != null && existing.trim().isNotEmpty) {
+      return existing.trim();
+    }
 
     try {
       final file = File(path);
@@ -48,6 +76,7 @@ class PostPreviewRemoteStorage {
           userId: userId,
           postId: postId,
           sourceUrl: sourceUrl,
+          imageUrl: imageUrl,
           bytes: original,
           ext: detected.extension,
           contentType: detected.contentType,
@@ -60,6 +89,7 @@ class PostPreviewRemoteStorage {
         userId: userId,
         postId: postId,
         sourceUrl: sourceUrl,
+        imageUrl: imageUrl,
         bytes: bytes,
         ext: '.jpg',
         contentType: 'image/jpeg',
@@ -74,6 +104,7 @@ class PostPreviewRemoteStorage {
     required String userId,
     required String postId,
     required String? sourceUrl,
+    required String? imageUrl,
     required List<int> bytes,
     required String ext,
     required String contentType,
@@ -82,10 +113,13 @@ class PostPreviewRemoteStorage {
     if (bytes.length > _hardMaxBytes) return null;
 
     final storage = FirebaseStorage.instance;
-    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
-    final objectPath = normalizedSourceUrl.isNotEmpty
-        ? 'post_previews/by_url/${_sha256Hex(normalizedSourceUrl)}'
-        : 'users/$userId/post_previews/$postId$ext';
+    final objectPath = _primaryObjectPath(
+      userId: userId,
+      postId: postId,
+      ext: ext,
+      sourceUrl: sourceUrl,
+      imageUrl: imageUrl,
+    );
 
     final ref = storage.ref(objectPath);
     try {
@@ -94,12 +128,17 @@ class PostPreviewRemoteStorage {
       // Il file globale non esiste ancora: lo carichiamo noi.
     }
 
+    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
+    final normalizedImageUrl = _normalizeImageUrl(imageUrl);
     final metadata = SettableMetadata(
       contentType: contentType,
       cacheControl: 'public,max-age=31536000',
       customMetadata: {
         'postId': postId,
-        if (normalizedSourceUrl.isNotEmpty) 'sourceUrlHash': _sha256Hex(normalizedSourceUrl),
+        if (normalizedSourceUrl.isNotEmpty)
+          'sourceUrlHash': _sha256Hex(normalizedSourceUrl),
+        if (normalizedImageUrl.isNotEmpty)
+          'imageUrlHash': _sha256Hex(normalizedImageUrl),
       },
     );
 
@@ -107,11 +146,54 @@ class PostPreviewRemoteStorage {
     return await ref.getDownloadURL();
   }
 
+  List<String> _candidateObjectPaths({
+    String? sourceUrl,
+    String? imageUrl,
+  }) {
+    final paths = <String>[];
+    final normalizedImageUrl = _normalizeImageUrl(imageUrl);
+    if (normalizedImageUrl.isNotEmpty) {
+      paths.add('post_previews/by_image/${_sha256Hex(normalizedImageUrl)}');
+    }
+    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
+    if (normalizedSourceUrl.isNotEmpty) {
+      paths.add('post_previews/by_url/${_sha256Hex(normalizedSourceUrl)}');
+    }
+    return paths;
+  }
+
+  String _primaryObjectPath({
+    required String userId,
+    required String postId,
+    required String ext,
+    String? sourceUrl,
+    String? imageUrl,
+  }) {
+    final normalizedImageUrl = _normalizeImageUrl(imageUrl);
+    if (normalizedImageUrl.isNotEmpty) {
+      return 'post_previews/by_image/${_sha256Hex(normalizedImageUrl)}';
+    }
+    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
+    if (normalizedSourceUrl.isNotEmpty) {
+      return 'post_previews/by_url/${_sha256Hex(normalizedSourceUrl)}';
+    }
+    return 'users/$userId/post_previews/$postId$ext';
+  }
+
   String _normalizeSourceUrl(String? value) {
     final raw = (value ?? '').trim();
     if (raw.isEmpty) return '';
     final uri = Uri.tryParse(raw);
-    if (uri == null || uri.host.isEmpty) return raw;
+    if (uri == null || uri.host.isEmpty) return raw.toLowerCase();
+    final normalized = uri.replace(fragment: '');
+    return normalized.toString().trim().toLowerCase();
+  }
+
+  String _normalizeImageUrl(String? value) {
+    final raw = (value ?? '').trim();
+    if (raw.isEmpty) return '';
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.host.isEmpty) return raw.toLowerCase();
     final normalized = uri.replace(fragment: '');
     return normalized.toString().trim().toLowerCase();
   }

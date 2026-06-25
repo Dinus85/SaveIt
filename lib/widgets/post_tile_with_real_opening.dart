@@ -3,10 +3,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/folder.dart';
-import '../services/folder_service.dart';
-import '../services/sharing_service.dart';
-import '../data_service.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/sharing_service.dart';
+import 'package:savein/data_service.dart';
 
 /// Widget wrapper che gestisce l'apertura reale dei post con notifiche di aggiornamento ottimistico
 /// 

@@ -17,6 +17,11 @@ class AppNotificationService {
   AppNotificationService._();
 
   static final AppNotificationService instance = AppNotificationService._();
+  static final StreamController<DashboardNotificationPayload>
+      _dashboardNotificationOpenController =
+      StreamController<DashboardNotificationPayload>.broadcast();
+  static final List<DashboardNotificationPayload> _pendingOpenedPayloads =
+      <DashboardNotificationPayload>[];
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -26,6 +31,17 @@ class AppNotificationService {
 
   static void registerBackgroundHandler() {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  }
+
+  Stream<DashboardNotificationPayload> get dashboardNotificationOpenedStream =>
+      _dashboardNotificationOpenController.stream;
+
+  List<DashboardNotificationPayload> takePendingOpenedPayloads() {
+    final pending = List<DashboardNotificationPayload>.from(
+      _pendingOpenedPayloads,
+    );
+    _pendingOpenedPayloads.clear();
+    return pending;
   }
 
   Future<void> initializeForUser(String userId) async {
@@ -45,6 +61,7 @@ class AppNotificationService {
     _messageOpenedSubscription =
         FirebaseMessaging.onMessageOpenedApp.listen((message) {
       debugPrint('Push opened app: ${message.data}');
+      _handleNotificationPayload(message.data);
     });
 
     unawaited(_messaging
@@ -56,11 +73,41 @@ class AppNotificationService {
         .then((message) {
       if (message != null) {
         debugPrint('Push launched app: ${message.data}');
+        _handleNotificationPayload(message.data);
       }
     }).catchError((Object error) {
       debugPrint('Initial push message skipped: $error');
       return null;
     }));
+  }
+
+  void _handleNotificationPayload(Map<String, dynamic> data) {
+    debugPrint('Handling notification payload: $data');
+    final type = (data['type'] ?? '').toString();
+    if (type != 'dashboard_notification') return;
+
+    final title = (data['title'] ??
+            data['notificationTitle'] ??
+            data['campaignTitle'] ??
+            '')
+        .toString()
+        .trim();
+    final body =
+        (data['body'] ?? data['notificationBody'] ?? data['campaignBody'] ?? '')
+            .toString()
+            .trim();
+    final campaignId = (data['campaignId'] ?? '').toString().trim();
+    if (title.isEmpty && body.isEmpty && campaignId.isEmpty) return;
+
+    final payload = DashboardNotificationPayload(
+      title: title,
+      body: body,
+      campaignId: campaignId,
+    );
+    if (!_dashboardNotificationOpenController.hasListener) {
+      _pendingOpenedPayloads.add(payload);
+    }
+    _dashboardNotificationOpenController.add(payload);
   }
 
   Future<void> _requestPermissionIfNeeded() async {
@@ -111,9 +158,36 @@ class AppNotificationService {
         .collection('users')
         .doc(userId)
         .collection('notifications')
-        .where('readAt', isNull: true)
-        .limit(10)
+        .orderBy('createdAt', descending: true)
+        .limit(20)
         .snapshots();
+  }
+
+  Future<DashboardNotificationPayload?> loadCampaignPayload(
+    String campaignId,
+  ) async {
+    final id = campaignId.trim();
+    if (id.isEmpty) return null;
+    try {
+      final snap = await _firestore
+          .collection('notification_campaigns')
+          .doc(id)
+          .get()
+          .timeout(const Duration(seconds: 6));
+      final data = snap.data();
+      if (data == null) return null;
+      final title = (data['title'] ?? '').toString().trim();
+      final body = (data['body'] ?? '').toString().trim();
+      if (title.isEmpty && body.isEmpty) return null;
+      return DashboardNotificationPayload(
+        title: title,
+        body: body,
+        campaignId: id,
+      );
+    } catch (e) {
+      debugPrint('Campaign notification payload unavailable: $e');
+      return null;
+    }
   }
 
   Future<void> markAsRead({
@@ -156,7 +230,9 @@ class AppNotificationListener extends StatefulWidget {
 
 class _AppNotificationListenerState extends State<AppNotificationListener> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subscription;
+  StreamSubscription<DashboardNotificationPayload>? _pushOpenSubscription;
   final Set<String> _shownNotificationIds = <String>{};
+  final Set<String> _shownCampaignIds = <String>{};
   bool _dialogShowing = false;
 
   @override
@@ -176,12 +252,22 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
   }
 
   Future<void> _initialize() async {
+    _pushOpenSubscription?.cancel();
+    _pushOpenSubscription = AppNotificationService
+        .instance.dashboardNotificationOpenedStream
+        .listen(_handlePushOpenedPayload, onError: (Object error) {
+      debugPrint('Push notification open stream failed: $error');
+    });
     _subscription = AppNotificationService.instance
         .unreadNotificationsStream(widget.userId)
         .listen(_handleSnapshot, onError: (Object error) {
       debugPrint('In-app notification stream failed: $error');
     });
     unawaited(AppNotificationService.instance.initializeForUser(widget.userId));
+    final pending = AppNotificationService.instance.takePendingOpenedPayloads();
+    for (final payload in pending) {
+      unawaited(_handlePushOpenedPayload(payload));
+    }
   }
 
   void _handleSnapshot(QuerySnapshot<Map<String, dynamic>> snapshot) {
@@ -199,14 +285,40 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
       }
     } catch (_) {}
 
-    for (final change in snapshot.docChanges) {
-      if (change.type != DocumentChangeType.added) continue;
-      final doc = change.doc;
-      if (_shownNotificationIds.contains(doc.id)) continue;
-      _shownNotificationIds.add(doc.id);
-      _showNotificationDialog(doc);
-      break;
+    final docs = snapshot.docs.where((doc) {
+      final data = doc.data();
+      return data['readAt'] == null;
+    }).toList();
+    if (docs.isEmpty) return;
+
+    // Mostriamo la più recente non letta
+    final doc = docs.first;
+    if (_shownNotificationIds.contains(doc.id)) return;
+    _shownNotificationIds.add(doc.id);
+    _showNotificationDialog(doc);
+  }
+
+  Future<void> _handlePushOpenedPayload(
+    DashboardNotificationPayload payload,
+  ) async {
+    if (!mounted) return;
+    if (payload.campaignId.isNotEmpty &&
+        _shownCampaignIds.contains(payload.campaignId)) {
+      return;
     }
+
+    var effectivePayload = payload;
+    if (effectivePayload.title.isEmpty && effectivePayload.body.isEmpty) {
+      final loaded = await AppNotificationService.instance
+          .loadCampaignPayload(effectivePayload.campaignId);
+      if (loaded == null) return;
+      effectivePayload = loaded;
+    }
+    if (!mounted) return;
+    if (effectivePayload.campaignId.isNotEmpty) {
+      _shownCampaignIds.add(effectivePayload.campaignId);
+    }
+    await _showNotificationPayloadDialog(effectivePayload);
   }
 
   Future<void> _showNotificationDialog(
@@ -217,19 +329,14 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
     final body = (data['body'] as String?)?.trim();
     if (title?.isNotEmpty != true && body?.isNotEmpty != true) return;
 
-    _dialogShowing = true;
     try {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(title?.isNotEmpty == true ? title! : 'Notifica'),
-          content: Text(body?.isNotEmpty == true ? body! : ''),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
+      if (!mounted) return;
+
+      await _showNotificationPayloadDialog(
+        DashboardNotificationPayload(
+          title: title ?? '',
+          body: body ?? '',
+          campaignId: (data['campaignId'] ?? '').toString(),
         ),
       );
 
@@ -239,6 +346,51 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
       );
     } catch (e) {
       debugPrint('In-app notification dialog failed: $e');
+    }
+  }
+
+  Future<void> _showNotificationPayloadDialog(
+    DashboardNotificationPayload payload,
+  ) async {
+    if (_dialogShowing || !mounted) return;
+    _dialogShowing = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          title: Row(
+            children: [
+              const Icon(Icons.notifications_active, color: Colors.orange),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  payload.title.isNotEmpty ? payload.title : 'Notifica',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            payload.body,
+            style: const TextStyle(fontSize: 16),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.orange.shade700,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      debugPrint('Dashboard notification dialog failed: $e');
     } finally {
       _dialogShowing = false;
     }
@@ -247,9 +399,22 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
   @override
   void dispose() {
     _subscription?.cancel();
+    _pushOpenSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+class DashboardNotificationPayload {
+  final String title;
+  final String body;
+  final String campaignId;
+
+  const DashboardNotificationPayload({
+    required this.title,
+    required this.body,
+    required this.campaignId,
+  });
 }

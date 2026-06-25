@@ -6,8 +6,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../data_service.dart';
-import '../models.dart';
+import 'package:savein/data_service.dart';
+import 'package:savein/models.dart';
 import '../services/auth_service.dart';
 
 /// Status della migrazione

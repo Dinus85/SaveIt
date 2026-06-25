@@ -3,7 +3,8 @@ import '../services/auth_service.dart';
 import '../services/sharing_service.dart';
 import '../services/migration_service.dart';
 import '../pages/login_page.dart';
-import '../models.dart'; // Per User
+import 'package:savein/models.dart'; // Per User
+import '../pages/auth_wrapper.dart';
 import '../main.dart';
 
 // MigrationWidget completo
@@ -684,101 +685,6 @@ class AuthWrapper extends StatelessWidget {
 }
 
 // LOGOUT BUTTON MIGLIORATO
-class LogoutButton extends StatelessWidget {
-  final VoidCallback? onLogoutComplete;
-
-  const LogoutButton({Key? key, this.onLogoutComplete}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      onPressed: () => _showLogoutDialog(context),
-      icon: Icon(Icons.logout, color: Colors.red),
-      tooltip: 'Logout',
-    );
-  }
-
-  void _showLogoutDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.logout, color: Colors.red, size: 24),
-            SizedBox(width: 12),
-            Text(
-              'Logout',
-              style:
-                  TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Sei sicuro di voler uscire dall\'app?',
-              style: TextStyle(color: Colors.black54),
-            ),
-            SizedBox(height: 12),
-            if (AuthService().currentUser != null)
-              Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.person, color: Colors.blue, size: 16),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        AuthService().currentUser!.email,
-                        style: TextStyle(
-                          color: Colors.blue,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Annulla', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-
-              // LOGOUT REATTIVO - Il wrapper si aggiornerà automaticamente
-              await AuthService().logout();
-
-              // Callback opzionale
-              onLogoutComplete?.call();
-
-              // NON serve più navigazione manuale - AuthWrapper è reattivo!
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child:
-                Text('Logout', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // AUTH GUARD MIGLIORATO
 class AuthGuard {

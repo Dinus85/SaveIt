@@ -2,9 +2,9 @@
 // Modelli di supporto per FolderService
 
 import 'package:flutter/material.dart';
-import '../models/folder.dart';
+import 'package:savein/models/folder.dart';
 
-import '../models.dart'; // Importa MockPost e MockFolder da qui
+import 'package:savein/models.dart'; // Importa MockPost e MockFolder da qui
 
 // ============================================================================
 // ENUMS E MODELLI DI STATO

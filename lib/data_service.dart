@@ -6,17 +6,16 @@
 // ðŸ”§ FIX PARENTID: Aggiunto supporto completo per parentId nelle cartelle
 // ðŸŽ¯ FIX CACHE VUOTA: Invalida cache posts vuota per forzare fetch Firebase
 
-import 'dart:convert';
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'models.dart';
-import 'services/firebase_data_service.dart';
-import 'services/auth_service.dart';
-import 'services/post_preview_cache.dart';
-import 'services/post_preview_remote_storage.dart';
+import 'package:savein/models.dart';
+import 'package:savein/services/firebase_data_service.dart';
+import 'package:savein/services/auth_service.dart';
+import 'package:savein/services/plan_limits_service.dart';
+import 'package:savein/services/post_preview_cache.dart';
+import 'package:savein/services/post_preview_remote_storage.dart';
 
 /// Exception per errori di autenticazione
 class AuthenticationRequiredException implements Exception {
@@ -338,10 +337,12 @@ class DataService {
 
     if (folders) {
       _userFoldersCache.remove(userId);
+      _foldersInFlight.clear();
     }
 
     if (posts) {
       _userPostsCache.remove(userId);
+      _postsInFlight.clear();
     }
 
     if (folders || posts) {
@@ -406,9 +407,13 @@ class DataService {
       }
 
       // Esegui operazione Firebase (sempre per operazioni di scrittura)
-      if (kDebugMode) print('DEBUG: DataService - Eseguendo firebaseOperation() per $operationName');
+      if (kDebugMode)
+        print(
+            'DEBUG: DataService - Eseguendo firebaseOperation() per $operationName');
       final result = await firebaseOperation();
-      if (kDebugMode) print('DEBUG: DataService - firebaseOperation() completata per $operationName');
+      if (kDebugMode)
+        print(
+            'DEBUG: DataService - firebaseOperation() completata per $operationName');
       return result;
     } catch (e) {
       if (kDebugMode) {
@@ -494,48 +499,52 @@ class DataService {
     }
 
     final folderFuture = _executeWithOptimizedCache<List<Folder>>(
-        () async {
-          if (kDebugMode) print('DEBUG: DataService - Chiamando _firebaseService.getFolders()');
-          final folders =
-              await _firebaseService.getFolders(forceRefresh: forceRefresh);
-          if (kDebugMode) print('DEBUG: DataService - _firebaseService.getFolders() ritornato ${folders.length} cartelle');
-          
-          // Aggiorna cache multi-utente
-          _updateUserCache(userId, folders, null);
+      () async {
+        if (kDebugMode)
+          print('DEBUG: DataService - Chiamando _firebaseService.getFolders()');
+        final folders =
+            await _firebaseService.getFolders(forceRefresh: forceRefresh);
+        if (kDebugMode)
+          print(
+              'DEBUG: DataService - _firebaseService.getFolders() ritornato ${folders.length} cartelle');
 
-          // Ordina: cartelle default sempre prime
-          folders.sort((a, b) {
-            if (a.isDefault) return -1;
-            if (b.isDefault) return 1;
-            return a.name.compareTo(b.name);
-          });
+        // Aggiorna cache multi-utente
+        _updateUserCache(userId, folders, null);
 
+        // Ordina: cartelle default sempre prime
+        folders.sort((a, b) {
+          if (a.isDefault) return -1;
+          if (b.isDefault) return 1;
+          return a.name.compareTo(b.name);
+        });
+
+        if (kDebugMode) {
+          print(
+              'DEBUG: DataService - Caricate ${folders.length} cartelle per utente: $userId');
+        }
+        return folders;
+      },
+      () {
+        // Cache operation
+        final cachedFolders = _userFoldersCache[userId];
+        if (cachedFolders != null) {
           if (kDebugMode) {
             print(
-                'DEBUG: DataService - Caricate ${folders.length} cartelle per utente: $userId');
+                'DEBUG: DataService - Cache folders hit per utente $userId (${cachedFolders.length} items)');
           }
-          return folders;
-        },
-        () {
-          // Cache operation
-          final cachedFolders = _userFoldersCache[userId];
-          if (cachedFolders != null) {
-            if (kDebugMode) {
-              print(
-                  'DEBUG: DataService - Cache folders hit per utente $userId (${cachedFolders.length} items)');
-            }
-            return List.from(cachedFolders);
-          }
+          return List.from(cachedFolders);
+        }
 
-          if (kDebugMode) {
-            print('DEBUG: ℹ️ Nessuna cache cartelle, ritorno lista vuota');
-          }
-          return <Folder>[];
-        },
-        'getFolders',
-        allowCache: !forceRefresh && _isFoldersCacheValid(userId),
-      )
-    .whenComplete(() { _foldersInFlight.remove(requestKey); });
+        if (kDebugMode) {
+          print('DEBUG: ℹ️ Nessuna cache cartelle, ritorno lista vuota');
+        }
+        return <Folder>[];
+      },
+      'getFolders',
+      allowCache: !forceRefresh && _isFoldersCacheValid(userId),
+    ).whenComplete(() {
+      _foldersInFlight.remove(requestKey);
+    });
 
     _foldersInFlight[requestKey] = folderFuture;
     return folderFuture;
@@ -781,9 +790,10 @@ class DataService {
   // ====== OPERAZIONI POST OTTIMIZZATE CON FIX COLLEZIONI VUOTE ======
 
   /// Get posts con gestione collezioni vuote - FIX CACHE VUOTA MIGLIORATO
-  Future<List<SavedPost>> getPosts({String? folderId}) async {
+  Future<List<SavedPost>> getPosts(
+      {String? folderId, bool forceRefresh = false}) async {
     final userId = currentUserId!;
-    final allowCache = _isPostsCacheValid(userId);
+    final allowCache = !forceRefresh && _isPostsCacheValid(userId);
 
     // 🔥 Request Collapsing: se c'è già una richiesta identica in corso, restituisci quella
     final requestKey = '${userId}_${folderId ?? "all"}';
@@ -796,79 +806,85 @@ class DataService {
     }
 
     final postFuture = _executeWithOptimizedCache<List<SavedPost>>(
-        () async {
-          try {
-            if (kDebugMode) print('DEBUG: DataService - Chiamando _firebaseService.getPosts(folderId: $folderId)');
-            // FIX: Chiamata Firebase con gestione collezione vuota
-            final posts = await _firebaseService.getPosts(folderId: folderId);
-            if (kDebugMode) print('DEBUG: DataService - _firebaseService.getPosts() ritornato ${posts.length} post');
+      () async {
+        try {
+          if (kDebugMode)
+            print(
+                'DEBUG: DataService - Chiamando _firebaseService.getPosts(folderId: $folderId, forceRefresh: $forceRefresh)');
+          // FIX: Chiamata Firebase con gestione collezione vuota
+          final posts = await _firebaseService.getPosts(
+              folderId: folderId, forceRefresh: forceRefresh);
+          if (kDebugMode)
+            print(
+                'DEBUG: DataService - _firebaseService.getPosts() ritornato ${posts.length} post');
 
-            // Aggiorna cache solo se non filtrato
-            if (folderId == null) {
-              _updateUserCache(userId, null, posts);
-            }
-
-            posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-            if (kDebugMode) {
-              print(
-                  'DEBUG: DataService - Caricati ${posts.length} posts per utente: $userId');
-            }
-
-            return posts;
-          } catch (e) {
-            if (kDebugMode) print('DEBUG: Errore Firebase posts: $e');
-
-            // FIX: Gestisci collezione vuota o non esistente
-            if (_isEmptyCollectionError(e)) {
-              if (kDebugMode) {
-                print(
-                    'DEBUG: Collezione posts vuota o non esistente - restituendo lista vuota');
-              }
-              final emptyPosts = <SavedPost>[];
-
-              // Aggiorna cache con lista vuota
-              if (folderId == null) {
-                _updateUserCache(userId, null, emptyPosts);
-              }
-
-              return emptyPosts;
-            }
-
-            // Re-lancia altri tipi di errore
-            rethrow;
-          }
-        },
-        () {
-          // 🔥 FIX PRINCIPALE: Cache operation migliorata
-          final cachedPosts = _userPostsCache[userId];
-
-          // Se non c'è cache, ritorna lista vuota invece di lanciare eccezione
-          if (cachedPosts == null || cachedPosts.isEmpty) {
-            if (kDebugMode) {
-              print('DEBUG: ℹ️ Nessuna cache post, ritorno lista vuota');
-            }
-            return <SavedPost>[];
-          }
-
-          var posts = List<SavedPost>.from(cachedPosts);
-
-          if (folderId != null) {
-            posts = posts.where((p) => p.folderId == folderId).toList();
+          // Aggiorna cache solo se non filtrato
+          if (folderId == null) {
+            _updateUserCache(userId, null, posts);
           }
 
           posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
           if (kDebugMode) {
             print(
-                'DEBUG: DataService - Cache posts hit per utente $userId (${posts.length} items)');
+                'DEBUG: DataService - Caricati ${posts.length} posts per utente: $userId');
           }
+
           return posts;
-        },
-        'getPosts',
-        allowCache: allowCache,
-      )
-    .whenComplete(() { _postsInFlight.remove(requestKey); });
+        } catch (e) {
+          if (kDebugMode) print('DEBUG: Errore Firebase posts: $e');
+
+          // FIX: Gestisci collezione vuota o non esistente
+          if (_isEmptyCollectionError(e)) {
+            if (kDebugMode) {
+              print(
+                  'DEBUG: Collezione posts vuota o non esistente - restituendo lista vuota');
+            }
+            final emptyPosts = <SavedPost>[];
+
+            // Aggiorna cache con lista vuota
+            if (folderId == null) {
+              _updateUserCache(userId, null, emptyPosts);
+            }
+
+            return emptyPosts;
+          }
+
+          // Re-lancia altri tipi di errore
+          rethrow;
+        }
+      },
+      () {
+        // 🔥 FIX PRINCIPALE: Cache operation migliorata
+        final cachedPosts = _userPostsCache[userId];
+
+        // Se non c'è cache, ritorna lista vuota invece di lanciare eccezione
+        if (cachedPosts == null || cachedPosts.isEmpty) {
+          if (kDebugMode) {
+            print('DEBUG: ℹ️ Nessuna cache post, ritorno lista vuota');
+          }
+          return <SavedPost>[];
+        }
+
+        var posts = List<SavedPost>.from(cachedPosts);
+
+        if (folderId != null) {
+          posts = posts.where((p) => p.folderId == folderId).toList();
+        }
+
+        posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+        if (kDebugMode) {
+          print(
+              'DEBUG: DataService - Cache posts hit per utente $userId (${posts.length} items)');
+        }
+        return posts;
+      },
+      'getPosts',
+      allowCache: allowCache,
+    ).whenComplete(() {
+      _postsInFlight.remove(requestKey);
+    });
 
     _postsInFlight[requestKey] = postFuture;
     return postFuture;
@@ -961,10 +977,12 @@ class DataService {
             title: post.title,
             description: post.description,
             imageUrl: post.imageUrl,
+            previewStorageUrl: post.previewStorageUrl,
             creatorName: post.creatorName,
             creatorUsername: post.creatorUsername,
             tags: post.tags,
             folderId: post.folderId,
+            isShared: post.isShared,
           );
         } else {
           await _firebaseService.updatePost(post);
@@ -1025,8 +1043,12 @@ class DataService {
             'DEBUG: DataService - Aggiungendo post appena creato alla cache per aggiornamento ottimistico');
         addPostToCache(post);
 
-        // 🔥 NUOVO: Cache persistente anteprima (in background, non blocca)
-        _cachePostPreviewInBackground(post);
+        // Evita re-upload per contenuti importati: usa la cache remota condivisa.
+        if (isShared) {
+          _warmSharedPostPreviewInBackground(post);
+        } else {
+          _cachePostPreviewInBackground(post);
+        }
 
         print(
             'DEBUG: DataService (FASE 8) - Post creato: ${post.title} (ID: ${post.id}) per utente: $userId');
@@ -1098,42 +1120,140 @@ class DataService {
       final userId = currentUserId;
       if (userId != null && userId.isNotEmpty) {
         unawaited(
-          Future.microtask(() async {
-            try {
-              final cache = const PostPreviewCache();
-              await cache.ensureCachedPreview(
-                postId: post.id,
-                imageUrl: remoteUrl,
-                fallbackImageUrl: imageUrl,
-              );
-              final localPath = await cache.getCachedPreviewPath(post.id);
-              if (localPath == null) return;
-
-              final uploadedRemoteUrl =
-                  await const PostPreviewRemoteStorage().uploadCachedPreview(
-                userId: userId,
-                postId: post.id,
-                localPath: localPath,
-                sourceUrl: post.url,
-              );
-              if (uploadedRemoteUrl == null ||
-                  uploadedRemoteUrl.trim().isEmpty) {
-                return;
-              }
-
-              final updatedPost = post.copyWith(
-                previewStorageUrl: uploadedRemoteUrl.trim(),
-                updatedAt: DateTime.now(),
-              );
-              await _firebaseService.updatePost(updatedPost);
-              addPostToCache(updatedPost);
-            } catch (e) {
-              print('DEBUG: Upload preview remoto fallito per ${post.id}: $e');
-            }
-          }),
+          Future.microtask(
+              () => _ensureRemotePreviewForPost(post, userId: userId)),
         );
       }
     }
+  }
+
+  void _warmSharedPostPreviewInBackground(SavedPost post) {
+    if (post.id.isEmpty) return;
+
+    unawaited(
+      Future(() async {
+        try {
+          final resolved = await resolveSharedPostPreview(
+            previewStorageUrl: post.previewStorageUrl,
+            postUrl: post.url,
+            imageUrl: post.imageUrl,
+          );
+          final remoteUrl = resolved ?? post.imageUrl;
+          if (remoteUrl == null || remoteUrl.trim().isEmpty) return;
+
+          await const PostPreviewCache().ensureCachedPreview(
+            postId: post.id,
+            imageUrl: remoteUrl,
+            fallbackImageUrl: post.imageUrl,
+          );
+
+          final resolvedTrimmed = resolved?.trim();
+          if (resolvedTrimmed != null &&
+              resolvedTrimmed.isNotEmpty &&
+              resolvedTrimmed != post.previewStorageUrl?.trim()) {
+            final updatedPost = post.copyWith(
+              previewStorageUrl: resolvedTrimmed,
+              updatedAt: DateTime.now(),
+            );
+            await _firebaseService.updatePost(updatedPost);
+            addPostToCache(updatedPost);
+          }
+        } catch (_) {}
+      }),
+    );
+  }
+
+  Future<String?> _resolvePreviewStorageUrl({
+    String? previewStorageUrl,
+    String? postUrl,
+    String? imageUrl,
+  }) {
+    return resolveSharedPostPreview(
+      previewStorageUrl: previewStorageUrl,
+      postUrl: postUrl,
+      imageUrl: imageUrl,
+    );
+  }
+
+  Future<String?> _ensureRemotePreviewForPost(
+    SavedPost post, {
+    required String userId,
+  }) async {
+    if (post.id.isEmpty) return post.previewStorageUrl;
+
+    final existing = await _resolvePreviewStorageUrl(
+      previewStorageUrl: post.previewStorageUrl,
+      postUrl: post.url,
+      imageUrl: post.imageUrl,
+    );
+    if (existing != null && existing.trim().isNotEmpty) {
+      if (post.previewStorageUrl?.trim() != existing.trim()) {
+        final updatedPost = post.copyWith(
+          previewStorageUrl: existing.trim(),
+          updatedAt: DateTime.now(),
+        );
+        await _firebaseService.updatePost(updatedPost);
+        addPostToCache(updatedPost);
+      }
+      return existing.trim();
+    }
+
+    final imageUrl = post.imageUrl?.trim();
+    final remoteUrl = post.previewStorageUrl?.trim();
+    if ((imageUrl?.isNotEmpty != true) && (remoteUrl?.isNotEmpty != true)) {
+      return post.previewStorageUrl;
+    }
+
+    try {
+      final cache = const PostPreviewCache();
+      await cache.ensureCachedPreview(
+        postId: post.id,
+        imageUrl: remoteUrl,
+        fallbackImageUrl: imageUrl,
+      );
+      final localPath = await cache.getCachedPreviewPath(post.id);
+      if (localPath == null) return post.previewStorageUrl;
+
+      final uploadedRemoteUrl =
+          await const PostPreviewRemoteStorage().uploadCachedPreview(
+        userId: userId,
+        postId: post.id,
+        localPath: localPath,
+        sourceUrl: post.url,
+        imageUrl: post.imageUrl,
+      );
+      if (uploadedRemoteUrl == null || uploadedRemoteUrl.trim().isEmpty) {
+        return post.previewStorageUrl;
+      }
+
+      final updatedPost = post.copyWith(
+        previewStorageUrl: uploadedRemoteUrl.trim(),
+        updatedAt: DateTime.now(),
+      );
+      await _firebaseService.updatePost(updatedPost);
+      addPostToCache(updatedPost);
+      return uploadedRemoteUrl.trim();
+    } catch (e) {
+      print('DEBUG: Upload preview remoto fallito per ${post.id}: $e');
+      return post.previewStorageUrl;
+    }
+  }
+
+  Future<SavedPost> _ensureStableRemotePreviewForSharing(SavedPost post) async {
+    if (post.id.isEmpty) return post;
+
+    final userId = currentUserId;
+    if (userId == null || userId.isEmpty) return post;
+
+    final resolvedUrl = await _ensureRemotePreviewForPost(
+      post,
+      userId: userId,
+    );
+    if (resolvedUrl == null || resolvedUrl.trim().isEmpty) {
+      return post;
+    }
+
+    return post.copyWith(previewStorageUrl: resolvedUrl.trim());
   }
 
   /// Backup "best-effort" delle anteprime su storage remoto (utile per Instagram).
@@ -1201,6 +1321,8 @@ class DataService {
           userId: userId,
           postId: post.id,
           localPath: localPath,
+          sourceUrl: post.url,
+          imageUrl: post.imageUrl,
         );
 
         if (downloadUrl == null || downloadUrl.trim().isEmpty) {
@@ -1442,8 +1564,17 @@ class DataService {
     return await _firebaseService.findUserByEmail(email);
   }
 
+  Future<void> _ensureShareFeatureEnabled(
+    String feature,
+    String featureName,
+  ) async {
+    await PlanLimitsService.consumeOrThrow(feature, featureName: featureName);
+  }
+
   /// Condivide un post con un altro utente
   Future<void> sharePost(SavedPost post, String recipientEmail) async {
+    await _ensureShareFeatureEnabled('share_post', 'Condivisione Post');
+
     final recipient = await findUserByEmail(recipientEmail);
     if (recipient == null) {
       throw Exception('Utente con email $recipientEmail non trovato');
@@ -1453,16 +1584,32 @@ class DataService {
       throw Exception('Non puoi condividere con te stesso');
     }
 
+    final postToShare = await _ensureStableRemotePreviewForSharing(post);
+
     await _firebaseService.shareItem(
-      resourceId: post.id,
+      resourceId: postToShare.id,
       type: 'post',
       recipientId: recipient['id'],
-      originalData: post.toFirestoreService(),
+      originalData: {
+        'url': postToShare.url,
+        'title': postToShare.title,
+        'description': postToShare.description,
+        'imageUrl': postToShare.imageUrl,
+        'creatorName': postToShare.creatorName,
+        'creatorUsername': postToShare.creatorUsername,
+        'previewStorageUrl': postToShare.previewStorageUrl,
+        'tags': postToShare.tags,
+        'folderId': postToShare.folderId,
+        'isShared': postToShare.isShared,
+      },
     );
+    await PlanLimitsService.recordFeatureSuccess('share_post');
   }
 
   /// Condivide una cartella con un altro utente
   Future<void> shareFolder(Folder folder, String recipientEmail) async {
+    await _ensureShareFeatureEnabled('share_folder', 'Condivisione Cartella');
+
     final recipient = await findUserByEmail(recipientEmail);
     if (recipient == null) {
       throw Exception('Utente con email $recipientEmail non trovato');
@@ -1472,13 +1619,18 @@ class DataService {
       throw Exception('Non puoi condividere con te stesso');
     }
 
-    // Per le cartelle, includiamo anche il colore e altre info
     await _firebaseService.shareItem(
       resourceId: folder.id,
       type: 'folder',
       recipientId: recipient['id'],
-      originalData: folder.toFirestoreService(),
+      originalData: {
+        'rootId': folder.id,
+        'name': folder.name,
+        'color': folder.color,
+        'parentId': folder.parentId,
+      },
     );
+    await PlanLimitsService.recordFeatureSuccess('share_folder');
   }
 
   /// Ottiene gli elementi condivisi con l'utente corrente
@@ -1486,50 +1638,682 @@ class DataService {
     return await _firebaseService.getSharedItems();
   }
 
-  /// Accetta un elemento condiviso (lo salva nella propria collezione)
-  Future<void> acceptSharedItem(Map<String, dynamic> sharedItem,
-      {String? targetFolderId}) async {
-    final type = sharedItem['type'];
-    final originalData = sharedItem['originalData'] as Map<String, dynamic>;
-    final ownerName = sharedItem['ownerName'];
+  String? _normalizeFolderParentId(dynamic parentId) {
+    final value = parentId?.toString().trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
 
-    if (type == 'post') {
-      // Trova la cartella di destinazione reale
-      String finalFolderId = targetFolderId ?? '';
-
-      if (finalFolderId.isEmpty || finalFolderId == 'all_folder') {
-        final folders = await getFolders();
-        finalFolderId = folders.firstWhere((f) => f.isDefault).id;
+  List<Map<String, dynamic>> _dedupeSharedSourceFolders(
+    List<Map<String, dynamic>> sourceFolders,
+  ) {
+    final seen = <String>{};
+    final deduped = <Map<String, dynamic>>[];
+    for (final folder in sourceFolders) {
+      final id = (folder['id'] ?? '').toString();
+      if (id.isNotEmpty) {
+        if (!seen.add(id)) continue;
       }
+      deduped.add(folder);
+    }
+    return deduped;
+  }
 
-      // Crea un nuovo post basato sui dati originali
-      await createPost(
-        url: originalData['url'],
-        title: '[Condiviso da $ownerName] ${originalData['title']}',
-        description: originalData['description'],
-        imageUrl: originalData['imageUrl'],
-        creatorName: originalData['creatorName'],
-        creatorUsername: originalData['creatorUsername'],
-        tags: List<String>.from(originalData['tags'] ?? [])..add('condiviso'),
-        folderId: finalFolderId,
-        isShared: true, // 🆕 NUOVO
-      );
-    } else if (type == 'folder') {
-      // Crea una nuova cartella basata sui dati originali
-      await createFolder(
-        name: '[Condivisa da $ownerName] ${originalData['name']}',
-        color: originalData['color'],
-        isShared: true, // 🆕 NUOVO
-      );
+  String _sharedImportFolderName(
+    Map<String, dynamic> sourceFolder,
+    Map<String, dynamic> originalData, {
+    required bool isRoot,
+    String? rootTitle,
+  }) {
+    final rawName = sourceFolder['name']?.toString().trim();
+    if (rawName != null && rawName.isNotEmpty) return rawName;
+    if (isRoot) {
+      final rootName = originalData['name']?.toString().trim();
+      if (rootName != null && rootName.isNotEmpty) return rootName;
+      final title = rootTitle?.trim();
+      if (title != null && title.isNotEmpty) return title;
+    }
+    return 'Cartella condivisa';
+  }
+
+  int _sharedSourceFolderDepth(
+    Map<String, dynamic> sourceFolder,
+    List<Map<String, dynamic>> sourceFolders,
+  ) {
+    var depth = 1;
+    var parentId = _normalizeFolderParentId(sourceFolder['parentId']);
+    while (parentId != null && depth < 50) {
+      final parents = sourceFolders
+          .where((candidate) => _sharedFolderId(candidate['id']) == parentId)
+          .toList();
+      if (parents.isEmpty) break;
+      depth++;
+      parentId = _normalizeFolderParentId(parents.first['parentId']);
+    }
+    return depth;
+  }
+
+  String _sharedFolderId(dynamic value) {
+    return value?.toString().trim() ?? '';
+  }
+
+  List<Map<String, dynamic>> _parseSharedPostEntries(dynamic raw) {
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((entry) {
+      final post = Map<String, dynamic>.from(entry);
+      final folderId = _sharedFolderId(post['folderId']);
+      if (folderId.isNotEmpty) {
+        post['folderId'] = folderId;
+      }
+      return post;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _parseSharedFolderEntries(
+    Map<String, dynamic> originalData, {
+    String? resourceId,
+    List<Map<String, dynamic>> sourcePosts = const [],
+  }) {
+    final parsed = <Map<String, dynamic>>[];
+    final raw = originalData['folders'];
+
+    if (kDebugMode) {
+      print(
+          'DEBUG: Parsing folders from share payload. Raw type: ${raw?.runtimeType}');
     }
 
-    // Rimuovi l'elemento dalla lista dei condivisi dopo l'accettazione
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUserId)
-        .collection('shared_items')
-        .doc(sharedItem['id'])
-        .delete();
+    if (raw is List) {
+      for (final entry in raw) {
+        if (entry is! Map) continue;
+        parsed.add(Map<String, dynamic>.from(entry));
+      }
+      if (kDebugMode) {
+        print('DEBUG: Trovate ${parsed.length} cartelle nel payload.');
+      }
+    }
+
+    // Se non ci sono cartelle nel payload, ma abbiamo un rootId, creiamo la cartella root virtuale
+    if (parsed.isEmpty) {
+      final rootId = _sharedFolderId(originalData['rootId']).isNotEmpty
+          ? _sharedFolderId(originalData['rootId'])
+          : (resourceId ?? 'root');
+
+      if (kDebugMode) {
+        print(
+            'DEBUG: Nessuna cartella nel payload, creo root virtuale: $rootId');
+      }
+
+      parsed.add({
+        'id': rootId,
+        'name': originalData['name'] ??
+            originalData['title'] ??
+            'Cartella condivisa',
+        'color': originalData['color'] ?? '#BB86FC',
+        'parentId': null,
+      });
+    }
+
+    return _dedupeSharedSourceFolders(parsed);
+  }
+
+  String _detectSharedRootId(
+    List<Map<String, dynamic>> sourceFolders,
+    Map<String, dynamic> originalData,
+    String? resourceId,
+  ) {
+    var rootId = _sharedFolderId(originalData['rootId']);
+    if (rootId.isEmpty) {
+      rootId = _sharedFolderId(resourceId);
+    }
+    if (rootId.isEmpty && sourceFolders.isNotEmpty) {
+      final detectedRoot = sourceFolders.firstWhere(
+        (folder) => _normalizeFolderParentId(folder['parentId']) == null,
+        orElse: () => sourceFolders.first,
+      );
+      rootId = _sharedFolderId(detectedRoot['id']);
+    }
+    return rootId;
+  }
+
+  void _ensureFoldersReferencedByPosts({
+    required List<Map<String, dynamic>> sourceFolders,
+    required List<Map<String, dynamic>> sourcePosts,
+    required String rootId,
+  }) {
+    final folderById = <String, Map<String, dynamic>>{};
+    for (final folder in sourceFolders) {
+      final id = _sharedFolderId(folder['id']);
+      if (id.isNotEmpty) {
+        folderById[id] = folder;
+      }
+    }
+
+    for (final post in sourcePosts) {
+      final folderId = _sharedFolderId(post['folderId']);
+      if (folderId.isEmpty || folderId == rootId) continue;
+      if (folderById.containsKey(folderId)) continue;
+
+      sourceFolders.add({
+        'id': folderId,
+        'name': 'Cartella condivisa',
+        'color': '#BB86FC',
+        'parentId': rootId.isNotEmpty ? rootId : null,
+      });
+      folderById[folderId] = sourceFolders.last;
+    }
+  }
+
+  void _attachOrphanSharedFolders(
+    List<Map<String, dynamic>> sourceFolders,
+    String rootId,
+  ) {
+    if (rootId.isEmpty) return;
+    final folderIds =
+        sourceFolders.map((f) => _sharedFolderId(f['id'])).toSet();
+
+    for (final sourceFolder in sourceFolders) {
+      final sourceId = _sharedFolderId(sourceFolder['id']);
+      final sourceParentId = _normalizeFolderParentId(sourceFolder['parentId']);
+
+      // Se è la root, non facciamo nulla
+      if (sourceId == rootId) continue;
+
+      // Se non ha parent, o il parent non è tra le cartelle condivise, lo attacchiamo alla root
+      if (sourceParentId == null || !folderIds.contains(sourceParentId)) {
+        if (kDebugMode) {
+          print(
+              'DEBUG: Attaccando cartella orfana "$sourceId" alla root "$rootId"');
+        }
+        sourceFolder['parentId'] = rootId;
+      }
+    }
+  }
+
+  String _uniqueImportFolderName(
+    String baseName,
+    String? parentKey,
+    Set<String> usedNames,
+  ) {
+    var candidate =
+        baseName.trim().isEmpty ? 'Cartella condivisa' : baseName.trim();
+    if (!usedNames.contains(candidate.toLowerCase())) {
+      usedNames.add(candidate.toLowerCase());
+      return candidate;
+    }
+
+    var suffix = 2;
+    while (usedNames.contains('$candidate ($suffix)'.toLowerCase())) {
+      suffix++;
+    }
+    candidate = '$candidate ($suffix)';
+    usedNames.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  Future<Folder> _createFolderForImport({
+    required String name,
+    required String color,
+    String? parentId,
+  }) async {
+    try {
+      return await createFolder(
+        name: name,
+        color: color,
+        parentId: parentId,
+        isShared: true,
+      );
+    } on FirebaseDataException catch (e) {
+      if (!e.message.contains('Esiste già una cartella')) {
+        rethrow;
+      }
+      final folders = await getFolders(forceRefresh: true);
+      final existing = folders.where(
+        (folder) =>
+            !folder.isDefault &&
+            folder.name.toLowerCase() == name.toLowerCase() &&
+            folder.parentId == parentId,
+      );
+      if (existing.isEmpty) rethrow;
+      return existing.first;
+    }
+  }
+
+  Future<Map<String, String>> _createImportedSharedFolders({
+    required List<Map<String, dynamic>> sourceFolders,
+    required String rootId,
+    required String? targetParentFolderId,
+    required Map<String, dynamic> originalData,
+    String? rootTitle,
+  }) async {
+    final idMap = <String, String>{};
+    final pending = List<Map<String, dynamic>>.from(sourceFolders);
+
+    if (kDebugMode) {
+      print(
+          'DEBUG: Inizio creazione ${pending.length} cartelle condivise (rootId: $rootId)');
+    }
+
+    pending.sort((a, b) {
+      final aId = _sharedFolderId(a['id']);
+      final bId = _sharedFolderId(b['id']);
+      if (aId == rootId && bId != rootId) return -1;
+      if (bId == rootId && aId != rootId) return 1;
+      return _sharedSourceFolderDepth(a, sourceFolders)
+          .compareTo(_sharedSourceFolderDepth(b, sourceFolders));
+    });
+
+    final usedNamesByParent = <String, Set<String>>{};
+    var passes = 0;
+    final maxPasses = pending.length + 5; // Aumentato per sicurezza
+
+    while (pending.isNotEmpty && passes < maxPasses) {
+      passes++;
+      var createdThisPass = 0;
+
+      if (kDebugMode) {
+        print(
+            'DEBUG: Passaggio $passes, cartelle rimanenti: ${pending.length}');
+      }
+
+      for (var index = pending.length - 1; index >= 0; index--) {
+        final sourceFolder = pending[index];
+        final sourceId = _sharedFolderId(sourceFolder['id']);
+
+        if (sourceId.isNotEmpty && idMap.containsKey(sourceId)) {
+          pending.removeAt(index);
+          continue;
+        }
+
+        final sourceParentId =
+            _normalizeFolderParentId(sourceFolder['parentId']);
+        final isRoot =
+            rootId.isNotEmpty ? sourceId == rootId : sourceParentId == null;
+
+        String? newParentId;
+        if (isRoot) {
+          newParentId = targetParentFolderId;
+        } else if (sourceParentId != null) {
+          if (!idMap.containsKey(sourceParentId)) {
+            // Parent non ancora creato, aspetta prossimo passaggio
+            continue;
+          }
+          newParentId = idMap[sourceParentId];
+        } else {
+          // Caso fallback per cartelle senza parent esplicito
+          newParentId =
+              rootId.isNotEmpty ? idMap[rootId] : targetParentFolderId;
+        }
+
+        final parentKey = newParentId ?? '__root__';
+        final usedNames =
+            usedNamesByParent.putIfAbsent(parentKey, () => <String>{});
+
+        final folderName = _uniqueImportFolderName(
+          _sharedImportFolderName(
+            sourceFolder,
+            originalData,
+            isRoot: isRoot,
+            rootTitle: rootTitle,
+          ),
+          parentKey,
+          usedNames,
+        );
+
+        if (kDebugMode) {
+          print(
+              'DEBUG: Creando cartella importata "$folderName" (sourceId: $sourceId, parent: $newParentId)');
+        }
+
+        try {
+          final created = await _createFolderForImport(
+            name: folderName,
+            color: (sourceFolder['color'] as String?) ??
+                (originalData['color'] as String?) ??
+                '#BB86FC',
+            parentId: newParentId,
+          );
+
+          if (sourceId.isNotEmpty) {
+            idMap[sourceId] = created.id;
+          }
+          if (isRoot && rootId.isNotEmpty) {
+            idMap[rootId] = created.id;
+          }
+
+          pending.removeAt(index);
+          createdThisPass++;
+        } catch (e) {
+          if (kDebugMode) {
+            print('ERRORE: Creazione cartella "$folderName" fallita: $e');
+          }
+          // Se fallisce, la lasciamo in pending per riprovare o fallire alla fine
+        }
+      }
+
+      // Se in questo passaggio non abbiamo creato nulla ma ci sono ancora cartelle,
+      // potrebbe esserci un problema di dipendenze circolari o parent mancanti.
+      if (createdThisPass == 0 && pending.isNotEmpty) {
+        if (kDebugMode) {
+          print(
+              'WARNING: Nessuna cartella creata nel passaggio $passes, ma pending non vuoto. Tentativo di recupero orfani...');
+        }
+        // Tentativo disperato: attacca tutto quello che resta alla root se possibile
+        for (var folder in pending) {
+          folder['parentId'] = rootId;
+        }
+      }
+    }
+
+    if (pending.isNotEmpty) {
+      if (kDebugMode) {
+        print(
+            'ERRORE: Impossibile creare tutte le cartelle. Rimanenti: ${pending.length}');
+      }
+      // Non blocchiamo tutto l'import se alcune cartelle falliscono,
+      // ma logghiamo l'errore.
+    }
+
+    return idMap;
+  }
+
+  Future<void> _importSharedFolderPosts({
+    required List<Map<String, dynamic>> sourcePosts,
+    required Map<String, String> idMap,
+    required String rootId,
+    required String? importedRootId,
+  }) async {
+    if (kDebugMode) {
+      print('DEBUG: Inizio importazione ${sourcePosts.length} post condivisi');
+    }
+
+    for (final sourcePost in sourcePosts) {
+      final sourceFolderId = _sharedFolderId(sourcePost['folderId']);
+
+      // Risolvi la cartella di destinazione
+      String? destinationFolderId;
+      if (sourceFolderId.isNotEmpty) {
+        destinationFolderId = idMap[sourceFolderId];
+        // Se non è in idMap, ma è la rootId originale, usa importedRootId
+        if (destinationFolderId == null && sourceFolderId == rootId) {
+          destinationFolderId = importedRootId;
+        }
+      }
+
+      // Fallback finale alla root importata se non troviamo la cartella specifica
+      destinationFolderId ??= importedRootId;
+
+      if (destinationFolderId == null || destinationFolderId.isEmpty) {
+        if (kDebugMode) {
+          print(
+              'WARNING: ⚠️ Impossibile trovare destinazione per post "${sourcePost['title']}". Salto.');
+        }
+        continue;
+      }
+
+      if (kDebugMode) {
+        print(
+            'DEBUG: Importando post "${sourcePost['title']}" in cartella $destinationFolderId');
+      }
+
+      try {
+        final resolvedPreview = await resolveSharedPostPreview(
+          previewStorageUrl: sourcePost['previewStorageUrl'] as String?,
+          postUrl: sourcePost['url'] as String?,
+          imageUrl: sourcePost['imageUrl'] as String?,
+        );
+
+        await createPost(
+          url: (sourcePost['url'] as String?) ?? '',
+          title: (sourcePost['title'] as String?) ?? 'Post condiviso',
+          description: (sourcePost['description'] as String?) ?? '',
+          imageUrl: sourcePost['imageUrl'] as String?,
+          creatorName: sourcePost['creatorName'] as String?,
+          creatorUsername: sourcePost['creatorUsername'] as String?,
+          previewStorageUrl: resolvedPreview,
+          tags: List<String>.from(sourcePost['tags'] ?? const [])
+            ..add('condiviso'),
+          folderId: destinationFolderId,
+          isShared: true,
+        );
+      } catch (e) {
+        if (kDebugMode) {
+          print(
+              'ERRORE: Importazione post "${sourcePost['title']}" fallita: $e');
+        }
+      }
+    }
+  }
+
+  /// Risolve l'anteprima di un post condiviso usando storage globale o URL pubblico.
+  Future<String?> resolveSharedPostPreview({
+    String? previewStorageUrl,
+    String? postUrl,
+    String? imageUrl,
+  }) async {
+    try {
+      // 1. Tenta di risolvere tramite PostPreviewRemoteStorage (che gestisce la cache remota globale)
+      final shared =
+          await const PostPreviewRemoteStorage().resolveExistingPreviewUrl(
+        sourceUrl: postUrl,
+        imageUrl: imageUrl,
+      );
+      if (shared != null && shared.trim().isNotEmpty) {
+        return shared.trim();
+      }
+
+      // 2. Se abbiamo un previewStorageUrl, verifichiamo se è accessibile
+      final existingRemote = previewStorageUrl?.trim();
+      if (existingRemote != null && existingRemote.isNotEmpty) {
+        // Se è un URL privato di un altro utente (/users/UID/...), non potremo accedervi
+        if (_isUserScopedPreviewUrl(existingRemote)) {
+          if (kDebugMode) {
+            print(
+                'DEBUG: Preview URL è privato di un altro utente, uso fallback.');
+          }
+          final fallback = imageUrl?.trim();
+          return fallback != null && fallback.isNotEmpty ? fallback : null;
+        }
+        return existingRemote;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('WARNING: Errore durante risoluzione anteprima condivisa: $e');
+      }
+    }
+
+    // 3. Fallback finale all'URL originale dell'immagine
+    final fallback = imageUrl?.trim();
+    return fallback != null && fallback.isNotEmpty ? fallback : null;
+  }
+
+  bool _isUserScopedPreviewUrl(String url) {
+    final normalized = url.toLowerCase();
+    return normalized.contains('/users/') &&
+        normalized.contains('/post_previews/');
+  }
+
+  /// Importa cartella condivisa (sottocartelle + post). Usato da acceptSharedItem e share link.
+  Future<String?> importSharedFolderContent({
+    required Map<String, dynamic> originalData,
+    String? resourceId,
+    String? targetParentFolderId,
+    String? rootTitle,
+  }) async {
+    try {
+      if (kDebugMode) {
+        print('DEBUG: DataService - Inizio importazione cartella condivisa');
+      }
+
+      // 1. Parse dei dati
+      final sourcePosts = _parseSharedPostEntries(originalData['posts']);
+      final sourceFolders = _parseSharedFolderEntries(
+        originalData,
+        resourceId: resourceId,
+        sourcePosts: sourcePosts,
+      );
+      final rootId = _detectSharedRootId(
+        sourceFolders,
+        originalData,
+        resourceId,
+      );
+
+      if (kDebugMode) {
+        print(
+            'DEBUG: DataService - Root rilevata: $rootId, Folders: ${sourceFolders.length}, Posts: ${sourcePosts.length}');
+      }
+
+      // 2. Assicura che tutte le cartelle referenziate dai post siano incluse
+      _ensureFoldersReferencedByPosts(
+        sourceFolders: sourceFolders,
+        sourcePosts: sourcePosts,
+        rootId: rootId,
+      );
+
+      // 3. Attacca cartelle orfane alla root
+      _attachOrphanSharedFolders(sourceFolders, rootId);
+
+      // 4. Valida limiti (opzionale, ma utile per utenti free)
+      try {
+        final folders = await getFolders(forceRefresh: true);
+        Folder? folderById(String? folderId) {
+          if (folderId == null || folderId.isEmpty || folderId == 'all_folder')
+            return null;
+          try {
+            return folders.firstWhere((folder) => folder.id == folderId);
+          } catch (_) {
+            return null;
+          }
+        }
+
+        int folderLevel(String? folderId) {
+          final folder = folderById(folderId);
+          if (folder == null || folder.parentId == null) return 0;
+          return folderLevel(folder.parentId) + 1;
+        }
+
+        final targetParent = folderById(targetParentFolderId);
+        final depthRule = await PlanLimitsService.getRule('folder_levels',
+            forceRefresh: true);
+
+        if (depthRule.limit > 0 && sourceFolders.isNotEmpty) {
+          final targetParentPathLength =
+              targetParent == null ? 0 : folderLevel(targetParent.id) + 1;
+          final maxSourceDepth = sourceFolders
+              .map((sourceFolder) =>
+                  _sharedSourceFolderDepth(sourceFolder, sourceFolders))
+              .fold<int>(
+                  0, (maxDepth, depth) => depth > maxDepth ? depth : maxDepth);
+
+          if (targetParentPathLength + maxSourceDepth > depthRule.limit) {
+            if (kDebugMode) {
+              print(
+                  'WARNING: Limite profondità superato (${targetParentPathLength + maxSourceDepth} > ${depthRule.limit}). Procedo comunque ma alcune cartelle potrebbero essere appiattite.');
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode)
+          print('DEBUG: Errore durante validazione limiti import: $e');
+      }
+
+      // 5. Crea le cartelle
+      final idMap = await _createImportedSharedFolders(
+        sourceFolders: sourceFolders,
+        rootId: rootId,
+        targetParentFolderId: targetParentFolderId,
+        originalData: originalData,
+        rootTitle: rootTitle,
+      );
+
+      final importedRootId = rootId.isNotEmpty
+          ? idMap[rootId]
+          : (idMap.isNotEmpty ? idMap.values.first : targetParentFolderId);
+
+      if (kDebugMode) {
+        print('DEBUG: Cartelle create. Root importata ID: $importedRootId');
+      }
+
+      // 6. Importa i post
+      await _importSharedFolderPosts(
+        sourcePosts: sourcePosts,
+        idMap: idMap,
+        rootId: rootId,
+        importedRootId: importedRootId,
+      );
+
+      // 7. Invalida cache una sola volta alla fine
+      if (kDebugMode) {
+        print(
+            'DEBUG: DataService - Importazione completata, invalidando cache');
+      }
+      invalidateCache(folders: true, posts: true);
+
+      // Notifica i listener del cambiamento strutturale
+      _notifyDataChange('cache_reloaded', {'userId': currentUserId});
+
+      return importedRootId ?? targetParentFolderId;
+    } catch (e) {
+      if (kDebugMode) {
+        print('ERRORE: Importazione cartella fallita: $e');
+      }
+      rethrow;
+    }
+  }
+
+  /// Accetta un elemento condiviso (lo salva nella propria collezione)
+  Future<String?> acceptSharedItem(
+    Map<String, dynamic> sharedItem, {
+    String? targetFolderId,
+    String? targetParentFolderId,
+  }) async {
+    await PlanLimitsService.consumeOrThrow(
+      'import_shared',
+      featureName: 'Importazione Contenuti',
+    );
+
+    final result = await _firebaseService.importSharedResource(
+      shareId: sharedItem['id']?.toString(),
+      targetFolderId: targetFolderId,
+      targetParentFolderId: targetParentFolderId,
+    );
+
+    invalidateCache(folders: true, posts: true);
+    _notifyDataChange('cache_reloaded', {'userId': currentUserId});
+    await PlanLimitsService.recordFeatureSuccess('import_shared');
+
+    return (result['importedRootId'] ??
+            result['importedFolderId'] ??
+            targetFolderId ??
+            targetParentFolderId)
+        ?.toString();
+  }
+
+  /// Importa un contenuto da share link copiandolo lato server dal proprietario.
+  Future<String?> importSharedLinkFromSource(
+    String token, {
+    String? targetFolderId,
+    String? targetParentFolderId,
+  }) async {
+    await PlanLimitsService.consumeOrThrow(
+      'import_shared',
+      featureName: 'Importazione Contenuti',
+    );
+
+    final result = await _firebaseService.importSharedResource(
+      token: token,
+      targetFolderId: targetFolderId,
+      targetParentFolderId: targetParentFolderId,
+    );
+
+    invalidateCache(folders: true, posts: true);
+    _notifyDataChange('cache_reloaded', {'userId': currentUserId});
+    await PlanLimitsService.recordFeatureSuccess('import_shared');
+
+    return (result['importedRootId'] ??
+            result['importedFolderId'] ??
+            targetFolderId ??
+            targetParentFolderId)
+        ?.toString();
   }
 
   /// Rifiuta un elemento condiviso

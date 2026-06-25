@@ -4,15 +4,15 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:receive_intent/receive_intent.dart' as receive_intent;
-import '../models.dart';
-import '../data_service.dart';
-import '../url_metadata_service.dart';
-import '../models/folder.dart';
-import 'access_control_service.dart';
-import 'folder_service.dart';
-import 'interstitial_ad_service.dart';
-import '../widgets/folder_card_selector.dart';
-import '../pages/folder_detail_page.dart'; // NUOVO: Import per navigazione
+import 'package:savein/models.dart';
+import 'package:savein/data_service.dart';
+import 'package:savein/url_metadata_service.dart';
+import 'package:savein/models/folder.dart';
+import 'package:savein/services/access_control_service.dart';
+import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/interstitial_ad_service.dart';
+import 'package:savein/widgets/folder_card_selector.dart';
+import 'package:savein/pages/folder_detail_page.dart';
 
 class SharedContent {
   final String url;
@@ -1772,7 +1772,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
 
           if (mockFolder != null && !mockFolder.isSpecial) {
             final destinationValidation =
-                _accessService.validateFolderDestination(mockFolder);
+                await _accessService.validateFolderDestinationAsync(mockFolder);
             if (destinationValidation != null) {
               throw Exception(destinationValidation);
             }

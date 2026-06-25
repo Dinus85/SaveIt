@@ -2,9 +2,9 @@
 // Analytics avanzati e tracking comportamentale
 
 import '../advanced_analytics_models.dart';
-import '../models.dart';
-import '../data_service.dart';
-import '../models/folder.dart';
+import 'package:savein/models.dart';
+import 'package:savein/data_service.dart';
+import 'package:savein/models/folder.dart';
 
 
 import 'folder_service_models.dart';

@@ -52,7 +52,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   String _searchQuery = '';
   AppUserRole? _roleFilter;
-  bool? _marketingFilter; // ✅ NUOVO: Filtro marketing
+  bool? _marketingFilter;
+  bool _birthdayThisWeekFilter = false;
   _AdminStatsPeriod _statsPeriod = _AdminStatsPeriod.all;
   _AdminDashboardSection _activeSection = _AdminDashboardSection.users;
   String? _selectedUserId;
@@ -67,8 +68,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   bool _sendPushNotification = false;
   bool _sendingNotification = false;
   bool _sendEmailEnabled = false;
+  bool _systemCommunication = false;
   bool _sendingEmail = false;
+  _NotificationMode _notificationMode = _NotificationMode.notification;
   int _emailTemplateIndex = 0;
+  String? _selectedPromoId;
+  String _selectedPromoType = 'birthday'; // 'birthday', 'banner'
   final Set<String> _expandedFolderIds = <String>{};
   final Set<String> _updatingUserIds = <String>{};
   final Set<String> _selectedUserIds = <String>{};
@@ -78,6 +83,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   static const double _storageDownloadFreeBytes = 100 * 1024 * 1024 * 1024;
   static const int _storageUploadOpsFree = 5000;
   static const int _firestoreWritesFreeDaily = 20000;
+  static const String _centralPromoAdminUrl =
+      'https://smart-chef-backend-514524345210.europe-west1.run.app/admin/promo-banners';
+  Map<String, dynamic>? _planLimitsDraft;
+  String? _planLimitsSnapshotKey;
+  String? _planLimitsPendingSavedKey;
+  bool _planLimitsDraftDirty = false;
 
   @override
   void initState() {
@@ -337,6 +348,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   }
 
   bool _matchesFilters(_AdminUserRecord user) {
+    if (user.isPlaceholder) return false;
     final matchesRole = _roleFilter == null || user.role == _roleFilter;
     if (!matchesRole) return false;
 
@@ -344,6 +356,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     final matchesMarketing =
         _marketingFilter == null || user.acceptedMarketing == _marketingFilter;
     if (!matchesMarketing) return false;
+
+    // ✅ NUOVO: Filtro compleanni della settimana
+    if (_birthdayThisWeekFilter) {
+      if (!_isBirthdayThisWeek(user.birthDate)) return false;
+    }
 
     if (_searchQuery.isEmpty) return true;
 
@@ -396,6 +413,120 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       userId,
       () => AuthService().assignRoleToUserId(userId: userId, role: role),
       'Ruolo aggiornato a ${_roleLabel(role)}',
+    );
+  }
+
+  String _premiumExpiryLabel(_AdminUserRecord user) {
+    if (user.role == AppUserRole.admin) return 'Admin';
+    if (user.role != AppUserRole.premium) return '-';
+    final premiumUntil = user.premiumUntil;
+    if (premiumUntil == null) return 'Senza scadenza';
+    final label = _formatDateOnly(premiumUntil);
+    if (premiumUntil.isBefore(DateTime.now())) {
+      return '$label (scaduta)';
+    }
+    return label;
+  }
+
+  Future<void> _editUserPremiumExpiry(_AdminUserRecord user) async {
+    final controller =
+        TextEditingController(text: _formatDateInput(user.premiumUntil));
+    var saving = false;
+
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Scadenza Premium'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user.email,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Data fine Premium',
+                    hintText: 'gg/mm/aaaa',
+                    suffixIcon: Icon(Icons.calendar_month_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                  onTap: saving
+                      ? null
+                      : () => _pickPromotionDate(
+                            controller: controller,
+                            dialogContext: dialogContext,
+                            setDialogState: setDialogState,
+                          ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'La data viene salvata alle 00:00 del giorno selezionato. Se imposti una data, l’utente diventa Premium fino a quella scadenza.',
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed:
+                  saving ? null : () => Navigator.of(dialogContext).pop(),
+              child: const Text('Annulla'),
+            ),
+            TextButton(
+              onPressed: saving
+                  ? null
+                  : () => Navigator.of(dialogContext).pop('clear'),
+              child: const Text('Rimuovi scadenza'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () {
+                      setDialogState(() => saving = true);
+                      Navigator.of(dialogContext).pop('save');
+                    },
+              child: const Text('Salva'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (action == null) return;
+
+    if (action == 'clear') {
+      await _runUserAction(
+        user.id,
+        () => AuthService().updateUserPremiumUntil(
+          userId: user.id,
+          premiumUntil: null,
+        ),
+        'Scadenza Premium rimossa',
+      );
+      return;
+    }
+
+    final parsed = _parseDateInput(controller.text.trim());
+    if (parsed == null) {
+      _showAdminSnackBar('Seleziona una data valida.', isError: true);
+      return;
+    }
+
+    await _runUserAction(
+      user.id,
+      () => AuthService().updateUserPremiumUntil(
+        userId: user.id,
+        premiumUntil: parsed,
+      ),
+      'Scadenza Premium aggiornata',
     );
   }
 
@@ -457,6 +588,21 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     }
 
     await _blockUsers([user], initialReason: user.blockedReason ?? '');
+  }
+
+  bool _isBirthdayThisWeek(DateTime? birthDate) {
+    if (birthDate == null) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final birthdayThisYear = DateTime(now.year, birthDate.month, birthDate.day);
+
+    DateTime nextBirthday = birthdayThisYear;
+    if (birthdayThisYear.isBefore(today)) {
+      nextBirthday = DateTime(now.year + 1, birthDate.month, birthDate.day);
+    }
+
+    final difference = nextBirthday.difference(today).inDays;
+    return difference >= 0 && difference <= 7;
   }
 
   Future<void> _blockUsers(
@@ -650,6 +796,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  Future<void> _openCentralPromoAdmin() async {
+    html.window.open(_centralPromoAdminUrl, '_blank');
+  }
+
+  void _showCentralPromoAdminRequired() {
+    _showAdminSnackBar(
+      'Le promo si attivano dalla gestione centrale SmartChef/SaveIn.',
+      isError: true,
+    );
+  }
+
   Future<void> _sendNotificationToSelected() async {
     if (!_canSendNotifications || _sendingNotification) return;
 
@@ -672,6 +829,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       _showAdminSnackBar('Scegli almeno un canale di invio.', isError: true);
       return;
     }
+    final canProceed = await _confirmUsersWithoutCommunicationConsent(
+      userIds: userIds,
+      channelLabel: 'notifica',
+    );
+    if (!canProceed) return;
 
     setState(() {
       _sendingNotification = true;
@@ -683,27 +845,21 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       var tokenCount = 0;
       final usedPushNotification = _sendPushNotification;
 
-      if (usedPushNotification) {
-        final callable = FirebaseFunctions.instance
-            .httpsCallable('sendDashboardNotification');
-        final result = await callable.call<Map<String, dynamic>>({
-          'title': title,
-          'body': body,
-          'userIds': userIds,
-          'sendInApp': _sendInAppNotification,
-          'sendPush': true,
-        });
-        final data = result.data;
-        recipients = data['recipients'] ?? userIds.length;
-        pushSuccess = data['pushSuccessCount'] ?? 0;
-        tokenCount = data['tokenCount'] ?? 0;
-      } else {
-        await _sendInAppNotificationDirectly(
-          title: title,
-          body: body,
-          userIds: userIds,
-        );
-      }
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('sendDashboardNotification');
+      final result = await callable.call<Map<String, dynamic>>({
+        'title': title,
+        'body': body,
+        'userIds': userIds,
+        'sendInApp': _sendInAppNotification,
+        'sendPush': _sendPushNotification,
+        'systemCommunication': _systemCommunication,
+      });
+      final data = result.data;
+      recipients = data['recipients'] ?? userIds.length;
+      pushSuccess = data['pushSuccessCount'] ?? 0;
+      tokenCount = data['tokenCount'] ?? 0;
+      final skippedConsent = data['skippedConsentCount'] ?? 0;
 
       if (!mounted) return;
       _notificationTitleController.clear();
@@ -712,11 +868,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         _selectedUserIds.clear();
         _sendInAppNotification = false;
         _sendPushNotification = false;
+        _systemCommunication = false;
       });
       _showAdminSnackBar(
         usedPushNotification
-            ? 'Notifica inviata a $recipients utenti. Push consegnate: $pushSuccess/$tokenCount.'
-            : 'Notifica in-app inviata a $recipients utenti.',
+            ? 'Notifica inviata a $recipients utenti. Push consegnate: $pushSuccess/$tokenCount.${skippedConsent > 0 ? ' Saltati per consenso: $skippedConsent.' : ''}'
+            : 'Notifica in-app inviata a $recipients utenti.${skippedConsent > 0 ? ' Saltati per consenso: $skippedConsent.' : ''}',
       );
     } on FirebaseFunctionsException catch (e) {
       if (!mounted) return;
@@ -759,6 +916,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       _showAdminSnackBar('Il corpo email è obbligatorio.', isError: true);
       return;
     }
+    final canProceed = await _confirmUsersWithoutCommunicationConsent(
+      userIds: userIds,
+      channelLabel: 'email',
+    );
+    if (!canProceed) return;
 
     setLocalState(() => _sendingEmail = true);
 
@@ -772,10 +934,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         'userIds': userIds,
         'subject': subject,
         'emailBody': emailBody,
+        'systemCommunication': _systemCommunication,
       });
       final data = Map<String, dynamic>.from(result.data);
       final sent = data['sentCount'] ?? 0;
       final failed = data['failCount'] ?? 0;
+      final skippedConsent = data['skippedConsentCount'] ?? 0;
 
       if (!mounted) return;
       _emailSubjectController.clear();
@@ -783,13 +947,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       setLocalState(() {
         _sendingEmail = false;
         _emailTemplateIndex = 0;
+        _systemCommunication = false;
       });
       setState(() => _selectedUserIds.clear());
 
       _showAdminSnackBar(
         failed == 0
-            ? 'Email inviata a $sent utenti.'
-            : 'Email inviata a $sent utenti. Fallite: $failed.',
+            ? 'Email inviata a $sent utenti.${skippedConsent > 0 ? ' Saltati per consenso: $skippedConsent.' : ''}'
+            : 'Email inviata a $sent utenti. Fallite: $failed.${skippedConsent > 0 ? ' Saltati per consenso: $skippedConsent.' : ''}',
         isError: failed > 0,
       );
     } on FirebaseFunctionsException catch (e) {
@@ -809,33 +974,63 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     }
   }
 
-  Future<void> _sendInAppNotificationDirectly({
-    required String title,
-    required String body,
+  Future<bool> _confirmUsersWithoutCommunicationConsent({
     required List<String> userIds,
+    required String channelLabel,
   }) async {
-    final currentAdmin = AuthService().currentUser;
-    final batch = _firestore.batch();
-    final campaignId = _firestore.collection('users').doc().id;
+    if (_systemCommunication) return true;
 
-    for (final userId in userIds) {
-      final notificationRef = _firestore
+    var blockedCount = 0;
+    final examples = <String>[];
+    const chunkSize = 10;
+    for (var i = 0; i < userIds.length; i += chunkSize) {
+      final chunk = userIds.skip(i).take(chunkSize).toList();
+      final snapshot = await _firestore
           .collection('users')
-          .doc(userId)
-          .collection('notifications')
-          .doc();
-      batch.set(notificationRef, {
-        'title': title,
-        'body': body,
-        'campaignId': campaignId,
-        'createdAt': FieldValue.serverTimestamp(),
-        'readAt': null,
-        'senderId': currentAdmin?.id,
-        'senderEmail': currentAdmin?.email,
-      });
+          .where(FieldPath.documentId, whereIn: chunk)
+          .get();
+      for (final doc in snapshot.docs) {
+        final user = _AdminUserRecord.fromDoc(doc);
+        if (user.acceptedMarketing) continue;
+        blockedCount++;
+        if (examples.length < 5) {
+          examples.add(user.email);
+        }
+      }
     }
 
-    await batch.commit();
+    if (blockedCount == 0 || !mounted) return true;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706)),
+            SizedBox(width: 10),
+            Expanded(child: Text('Consenso comunicazioni mancante')),
+          ],
+        ),
+        content: Text(
+          '$blockedCount utenti selezionati hanno NO alla ricezione comunicazioni.\n\n'
+          'La $channelLabel non verrà inviata a questi utenti, a meno che tu non selezioni il flag:\n'
+          '"Questa comunicazione deve arrivare sempre perché è di sistema".'
+          '${examples.isEmpty ? '' : '\n\nEsempi:\n${examples.join('\n')}'}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text('Continua saltando $blockedCount'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   Future<_AdminUserCloudStats> _loadUserCloudStats(
@@ -1017,9 +1212,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   Future<_GlobalContentStats> _loadGlobalContentStats() async {
     final postsSnapshot = await _firestore.collectionGroup('posts').get();
     final foldersSnapshot = await _firestore.collectionGroup('folders').get();
+    final usersSnapshot = await _firestore.collection('users').get();
     final postsBySource = <String, int>{};
     final postsByCreator = <String, int>{};
+    final tagsByName = <String, int>{};
     final foldersByName = <String, int>{};
+    var freeUsers = 0;
+    var premiumUsers = 0;
+    var adminUsers = 0;
 
     for (final doc in postsSnapshot.docs) {
       final data = doc.data();
@@ -1030,6 +1230,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       if (creator != null) {
         postsByCreator[creator] = (postsByCreator[creator] ?? 0) + 1;
       }
+
+      final tagsValue = data['tags'];
+      if (tagsValue is Iterable) {
+        for (final rawTag in tagsValue) {
+          final tag = rawTag.toString().trim();
+          if (tag.isEmpty) continue;
+          tagsByName[tag] = (tagsByName[tag] ?? 0) + 1;
+        }
+      }
     }
 
     for (final doc in foldersSnapshot.docs) {
@@ -1039,12 +1248,31 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       foldersByName[folderName] = (foldersByName[folderName] ?? 0) + 1;
     }
 
+    for (final doc in usersSnapshot.docs) {
+      final user = _AdminUserRecord.fromDoc(doc);
+      if (user.isPlaceholder) continue;
+      if (user.role == AppUserRole.admin) {
+        adminUsers++;
+      } else if (user.role == AppUserRole.premium &&
+          (user.premiumUntil == null ||
+              !user.premiumUntil!.isBefore(DateTime.now()))) {
+        premiumUsers++;
+      } else {
+        freeUsers++;
+      }
+    }
+
     return _GlobalContentStats(
       totalPosts: postsSnapshot.docs.length,
       totalFolders: foldersSnapshot.docs.length,
+      totalUsers: freeUsers + premiumUsers + adminUsers,
+      freeUsers: freeUsers,
+      premiumUsers: premiumUsers,
+      adminUsers: adminUsers,
       topSources: _topEntries(postsBySource, limit: 10),
       topCreators: _topEntries(postsByCreator, limit: 30),
-      topFolderNames: _topEntries(foldersByName, limit: 10),
+      topTags: _topEntries(tagsByName, limit: 20),
+      topFolderNames: _topEntries(foldersByName, limit: 20),
     );
   }
 
@@ -1060,6 +1288,164 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     if (creatorUsername?.isNotEmpty == true) return creatorUsername;
     if (creatorName?.isNotEmpty == true) return creatorName;
     return null;
+  }
+
+  Future<void> _showBulkBirthdayOfferDialog(
+      List<_AdminUserRecord> users) async {
+    final birthdayUsers =
+        users.where((u) => _isBirthdayThisWeek(u.birthDate)).toList();
+    if (birthdayUsers.isEmpty) {
+      _showAdminSnackBar(
+        'Seleziona almeno un utente con compleanno questa settimana.',
+        isError: true,
+      );
+      return;
+    }
+
+    QuerySnapshot<Map<String, dynamic>> templatesSnapshot;
+    try {
+      templatesSnapshot = await _firestore
+          .collection('birthday_offer_templates')
+          .where('app_id', isEqualTo: 'savein')
+          .get();
+    } catch (e) {
+      if (!mounted) return;
+      _showAdminSnackBar(
+        'Errore caricamento offerte compleanno: $e',
+        isError: true,
+      );
+      return;
+    }
+    final templates = templatesSnapshot.docs
+        .where((doc) => doc.data()['is_active'] != false)
+        .toList();
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Invia Offerta a ${birthdayUsers.length} utenti'),
+        content: SizedBox(
+          width: 460,
+          child: templates.isEmpty
+              ? const Text(
+                  'Non ci sono offerte compleanno SaveIn configurate.\n\n'
+                  'Creale dalla dashboard SmartChef in "Offerte Compleanno" scegliendo App Target: SaveIn.',
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Seleziona il tipo di offerta da inviare:'),
+                    const SizedBox(height: 12),
+                    ...templates.map((doc) {
+                      final data = doc.data();
+                      final premiumDays =
+                          _readInt(data['premium_days'] ?? data['premiumDays']);
+                      final promoCode = (data['promo_code'] as String?)?.trim();
+                      final description =
+                          (data['description'] as String?)?.trim();
+                      final subtitleParts = <String>[
+                        if (premiumDays > 0) '$premiumDays giorni Premium',
+                        if (promoCode?.isNotEmpty == true) 'Codice: $promoCode',
+                      ];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title:
+                              Text((data['name'] as String?) ?? 'Senza nome'),
+                          subtitle: Text(
+                            subtitleParts.isEmpty
+                                ? (description?.isNotEmpty == true
+                                    ? description!
+                                    : 'Offerta senza giorni Premium o codice promo')
+                                : subtitleParts.join(' • '),
+                          ),
+                          trailing: const Icon(Icons.send),
+                          onTap: () {
+                            Navigator.pop(context);
+                            _applyBulkBirthdayOffer(
+                              birthdayUsers,
+                              premiumDays: premiumDays,
+                              promoCode: promoCode,
+                              offerName: (data['name'] as String?) ??
+                                  'Offerta compleanno',
+                            );
+                          },
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annulla'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _readInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  Future<void> _applyBulkBirthdayOffer(
+    List<_AdminUserRecord> users, {
+    required int premiumDays,
+    String? promoCode,
+    required String offerName,
+  }) async {
+    if (premiumDays <= 0 && (promoCode == null || promoCode.isEmpty)) {
+      _showAdminSnackBar(
+        'Questa offerta non ha giorni Premium né codice promo.',
+        isError: true,
+      );
+      return;
+    }
+
+    int successCount = 0;
+    for (final user in users) {
+      try {
+        if (premiumDays > 0) {
+          final currentExpiry = user.premiumUntil ?? DateTime.now();
+          final baseDate = currentExpiry.isAfter(DateTime.now())
+              ? currentExpiry
+              : DateTime.now();
+          final newExpiry = baseDate.add(Duration(days: premiumDays));
+
+          await AuthService().updateUserPremiumUntil(
+            userId: user.id,
+            premiumUntil: newExpiry,
+          );
+        }
+        if (promoCode != null && promoCode.isNotEmpty) {
+          await _firestore.collection('users').doc(user.id).set({
+            'birthdayOffer': {
+              'app_id': 'savein',
+              'offerName': offerName,
+              'promoCode': promoCode,
+              'assignedAt': FieldValue.serverTimestamp(),
+              'assignedBy': AuthService().currentUser?.id,
+            },
+          }, SetOptions(merge: true));
+        }
+        successCount++;
+      } catch (e) {
+        debugPrint('Errore invio offerta a ${user.email}: $e');
+      }
+    }
+
+    if (!mounted) return;
+    _showAdminSnackBar('Offerta "$offerName" inviata a $successCount utenti.');
+    setState(() {
+      _selectedUserIds.clear();
+    });
   }
 
   Widget _buildStatCardsRow({required List<Widget> cards}) {
@@ -1200,14 +1586,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      if (_canGoBackFromAdminSection) ...[
-                        _AdminBackButton(onPressed: _goBackFromAdminSection),
-                        const SizedBox(width: 10),
-                      ],
                       _AdminNavButton(
                         label: 'Home dashboard',
                         selected:
-                            _activeSection == _AdminDashboardSection.users,
+                            _activeSection == _AdminDashboardSection.users ||
+                                _activeSection ==
+                                    _AdminDashboardSection.userDetail ||
+                                _activeSection ==
+                                    _AdminDashboardSection.userPosts ||
+                                _activeSection ==
+                                    _AdminDashboardSection.userFolders,
                         onPressed: _goToDashboardHome,
                       ),
                       const SizedBox(width: 10),
@@ -1215,66 +1603,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         label: 'Banner promo',
                         selected:
                             _activeSection == _AdminDashboardSection.promos,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.promos;
-                          });
-                        },
+                        onPressed: _openCentralPromoAdmin,
                       ),
-                      if (_selectedUserId != null &&
-                          (_activeSection ==
-                                  _AdminDashboardSection.userDetail ||
-                              _activeSection ==
-                                  _AdminDashboardSection.userPosts ||
-                              _activeSection ==
-                                  _AdminDashboardSection.userFolders)) ...[
-                        const SizedBox(width: 10),
-                        _AdminNavButton(
-                          label: 'Dettaglio utente',
-                          selected: _activeSection ==
-                              _AdminDashboardSection.userDetail,
-                          onPressed: () {
-                            setState(() {
-                              _activeSection =
-                                  _AdminDashboardSection.userDetail;
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        _AdminNavButton(
-                          label: 'Post salvati',
-                          selected: _activeSection ==
-                              _AdminDashboardSection.userPosts,
-                          onPressed: () {
-                            setState(() {
-                              _activeSection = _AdminDashboardSection.userPosts;
-                              _postsPage = 0;
-                              _postSourceFilter = null;
-                            });
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        _AdminNavButton(
-                          label: 'Cartelle',
-                          selected: _activeSection ==
-                              _AdminDashboardSection.userFolders,
-                          onPressed: () {
-                            setState(() {
-                              _activeSection =
-                                  _AdminDashboardSection.userFolders;
-                              _foldersPage = 0;
-                            });
-                          },
-                        ),
-                      ],
                       const SizedBox(width: 10),
                       _AdminNavButton(
-                        label: 'Piani Free/Premium',
+                        label: 'Limiti Funzioni',
                         selected:
-                            _activeSection == _AdminDashboardSection.plans,
+                            _activeSection == _AdminDashboardSection.planLimits,
                         onPressed: () {
                           setState(() {
-                            _activeSection = _AdminDashboardSection.plans;
+                            _activeSection = _AdminDashboardSection.planLimits;
                           });
                         },
                       ),
@@ -1307,6 +1645,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             _AdminDashboardSection.notifications,
                         onPressed: _openNotificationsSection,
                       ),
+                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Accessi',
                         selected:
@@ -1335,8 +1674,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             const SizedBox(width: 12),
           ],
         ),
-        body: _activeSection == _AdminDashboardSection.plans
-            ? _buildPlansInfoPage()
+        body: _activeSection == _AdminDashboardSection.planLimits
+            ? _buildPlanLimitsPage()
             : _activeSection == _AdminDashboardSection.globalStats
                 ? _buildGlobalStatsPage()
                 : _activeSection == _AdminDashboardSection.finance
@@ -1344,7 +1683,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     : _activeSection == _AdminDashboardSection.notifications
                         ? _buildNotificationsPage()
                         : _activeSection == _AdminDashboardSection.promos
-                            ? _buildPromotionBannersPage()
+                            ? _buildCentralPromoRedirectPage()
                             : _activeSection == _AdminDashboardSection.accesses
                                 ? _buildDashboardAccessPage()
                                 : StreamBuilder<
@@ -1486,6 +1825,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                                   ],
                                                 ),
                                                 const SizedBox(height: 16),
+                                                _buildBirthdayAlert(users),
+                                                const SizedBox(height: 16),
                                                 _buildUserFilters(currentAdmin),
                                                 const SizedBox(height: 16),
                                                 _buildUsersTable(filteredUsers),
@@ -1519,6 +1860,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
     return Container(
       width: double.infinity,
+      clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1566,6 +1908,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             ),
           ),
           const Divider(height: 1),
+          _buildPromoBannerBar(selectedUsers),
+          const Divider(height: 1),
           if (filteredUsers.isEmpty)
             const Padding(
               padding: EdgeInsets.all(24),
@@ -1576,25 +1920,33 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               width: double.infinity,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final tableWidth = constraints.maxWidth < 1100
-                      ? 1280.0
+                  final tableWidth = constraints.maxWidth < 1180
+                      ? 1180.0
                       : constraints.maxWidth;
 
                   return SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.hardEdge,
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: SizedBox(
                       width: tableWidth,
                       child: DataTable(
+                        columnSpacing: 18,
+                        horizontalMargin: 12,
+                        headingRowHeight: 48,
+                        dataRowMinHeight: 52,
+                        dataRowMaxHeight: 58,
                         showCheckboxColumn: false,
                         columns: const [
                           DataColumn(label: Text('')),
                           DataColumn(label: Text('Nome')),
                           DataColumn(label: Text('Email')),
-                          DataColumn(label: Text('Marketing')), // ✅ NUOVO
+                          DataColumn(label: Text('Marketing')),
                           DataColumn(label: Text('Ruolo')),
+                          DataColumn(label: Text('Piano Premium')),
                           DataColumn(label: Text('Stato')),
                           DataColumn(label: Text('Creato il')),
-                          DataColumn(label: Text('Ultimo login')),
+                          DataColumn(label: Text('Data nascita')),
                           DataColumn(label: Text('Azioni')),
                         ],
                         rows: visibleUsers.map((user) {
@@ -1635,30 +1987,82 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                 ),
                               ),
                               DataCell(
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      user.name,
-                                      style: const TextStyle(
-                                        color: Color(0xFF111827),
-                                        fontWeight: FontWeight.w700,
+                                SizedBox(
+                                  width: 112,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              user.name,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Color(0xFF111827),
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          if (_isBirthdayThisWeek(
+                                              user.birthDate))
+                                            Tooltip(
+                                              message:
+                                                  'Compleanno questa settimana',
+                                              child: Container(
+                                                margin: const EdgeInsets.only(
+                                                    left: 4),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 7,
+                                                  vertical: 3,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.red
+                                                      .withValues(alpha: 0.15),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                  border: Border.all(
+                                                    color: Colors.red.shade400,
+                                                  ),
+                                                ),
+                                                child: const Text(
+                                                  'BD',
+                                                  style: TextStyle(
+                                                    color: Colors.red,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w900,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
-                                    ),
-                                    Text(
-                                      user.username ?? '-',
-                                      style: TextStyle(
-                                          color: Colors.grey.shade600),
-                                    ),
-                                  ],
+                                      Text(
+                                        user.username ?? '-',
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                               DataCell(
-                                Text(
-                                  user.email,
-                                  style:
-                                      const TextStyle(color: Color(0xFF111827)),
+                                SizedBox(
+                                  width: 110,
+                                  child: Text(
+                                    user.email,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Color(0xFF111827)),
+                                  ),
                                 ),
                               ),
                               DataCell(
@@ -1683,10 +2087,32 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                   ),
                                 ),
                               ),
-                              DataCell(_RoleChip(
-                                  role: user.role,
-                                  color: _roleColor(user.role),
-                                  label: _roleLabel(user.role))),
+                              DataCell(
+                                SizedBox(
+                                    width: 70,
+                                    child: _RoleChip(
+                                      role: user.role,
+                                      color: _roleColor(user.role),
+                                      label: _roleLabel(user.role),
+                                    )),
+                              ),
+                              DataCell(
+                                SizedBox(
+                                  width: 70,
+                                  child: Text(
+                                    _premiumExpiryLabel(user),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: user.premiumUntil != null &&
+                                              user.premiumUntil!
+                                                  .isBefore(DateTime.now())
+                                          ? Colors.red.shade700
+                                          : const Color(0xFF111827),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
                               DataCell(
                                 _StatusChip(
                                   label: user.isBlocked ? 'Bloccato' : 'Attivo',
@@ -1696,30 +2122,70 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                 ),
                               ),
                               DataCell(
-                                Text(
-                                  _formatDate(user.createdAt),
-                                  style:
-                                      const TextStyle(color: Color(0xFF111827)),
+                                SizedBox(
+                                  width: 85,
+                                  child: Text(
+                                    _formatDate(user.createdAt),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Color(0xFF111827)),
+                                  ),
                                 ),
                               ),
                               DataCell(
-                                Text(
-                                  _formatDate(user.lastLogin),
-                                  style:
-                                      const TextStyle(color: Color(0xFF111827)),
+                                SizedBox(
+                                  width: 85,
+                                  child: Text(
+                                    _formatDateOnly(user.birthDate),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Color(0xFF111827)),
+                                  ),
                                 ),
                               ),
                               DataCell(
-                                OutlinedButton.icon(
-                                  onPressed: !_canBlockUsers ||
-                                          _updatingUserIds.contains(user.id)
-                                      ? null
-                                      : () => _toggleUserBlocked(user),
-                                  icon: Icon(user.isBlocked
-                                      ? Icons.lock_open
-                                      : Icons.block),
-                                  label: Text(
-                                      user.isBlocked ? 'Sblocca' : 'Blocca'),
+                                SizedBox(
+                                  width: 80,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_isBirthdayThisWeek(user.birthDate))
+                                        IconButton(
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                            minWidth: 36,
+                                            minHeight: 36,
+                                          ),
+                                          tooltip: 'Invia offerta compleanno',
+                                          onPressed: () =>
+                                              _showBulkBirthdayOfferDialog(
+                                                  [user]),
+                                          icon: const Icon(Icons.cake,
+                                              color: Colors.orange, size: 20),
+                                        ),
+                                      IconButton(
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 36,
+                                          minHeight: 36,
+                                        ),
+                                        tooltip: user.isBlocked
+                                            ? 'Sblocca'
+                                            : 'Blocca',
+                                        onPressed: !_canBlockUsers ||
+                                                _updatingUserIds
+                                                    .contains(user.id)
+                                            ? null
+                                            : () => _toggleUserBlocked(user),
+                                        icon: Icon(
+                                          user.isBlocked
+                                              ? Icons.lock_open
+                                              : Icons.block,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
@@ -1757,12 +2223,24 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         selectedUsers.where((user) => user.isBlocked).toList();
     final activeSelected =
         selectedUsers.where((user) => !user.isBlocked).toList();
+    final hasBirthdayOffer =
+        selectedUsers.any((u) => _isBirthdayThisWeek(u.birthDate));
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        if (selectedCount > 0 && hasBirthdayOffer)
+          ElevatedButton.icon(
+            onPressed: () => _showBulkBirthdayOfferDialog(selectedUsers),
+            icon: const Icon(Icons.cake, size: 18),
+            label: const Text('Invia Offerta Compleanno'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
         Text(
           selectedCount == 0
               ? 'Seleziona utenti da bloccare o sbloccare'
@@ -1824,6 +2302,350 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           child: const Text('Pulisci selezione'),
         ),
       ],
+    );
+  }
+
+  Widget _buildPromoBannerBar(List<_AdminUserRecord> selectedUsers) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: Colors.yellow.shade50.withOpacity(0.5),
+      child: Row(
+        children: [
+          const Icon(Icons.card_giftcard, color: Colors.orange, size: 20),
+          const SizedBox(width: 8),
+          const Text(
+            'Invia Promo/Banner:',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 430,
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream:
+                  _firestore.collection('birthday_offer_templates').snapshots(),
+              builder: (context, birthdaySnapshot) {
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream:
+                      _firestore.collection('promotion_banners').snapshots(),
+                  builder: (context, bannersSnapshot) {
+                    if (birthdaySnapshot.hasError || bannersSnapshot.hasError) {
+                      return Text(
+                        'Errore caricamento promo: ${birthdaySnapshot.error ?? bannersSnapshot.error}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 13,
+                        ),
+                      );
+                    }
+                    if (!birthdaySnapshot.hasData || !bannersSnapshot.hasData) {
+                      return const Text('Caricamento promo...');
+                    }
+
+                    final birthdayDocs =
+                        birthdaySnapshot.data!.docs.where((doc) {
+                      final data = doc.data();
+                      final appId = (data['app_id'] ?? data['appId'] ?? '')
+                          .toString()
+                          .toLowerCase();
+                      final apps = data['apps'] as List? ?? const [];
+                      return appId == 'savein' ||
+                          appId == 'both' ||
+                          apps.contains('savein');
+                    }).toList();
+                    final bannerDocs = bannersSnapshot.data!.docs.where((doc) {
+                      final data = doc.data();
+                      final apps = data['apps'] as List? ?? [];
+                      final app = (data['app'] ?? '').toString().toLowerCase();
+                      return app == 'savein' ||
+                          app == 'both' ||
+                          apps.contains('savein');
+                    }).toList();
+
+                    const placeholder = 'Scegli cosa inviare...';
+                    final List<DropdownMenuItem<String>> items = [];
+
+                    if (birthdayDocs.isNotEmpty) {
+                      items.add(const DropdownMenuItem(
+                        enabled: false,
+                        child: _PromoDropdownHeader(
+                          icon: Icons.cake_outlined,
+                          label: 'Offerte Compleanno',
+                        ),
+                      ));
+                      for (var doc in birthdayDocs) {
+                        final data = doc.data();
+                        final active = data['is_active'] != false &&
+                            data['isActive'] != false &&
+                            data['active'] != false;
+                        items.add(DropdownMenuItem(
+                          value: 'birthday:${doc.id}',
+                          child: _PromoDropdownOption(
+                            icon: Icons.card_giftcard_outlined,
+                            title: data['name'] ?? 'Senza nome',
+                            inactiveLabel: active ? null : 'non attiva in app',
+                          ),
+                        ));
+                      }
+                    }
+
+                    if (bannerDocs.isNotEmpty) {
+                      items.add(const DropdownMenuItem(
+                        enabled: false,
+                        child: _PromoDropdownHeader(
+                          icon: Icons.campaign_outlined,
+                          label: 'Banner SaveIn',
+                        ),
+                      ));
+                      for (var doc in bannerDocs) {
+                        final data = doc.data();
+                        final active = data['active'] == true;
+                        items.add(DropdownMenuItem(
+                          value: 'banner:${doc.id}',
+                          child: _PromoDropdownOption(
+                            icon: Icons.local_offer_outlined,
+                            title: data['title'] ?? doc.id,
+                            inactiveLabel: active ? null : 'non attivo in app',
+                          ),
+                        ));
+                      }
+                    }
+
+                    if (items.length == 1) {
+                      return const Text(
+                        'Nessuna promo SaveIn preparata trovata.',
+                        style: TextStyle(fontSize: 13, color: Colors.black54),
+                      );
+                    }
+
+                    return MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Container(
+                        height: 50,
+                        padding: const EdgeInsets.only(left: 14, right: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFEF7),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.orange.shade500,
+                            width: 2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.orange.withOpacity(0.18),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedPromoId,
+                            hint: const Text(
+                              placeholder,
+                              style: TextStyle(
+                                color: Color(0xFF667085),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            items: items,
+                            isExpanded: true,
+                            menuMaxHeight: 280,
+                            icon: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade100,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: Colors.orange.shade300,
+                                ),
+                              ),
+                              child: Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: Colors.orange.shade900,
+                                size: 28,
+                              ),
+                            ),
+                            selectedItemBuilder: (context) {
+                              return items
+                                  .where((item) => item.enabled)
+                                  .map((item) => Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: DefaultTextStyle.merge(
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                          child: item.child,
+                                        ),
+                                      ))
+                                  .toList();
+                            },
+                            onChanged: (val) {
+                              setState(() {
+                                _selectedPromoId = val;
+                              });
+                            },
+                            style: const TextStyle(
+                                fontSize: 14, color: Colors.black87),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          MouseRegion(
+            cursor: _selectedPromoId == null || selectedUsers.isEmpty
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
+            child: ElevatedButton(
+              onPressed: _selectedPromoId == null || selectedUsers.isEmpty
+                  ? null
+                  : () => _sendSelectedPromo(selectedUsers),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.yellow.shade700,
+                foregroundColor: Colors.black87,
+                elevation: 0,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Invia ai selezionati',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Checkbox per filtrare i compleanni (come in SmartChef)
+          Row(
+            children: [
+              Checkbox(
+                value: _birthdayThisWeekFilter,
+                mouseCursor: SystemMouseCursors.click,
+                onChanged: (val) {
+                  setState(() {
+                    _birthdayThisWeekFilter = val ?? false;
+                    if (_birthdayThisWeekFilter) {
+                      _usersPage = 0;
+                    }
+                  });
+                },
+              ),
+              const Text('Compleanni 7 giorni', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendSelectedPromo(List<_AdminUserRecord> users) async {
+    if (_selectedPromoId == null) return;
+
+    final parts = _selectedPromoId!.split(':');
+    final type = parts[0];
+    final id = parts[1];
+
+    if (type == 'birthday') {
+      // Usa la logica esistente per le offerte compleanno
+      final doc =
+          await _firestore.collection('birthday_offer_templates').doc(id).get();
+      if (!doc.exists) return;
+
+      final data = doc.data()!;
+      final premiumDays = _readInt(data['premium_days'] ?? data['premiumDays']);
+      final promoCode = (data['promo_code'] as String?)?.trim();
+      final offerName = data['name'] ?? 'Offerta compleanno';
+
+      await _applyBulkBirthdayOffer(
+        users,
+        premiumDays: premiumDays,
+        promoCode: promoCode,
+        offerName: offerName,
+      );
+    } else if (type == 'banner') {
+      // Per i banner, inviamo una notifica che invita a vedere la promo
+      final doc =
+          await _firestore.collection('promotion_banners').doc(id).get();
+      if (!doc.exists) return;
+
+      final data = doc.data()!;
+      final title = data['title'] ?? 'Nuova promo per te!';
+      final body = data['message'] ?? 'Apri l\'app per scoprire i dettagli.';
+
+      // Chiamiamo la funzione per inviare notifiche (in-app e push)
+      try {
+        final callable = FirebaseFunctions.instance
+            .httpsCallable('sendDashboardNotification');
+        await callable.call({
+          'title': title,
+          'body': body,
+          'userIds': users.map((u) => u.id).toList(),
+          'sendInApp': true,
+          'sendPush': true,
+        });
+
+        _showAdminSnackBar(
+            'Banner "$title" notificato a ${users.length} utenti.');
+        setState(() {
+          _selectedUserIds.clear();
+          _selectedPromoId = null;
+        });
+      } catch (e) {
+        _showAdminSnackBar('Errore invio notifica banner: $e', isError: true);
+      }
+    }
+  }
+
+  Widget _buildBirthdayAlert(List<_AdminUserRecord> users) {
+    final birthdayUsers =
+        users.where((u) => _isBirthdayThisWeek(u.birthDate)).toList();
+    if (birthdayUsers.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cake, color: Colors.orange, size: 28),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '🎂 ${birthdayUsers.length} utenti compiono gli anni questa settimana!',
+                  style: TextStyle(
+                    color: Colors.orange.shade900,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const Text(
+                  'Usa il filtro compleanni per vederli e inviare un\'offerta speciale.',
+                  style: TextStyle(fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _birthdayThisWeekFilter = true;
+                _usersPage = 0;
+              });
+            },
+            child: const Text('Mostra utenti'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1914,6 +2736,33 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             ),
           );
 
+          final birthdayFilter = Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cake_outlined, size: 20, color: Colors.orange),
+                const SizedBox(width: 8),
+                const Text('Compleanni settimana',
+                    style: TextStyle(fontSize: 14)),
+                Switch(
+                  value: _birthdayThisWeekFilter,
+                  activeColor: Colors.orange,
+                  onChanged: (value) {
+                    setState(() {
+                      _birthdayThisWeekFilter = value;
+                      _usersPage = 0;
+                    });
+                  },
+                ),
+              ],
+            ),
+          );
+
           if (compact) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1923,6 +2772,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 roleFilter,
                 const SizedBox(height: 12),
                 marketingFilter,
+                const SizedBox(height: 12),
+                birthdayFilter,
                 const SizedBox(height: 12),
                 adminBadge,
               ],
@@ -1938,6 +2789,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               const SizedBox(width: 12),
               Expanded(flex: 2, child: marketingFilter),
               const SizedBox(width: 12),
+              birthdayFilter,
+              const SizedBox(width: 12),
               Expanded(flex: 2, child: adminBadge),
             ],
           );
@@ -1946,12 +2799,540 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  Widget _buildPlanLimitsPage() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.doc('config/plan_limits').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Errore: ${snapshot.error}'));
+        }
+
+        final data = snapshot.data?.data() ?? {};
+        final rawFeatureRules =
+            data['featureRules'] as Map<String, dynamic>? ?? {};
+
+        // Valori predefiniti dalla Bibbia del progetto
+        final Map<String, dynamic> defaultRules = {
+          'root_folders': {
+            'free': {
+              'enabled': true,
+              'limit': 10,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
+          'child_folders': {
+            'free': {
+              'enabled': true,
+              'limit': 4,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
+          'folder_levels': {
+            'free': {
+              'enabled': true,
+              'limit': 1,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 5,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
+          'manual_tags': {
+            'free': {
+              'enabled': false,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
+          'share_folder': {
+            'free': {
+              'enabled': true,
+              'limit': 1,
+              'period': 'day',
+              'requiresAd': true
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'day',
+              'requiresAd': false
+            },
+          },
+          'share_post': {
+            'free': {
+              'enabled': true,
+              'limit': 3,
+              'period': 'day',
+              'requiresAd': true
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'day',
+              'requiresAd': false
+            },
+          },
+          'import_shared': {
+            'free': {
+              'enabled': true,
+              'limit': 5,
+              'period': 'day',
+              'requiresAd': true
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'day',
+              'requiresAd': false
+            },
+          },
+        };
+
+        final snapshotKey = jsonEncode(rawFeatureRules);
+        if (_planLimitsPendingSavedKey != null &&
+            snapshotKey == _planLimitsPendingSavedKey) {
+          _planLimitsPendingSavedKey = null;
+          _planLimitsDraftDirty = false;
+          _planLimitsSnapshotKey = snapshotKey;
+          _planLimitsDraft = _mergedPlanLimitRules(
+            rawFeatureRules,
+            defaultRules,
+          );
+        } else if (_planLimitsDraft == null ||
+            (_planLimitsPendingSavedKey == null &&
+                !_planLimitsDraftDirty &&
+                _planLimitsSnapshotKey != snapshotKey)) {
+          _planLimitsSnapshotKey = snapshotKey;
+          _planLimitsDraft = _mergedPlanLimitRules(
+            rawFeatureRules,
+            defaultRules,
+          );
+        }
+        final featureRules = _planLimitsDraft!;
+
+        final features = [
+          {
+            'id': 'root_folders',
+            'name': 'Cartelle nella Home',
+            'desc': 'Numero massimo di cartelle principali creabili nella Home.'
+          },
+          {
+            'id': 'child_folders',
+            'name': 'Sottocartelle per cartella',
+            'desc': 'Numero massimo di sottocartelle per ogni cartella.'
+          },
+          {
+            'id': 'folder_levels',
+            'name': 'Livelli di profondità',
+            'desc': 'Livelli massimi di annidamento (es. Home > L1 > L2...).'
+          },
+          {
+            'id': 'manual_tags',
+            'name': 'Tag manuali',
+            'desc': 'Possibilità di aggiungere hashtag personalizzati ai post.'
+          },
+          {
+            'id': 'share_folder',
+            'name': 'Condivisione Cartella',
+            'desc': 'Limite creazione link pubblici per intere cartelle.'
+          },
+          {
+            'id': 'share_post',
+            'name': 'Condivisione Post',
+            'desc': 'Limite creazione link pubblici per singoli post.'
+          },
+          {
+            'id': 'import_shared',
+            'name': 'Importazione Contenuti',
+            'desc':
+                'Limite importazione contenuti condivisi da altri tramite link.'
+          },
+        ];
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1400),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Configurazione Limiti Piani',
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF111827),
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Gestisci i limiti di utilizzo per ogni funzionalità dell\'app.',
+                            style: TextStyle(color: Color(0xFF4B5563)),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _planLimitsDraft =
+                                    _deepCopyPlanLimitRules(defaultRules);
+                                _planLimitsDraftDirty = true;
+                              });
+                            },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Ripristina Predefiniti'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.grey.shade600,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton.icon(
+                            onPressed: () => _savePlanLimits(featureRules),
+                            icon: const Icon(Icons.save),
+                            label: const Text('Salva Modifiche'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade700,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 24, vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey.shade200),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.03),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Table(
+                      columnWidths: const {
+                        0: FlexColumnWidth(1.2),
+                        1: FlexColumnWidth(1),
+                        2: FlexColumnWidth(1),
+                      },
+                      children: [
+                        // Header
+                        TableRow(
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade50,
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(16)),
+                          ),
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.all(20),
+                              child: Text('Funzionalità',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              color: Colors.blue.shade50.withOpacity(0.3),
+                              child: const Text('Piano FREE',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue)),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              color: Colors.orange.shade50.withOpacity(0.3),
+                              child: const Text('Piano PREMIUM',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orange)),
+                            ),
+                          ],
+                        ),
+                        // Rows
+                        ...features.map((f) {
+                          final featId = f['id']!;
+                          final featName = f['name']!;
+                          final featDesc = f['desc']!;
+                          return TableRow(
+                            decoration: BoxDecoration(
+                              border: Border(
+                                  bottom:
+                                      BorderSide(color: Colors.grey.shade100)),
+                            ),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(featName,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16)),
+                                    const SizedBox(height: 4),
+                                    Text(featDesc,
+                                        style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 13)),
+                                    const SizedBox(height: 8),
+                                    Text('ID: $featId',
+                                        style: TextStyle(
+                                            color: Colors.grey.shade400,
+                                            fontSize: 11)),
+                                  ],
+                                ),
+                              ),
+                              _buildTierLimitCell(featureRules, featId, 'free'),
+                              _buildTierLimitCell(
+                                  featureRules, featId, 'premium'),
+                            ],
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Map<String, dynamic> _deepCopyPlanLimitRules(Map<String, dynamic> source) {
+    return Map<String, dynamic>.from(jsonDecode(jsonEncode(source)) as Map);
+  }
+
+  Map<String, dynamic> _mergedPlanLimitRules(
+    Map<String, dynamic> source,
+    Map<String, dynamic> defaults,
+  ) {
+    final rules = _deepCopyPlanLimitRules(source);
+    defaults.forEach((key, value) {
+      final defaultFeature = Map<String, dynamic>.from(value as Map);
+      if (!rules.containsKey(key) || rules[key] is! Map) {
+        rules[key] = _deepCopyPlanLimitRules(defaultFeature);
+        return;
+      }
+
+      final feature = Map<String, dynamic>.from(rules[key] as Map);
+      if (!feature.containsKey('free')) {
+        feature['free'] = _deepCopyPlanLimitRules(
+          Map<String, dynamic>.from(defaultFeature['free'] as Map),
+        );
+      }
+      if (!feature.containsKey('premium')) {
+        feature['premium'] = _deepCopyPlanLimitRules(
+          Map<String, dynamic>.from(defaultFeature['premium'] as Map),
+        );
+      }
+      rules[key] = feature;
+    });
+    return rules;
+  }
+
+  Widget _buildTierLimitCell(
+      Map<String, dynamic> rules, String featureId, String tier) {
+    Map<String, dynamic> tierRules() {
+      if (rules[featureId] == null || rules[featureId] is! Map) {
+        rules[featureId] = <String, dynamic>{};
+      }
+      final featureRules = rules[featureId] as Map<String, dynamic>;
+      if (featureRules[tier] == null || featureRules[tier] is! Map) {
+        featureRules[tier] = {
+          'enabled': true,
+          'limit': 0,
+          'period': 'total',
+          'requiresAd': false,
+        };
+      }
+      return featureRules[tier] as Map<String, dynamic>;
+    }
+
+    return StatefulBuilder(
+      builder: (context, setCellState) {
+        final currentRules = tierRules();
+        return Container(
+          padding: const EdgeInsets.all(16),
+          color: tier == 'free'
+              ? Colors.blue.shade50.withOpacity(0.1)
+              : Colors.orange.shade50.withOpacity(0.1),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Checkbox(
+                    value: currentRules['enabled'] ?? true,
+                    onChanged: (val) {
+                      setCellState(() {
+                        tierRules()['enabled'] = val ?? false;
+                        _planLimitsDraftDirty = true;
+                      });
+                    },
+                  ),
+                  const Text('Abilitato'),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text('Limite (0 = illimitato)',
+                  style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 4),
+              TextFormField(
+                initialValue: (currentRules['limit'] ?? 0).toString(),
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                onChanged: (val) {
+                  tierRules()['limit'] = int.tryParse(val) ?? 0;
+                  _planLimitsDraftDirty = true;
+                },
+              ),
+              const SizedBox(height: 12),
+              const Text('Periodo reset', style: TextStyle(fontSize: 12)),
+              const SizedBox(height: 4),
+              DropdownButtonFormField<String>(
+                value: currentRules['period'] ?? 'total',
+                isDense: true,
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'total', child: Text('Totale')),
+                  DropdownMenuItem(value: 'day', child: Text('Giorno')),
+                  DropdownMenuItem(value: 'week', child: Text('Settimana')),
+                  DropdownMenuItem(value: 'month', child: Text('Mese')),
+                ],
+                onChanged: (val) {
+                  setCellState(() {
+                    tierRules()['period'] = val ?? 'total';
+                    _planLimitsDraftDirty = true;
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Checkbox(
+                    value: currentRules['requiresAd'] ?? false,
+                    onChanged: (val) {
+                      setCellState(() {
+                        tierRules()['requiresAd'] = val ?? false;
+                        _planLimitsDraftDirty = true;
+                      });
+                    },
+                  ),
+                  const Expanded(
+                    child: Text(
+                      'Richiede Pubblicità',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _savePlanLimits(Map<String, dynamic> rules) async {
+    try {
+      await _firestore.doc('config/plan_limits').set({
+        'featureRules': rules,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedBy': AuthService().currentUser?.email,
+      }, SetOptions(merge: true));
+
+      if (mounted) {
+        setState(() {
+          _planLimitsDraft = _deepCopyPlanLimitRules(rules);
+          _planLimitsPendingSavedKey = jsonEncode(rules);
+          _planLimitsDraftDirty = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Limiti salvati con successo!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Errore durante il salvataggio: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildPlansInfoPage() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
+          constraints: const BoxConstraints(maxWidth: 1400),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2214,212 +3595,445 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
         return Column(
           children: [
+            // Schede di selezione Tipo (Notifica vs Email)
             Container(
-              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black, width: 1),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Notifica',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF111827),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'In-app appare come popup; push usa Firebase Cloud Messaging.',
-                    style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      FilterChip(
-                        selected: _sendInAppNotification,
-                        label: const Text('In-app'),
-                        avatar: const Icon(Icons.notifications_outlined),
-                        onSelected: _sendingNotification
-                            ? null
-                            : (v) =>
-                                setLocalState(() => _sendInAppNotification = v),
-                      ),
-                      FilterChip(
-                        selected: _sendPushNotification,
-                        label: const Text('Push fuori app'),
-                        avatar: const Icon(Icons.phone_android),
-                        onSelected: _sendingNotification
-                            ? null
-                            : (v) =>
-                                setLocalState(() => _sendPushNotification = v),
-                      ),
-                      Chip(
-                        avatar: const Icon(Icons.people_alt_outlined),
-                        label: Text('$selectedCount selezionati'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _notificationTitleController,
-                    maxLength: 120,
-                    decoration: const InputDecoration(
-                      labelText: 'Titolo notifica',
-                      hintText: 'Nuova funzione disponibile',
-                      prefixIcon: Icon(Icons.title),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _notificationBodyController,
-                    minLines: 3,
-                    maxLines: 6,
-                    maxLength: 1000,
-                    decoration: const InputDecoration(
-                      labelText: 'Messaggio',
-                      hintText: 'Testo che l\'utente ricevera.',
-                      alignLabelWithHint: true,
-                      prefixIcon: Icon(Icons.message_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: !_canSendNotifications ||
-                            _sendingNotification ||
-                            selectedCount == 0
-                        ? null
-                        : _sendNotificationToSelected,
-                    icon: _sendingNotification
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send),
-                    label: Text(_sendingNotification
-                        ? 'Invio in corso...'
-                        : 'Invia notifica'),
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.grey.shade300, width: 1.4),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.blue, width: 1.5),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.email_outlined,
-                          color: Colors.blue, size: 22),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          'Invia Email',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF111827),
+                  Expanded(
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => setLocalState(() =>
+                            _notificationMode = _NotificationMode.notification),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 18,
+                            horizontal: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _notificationMode ==
+                                    _NotificationMode.notification
+                                ? Colors.purple.shade700
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _notificationMode ==
+                                      _NotificationMode.notification
+                                  ? Colors.purple.shade700
+                                  : Colors.purple.shade100,
+                              width: 1.6,
+                            ),
+                            boxShadow: _notificationMode ==
+                                    _NotificationMode.notification
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.purple.withOpacity(0.24),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 5),
+                                    )
+                                  ]
+                                : null,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.notifications_active_outlined,
+                                color: _notificationMode ==
+                                        _NotificationMode.notification
+                                    ? Colors.white
+                                    : Colors.purple.shade700,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Notifica Push / In-App',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15,
+                                  color: _notificationMode ==
+                                          _NotificationMode.notification
+                                      ? Colors.white
+                                      : Colors.purple.shade700,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      Chip(
-                        avatar: const Icon(Icons.people_alt_outlined, size: 16),
-                        label: Text('$selectedCount sel.'),
-                        backgroundColor: Color(0xFFDBEAFE),
-                        padding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => setLocalState(
+                            () => _notificationMode = _NotificationMode.email),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 18,
+                            horizontal: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _notificationMode == _NotificationMode.email
+                                ? Colors.blue.shade700
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color:
+                                  _notificationMode == _NotificationMode.email
+                                      ? Colors.blue.shade700
+                                      : Colors.blue.shade100,
+                              width: 1.6,
+                            ),
+                            boxShadow:
+                                _notificationMode == _NotificationMode.email
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.blue.withOpacity(0.22),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 5),
+                                        )
+                                      ]
+                                    : null,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.email_outlined,
+                                color:
+                                    _notificationMode == _NotificationMode.email
+                                        ? Colors.white
+                                        : Colors.blue.shade700,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Email Marketing',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15,
+                                  color: _notificationMode ==
+                                          _NotificationMode.email
+                                      ? Colors.white
+                                      : Colors.blue.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Email da noreply@savein.eu agli utenti selezionati. Usa **parola** per il grassetto.',
-                    style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('Template:',
-                      style:
-                          TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: List.generate(
-                      _emailTemplates.length,
-                      (i) => ChoiceChip(
-                        label: Text(_emailTemplates[i]['label']!),
-                        selected: _emailTemplateIndex == i,
-                        onSelected:
-                            _sendingEmail ? null : (_) => applyTemplate(i),
-                        selectedColor: const Color(0xFFBFDBFE),
-                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _emailSubjectController,
-                    maxLength: 150,
-                    decoration: const InputDecoration(
-                      labelText: 'Oggetto email',
-                      hintText: 'Es: Novita su SaveIn!',
-                      prefixIcon: Icon(Icons.subject),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _emailBodyController,
-                    minLines: 6,
-                    maxLines: 16,
-                    maxLength: 3000,
-                    decoration: const InputDecoration(
-                      labelText: 'Corpo email',
-                      hintText:
-                          'Scrivi il testo.\nUsa **parola** per il grassetto.',
-                      alignLabelWithHint: true,
-                      prefixIcon: Icon(Icons.text_snippet_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: !_canSendNotifications ||
-                            _sendingEmail ||
-                            selectedCount == 0
-                        ? null
-                        : () => _sendEmailToSelected(setLocalState),
-                    style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF1D4ED8)),
-                    icon: _sendingEmail
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.send),
-                    label: Text(_sendingEmail
-                        ? 'Invio email in corso...'
-                        : 'Invia Email a $selectedCount utenti'),
                   ),
                 ],
               ),
             ),
+
+            if (_notificationMode == _NotificationMode.notification)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.purple.shade200, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.purple.shade50.withOpacity(0.5),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.notifications_active_outlined,
+                            color: Colors.purple, size: 22),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Configura Notifica',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF111827),
+                            ),
+                          ),
+                        ),
+                        Chip(
+                          avatar:
+                              const Icon(Icons.people_alt_outlined, size: 16),
+                          label: Text('$selectedCount selezionati'),
+                          backgroundColor: Colors.purple.shade50,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'In-app appare come popup; push usa Firebase Cloud Messaging.',
+                      style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSystemCommunicationCheckbox(
+                      setLocalState,
+                      color: Colors.purple.shade700,
+                    ),
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        FilterChip(
+                          selected: _sendInAppNotification,
+                          label: const Text('In-app'),
+                          avatar: const Icon(Icons.notifications_outlined),
+                          onSelected: _sendingNotification
+                              ? null
+                              : (v) => setLocalState(
+                                  () => _sendInAppNotification = v),
+                        ),
+                        FilterChip(
+                          selected: _sendPushNotification,
+                          label: const Text('Push fuori app'),
+                          avatar: const Icon(Icons.phone_android),
+                          onSelected: _sendingNotification
+                              ? null
+                              : (v) => setLocalState(
+                                  () => _sendPushNotification = v),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _notificationTitleController,
+                      maxLength: 120,
+                      decoration: const InputDecoration(
+                        labelText: 'Titolo notifica',
+                        hintText: 'Nuova funzione disponibile',
+                        prefixIcon: Icon(Icons.title),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _notificationBodyController,
+                      minLines: 3,
+                      maxLines: 6,
+                      maxLength: 1000,
+                      decoration: const InputDecoration(
+                        labelText: 'Messaggio',
+                        hintText: 'Testo che l\'utente ricevera.',
+                        alignLabelWithHint: true,
+                        prefixIcon: Icon(Icons.message_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: !_canSendNotifications ||
+                                _sendingNotification ||
+                                selectedCount == 0
+                            ? null
+                            : _sendNotificationToSelected,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.purple.shade700,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        icon: _sendingNotification
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.send),
+                        label: Text(_sendingNotification
+                            ? 'Invio in corso...'
+                            : 'Invia Notifica a $selectedCount utenti'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            if (_notificationMode == _NotificationMode.email)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.blue.shade200, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.blue.shade50.withOpacity(0.5),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.email_outlined,
+                            color: Colors.blue, size: 22),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Configura Email',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF111827),
+                            ),
+                          ),
+                        ),
+                        Chip(
+                          avatar:
+                              const Icon(Icons.people_alt_outlined, size: 16),
+                          label: Text('$selectedCount selezionati'),
+                          backgroundColor: Colors.blue.shade50,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Email da noreply@savein.eu agli utenti selezionati. Usa **parola** per il grassetto.',
+                      style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSystemCommunicationCheckbox(
+                      setLocalState,
+                      color: const Color(0xFF1D4ED8),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Template:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: List.generate(
+                        _emailTemplates.length,
+                        (i) => ChoiceChip(
+                          label: Text(_emailTemplates[i]['label']!),
+                          selected: _emailTemplateIndex == i,
+                          onSelected:
+                              _sendingEmail ? null : (_) => applyTemplate(i),
+                          selectedColor: const Color(0xFFBFDBFE),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _emailSubjectController,
+                      maxLength: 150,
+                      decoration: const InputDecoration(
+                        labelText: 'Oggetto email',
+                        hintText: 'Es: Novita su SaveIn!',
+                        prefixIcon: Icon(Icons.subject),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _emailBodyController,
+                      minLines: 6,
+                      maxLines: 16,
+                      maxLength: 3000,
+                      decoration: const InputDecoration(
+                        labelText: 'Corpo email',
+                        hintText:
+                            'Scrivi il testo.\nUsa **parola** per il grassetto.',
+                        alignLabelWithHint: true,
+                        prefixIcon: Icon(Icons.text_snippet_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: !_canSendNotifications ||
+                                _sendingEmail ||
+                                selectedCount == 0
+                            ? null
+                            : () => _sendEmailToSelected(setLocalState),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1D4ED8),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        icon: _sendingEmail
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.send),
+                        label: Text(_sendingEmail
+                            ? 'Invio email in corso...'
+                            : 'Invia Email a $selectedCount utenti'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildSystemCommunicationCheckbox(
+    StateSetter setLocalState, {
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: CheckboxListTile(
+        value: _systemCommunication,
+        onChanged: _sendingNotification || _sendingEmail
+            ? null
+            : (value) => setLocalState(() {
+                  _systemCommunication = value ?? false;
+                }),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        activeColor: color,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text(
+          'Questa comunicazione deve arrivare sempre perché è di sistema',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: const Text(
+          'Se attivo, ignora il blocco marketing/comunicazioni per notifiche ed email istituzionali.',
+        ),
+      ),
     );
   }
 
@@ -2916,6 +4530,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  // Vecchia pagina locale non piu' raggiungibile: la voce Banner promo ora
+  // reindirizza sempre alla dashboard centrale SmartChef/SaveIn.
+  // ignore: unused_element
   Widget _buildPromotionBannersPage() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _firestore.collection('promotion_banners').snapshots(),
@@ -2942,7 +4559,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 children: [
                   const Expanded(
                     child: Text(
-                      'Banner promo',
+                      'Banner promo centralizzati',
                       style: TextStyle(
                         color: Color(0xFF111827),
                         fontSize: 28,
@@ -2951,9 +4568,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     ),
                   ),
                   ElevatedButton.icon(
-                    onPressed: () => _showPromotionBannerDialog(),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Nuovo banner'),
+                    onPressed: _openCentralPromoAdmin,
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Apri gestione centrale'),
                   ),
                 ],
               ),
@@ -2961,14 +4578,19 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               _AdminInfoBox(
                 title: 'Funzionamento',
                 lines: const [
-                  'SaveIn mostra questi banner sotto la barra di ricerca e nella pagina Account.',
-                  'Il campo imageUrl e l’immagine realmente vista dagli utenti dentro al banner.',
+                  'Questa pagina resta come monitor locale dei banner che SaveIn riceve dal centro promo.',
+                  'La creazione, modifica, attivazione, disattivazione ed eliminazione si fanno dalla gestione centrale SmartChef/SaveIn.',
+                  'Per le cross promo puoi caricare due immagini: saveinImageUrl per SaveIn e smartchefImageUrl per SmartChef. imageUrl resta come fallback/generic.',
                   'Dimensioni immagine consigliate: 1200x400 px (formato 3:1). Alternativa accettabile: 1200x628 px, ma verra ritagliata/adattata.',
                   'type=cross_promo attiva la promo SaveIn/SmartChef; type=generic_promo apre un URL o mostra una proposta diversa.',
                   'Se oncePerUser=true, il banner sparisce dopo il primo utilizzo. Se la cross-promo e gia stata usata da una delle due app, non viene piu mostrata.',
-                  'Priorita piu alta = banner scelto per primo quando piu banner sono attivi.',
+                  'Può esserci una sola promo attiva alla volta: lo decide il centro promo e SaveIn riceve lo stato gia sincronizzato.',
                 ],
               ),
+              const SizedBox(height: 16),
+              _buildNewSignupPremiumPromoSection(),
+              const SizedBox(height: 12),
+              _buildNewSignupPremiumPromoClaimsList(),
               const SizedBox(height: 16),
               _buildPromotionBannerSimpleList(banners),
               const SizedBox(height: 22),
@@ -2978,6 +4600,219 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         );
       },
     );
+  }
+
+  Widget _buildNewSignupPremiumPromoSection() {
+    final docRef =
+        _firestore.collection('app_config').doc('new_signup_premium_promo');
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: docRef.snapshots(),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() ?? <String, dynamic>{};
+        final active = data['active'] == true;
+        final durationDays = (data['durationDays'] as num?)?.toInt() ?? 30;
+        final priceAfterTrial = (data['priceAfterTrial'] ?? '2.99').toString();
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.card_giftcard,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Promo nuovi iscritti',
+                      style: TextStyle(
+                        color: Color(0xFF111827),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      active
+                          ? 'Attiva: i nuovi iscritti Free possono accettare 1 mese Premium gratis. Prezzo comunicato dal secondo mese: €$priceAfterTrial.'
+                          : 'Spenta: i nuovi iscritti non vedono la proposta Premium gratuita.',
+                      style: const TextStyle(
+                        color: Color(0xFF4B5563),
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Durata prova: $durationDays giorni',
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Switch(
+                value: active,
+                onChanged: (value) async {
+                  try {
+                    await docRef.set({
+                      'active': value,
+                      'durationDays': 30,
+                      'priceAfterTrial': '2.99',
+                      'updatedAt': FieldValue.serverTimestamp(),
+                      'updatedBy': AuthService().currentUser?.email,
+                    }, SetOptions(merge: true));
+                  } catch (error) {
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Impossibile aggiornare la promo: ${error.toString()}',
+                        ),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildNewSignupPremiumPromoClaimsList() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('new_signup_premium_promo_claims')
+          .orderBy('startedAt', descending: true)
+          .limit(20)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 56,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Storico promo nuovi iscritti',
+                style: TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Elenco permanente delle email che hanno già usato la promo.',
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              if (docs.isEmpty)
+                const Text(
+                  'Nessuna attivazione registrata.',
+                  style: TextStyle(color: Color(0xFF6B7280)),
+                )
+              else
+                ...docs.map((doc) {
+                  final data = doc.data();
+                  final startedAt = _dateFromAny(data['startedAt']);
+                  final premiumUntil = _dateFromAny(data['premiumUntil']);
+                  final isActive = premiumUntil != null &&
+                      premiumUntil.isAfter(DateTime.now());
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            (data['email'] ?? data['normalizedEmail'] ?? doc.id)
+                                .toString(),
+                            style: const TextStyle(
+                              color: Color(0xFF111827),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            'Inizio: ${_formatDateOnly(startedAt)}',
+                            style: const TextStyle(color: Color(0xFF4B5563)),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            'Fine: ${_formatDateOnly(premiumUntil)}',
+                            style: const TextStyle(color: Color(0xFF4B5563)),
+                          ),
+                        ),
+                        _StatusChip(
+                          label: isActive ? 'Attiva' : 'Scaduta',
+                          color: isActive
+                              ? const Color(0xFF059669)
+                              : const Color(0xFF6B7280),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  DateTime? _dateFromAny(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return DateTime.tryParse(value.toString());
   }
 
   Widget _buildPromotionBannerSimpleList(
@@ -3014,7 +4849,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           ],
         ),
         const SizedBox(height: 10),
-        _buildPromotionQuickSetupCards(),
+        _buildCentralPromotionAdminCard(),
         const SizedBox(height: 12),
         if (activeBanners.isEmpty)
           const _AdminEmptyState(
@@ -3027,8 +4862,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               banner: banner,
               loadStats: _loadPromotionBannerStats,
               onToggle: (value) => _togglePromotionBanner(banner, value),
-              onEdit: () => _showPromotionBannerDialog(existing: banner),
-              onDelete: () => _deletePromotionBanner(banner),
+              onEdit: _openCentralPromoAdmin,
             ),
             const SizedBox(height: 10),
           ],
@@ -3036,6 +4870,102 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  Widget _buildCentralPromoRedirectPage() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.hub_outlined,
+              color: Color(0xFF2563EB),
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Gestione Centrale Banner e Promo',
+              style: TextStyle(
+                color: Color(0xFF111827),
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'La configurazione dei banner promozionali (cross-app e generici)\nè centralizzata nella dashboard SmartChef.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF6B7280), fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _openCentralPromoAdmin,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Apri Dashboard Centrale (Nuova scheda)'),
+              style: FilledButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Nota: La gestione degli utenti SaveIn e l\'invio di offerte individuali\nrimane qui nella sezione "Home dashboard".',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCentralPromotionAdminCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEEF2FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFC7D2FE)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.hub_outlined, color: Color(0xFF4338CA), size: 30),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Gestione centrale promo SmartChef/SaveIn',
+                  style: TextStyle(
+                    color: Color(0xFF111827),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Crea e attiva qui una sola promo globale alla volta, generica o cross-app.',
+                  style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.icon(
+            onPressed: _openCentralPromoAdmin,
+            icon: const Icon(Icons.open_in_new),
+            label: const Text('Apri admin centrale'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Rimasta come riferimento della vecchia UI locale; le promo ora si gestiscono
+  // dalla dashboard centrale SmartChef/SaveIn.
+  // ignore: unused_element
   Widget _buildPromotionQuickSetupCards() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3050,6 +4980,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             onTap: () => _showPromotionBannerDialog(
               defaultId: 'savein_smartchef_launch',
               defaultType: 'cross_promo',
+              lockType: true,
               defaultApp: 'both',
               defaultTitle: 'Promo lancio: SaveIn e SmartChef',
               defaultMessage:
@@ -3072,6 +5003,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             onTap: () => _showPromotionBannerDialog(
               defaultId: 'savein_generic_offer',
               defaultType: 'generic_promo',
+              lockType: true,
               defaultApp: 'savein',
               defaultTitle: 'Promo disponibile',
               defaultMessage:
@@ -3140,7 +5072,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               banner: banner,
               loadStats: _loadPromotionBannerStats,
               onReactivate: () => _reactivatePromotionBanner(banner),
-              onEdit: () => _showPromotionBannerDialog(existing: banner),
+              onEdit: _openCentralPromoAdmin,
               onDelete: () => _deletePromotionBanner(banner),
             ),
             const SizedBox(height: 10),
@@ -3178,51 +5110,40 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     _PromotionBannerRecord banner,
     bool active,
   ) async {
-    await _firestore.collection('promotion_banners').doc(banner.id).set({
-      'active': active,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'updatedBy': AuthService().currentUser?.email,
-    }, SetOptions(merge: true));
+    _showCentralPromoAdminRequired();
+  }
+
+  Future<void> _deactivateOtherPromotionBanners(String keepActiveId) async {
+    final activePromos = await _firestore
+        .collection('promotion_banners')
+        .where('active', isEqualTo: true)
+        .get();
+    final batch = _firestore.batch();
+    var hasWrites = false;
+    for (final doc in activePromos.docs) {
+      if (doc.id == keepActiveId) continue;
+      batch.set(
+        doc.reference,
+        {
+          'active': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+          'updatedBy': AuthService().currentUser?.email,
+        },
+        SetOptions(merge: true),
+      );
+      hasWrites = true;
+    }
+    if (hasWrites) {
+      await batch.commit();
+    }
   }
 
   Future<void> _reactivatePromotionBanner(_PromotionBannerRecord banner) async {
-    final now = DateTime.now();
-    final data = <String, dynamic>{
-      'active': true,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'updatedBy': AuthService().currentUser?.email,
-    };
-    if (banner.endsAt != null && banner.endsAt!.isBefore(now)) {
-      data['startsAt'] = FieldValue.serverTimestamp();
-      data['endsAt'] = FieldValue.delete();
-    }
-    await _firestore
-        .collection('promotion_banners')
-        .doc(banner.id)
-        .set(data, SetOptions(merge: true));
+    _showCentralPromoAdminRequired();
   }
 
   Future<void> _deletePromotionBanner(_PromotionBannerRecord banner) async {
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Eliminare banner?'),
-            content: Text('Vuoi eliminare definitivamente "${banner.id}"?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Annulla'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Elimina'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed) return;
-    await _firestore.collection('promotion_banners').doc(banner.id).delete();
+    _showCentralPromoAdminRequired();
   }
 
   Future<void> _showPromotionBannerDialog({
@@ -3237,6 +5158,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     String defaultActionUrl = '',
     int defaultPriority = 10,
     bool defaultOncePerUser = true,
+    bool lockType = false,
   }) async {
     final idController = TextEditingController(text: existing?.id ?? defaultId);
     final titleController =
@@ -3249,8 +5171,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         text: existing?.secondaryCtaLabel ?? defaultSecondaryCtaLabel);
     final urlController =
         TextEditingController(text: existing?.actionUrl ?? defaultActionUrl);
+    final existingType = existing?.type ?? defaultType;
     final imageUrlController =
         TextEditingController(text: existing?.imageUrl ?? '');
+    final saveInImageUrlController = TextEditingController(
+        text: existing?.saveinImageUrl ??
+            (existingType == 'cross_promo' || defaultApp == 'savein'
+                ? existing?.imageUrl ?? ''
+                : ''));
+    final smartChefImageUrlController = TextEditingController(
+        text: existing?.smartchefImageUrl ??
+            (existingType == 'cross_promo' ? existing?.imageUrl ?? '' : ''));
     final priorityController = TextEditingController(
         text: (existing?.priority ?? defaultPriority).toString());
     final startsAtController =
@@ -3260,8 +5191,110 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     var active = existing?.active ?? false;
     var oncePerUser = existing?.oncePerUser ?? defaultOncePerUser;
     var type = existing?.type ?? defaultType;
-    var app = existing?.app ?? defaultApp;
     var uploadingImage = false;
+
+    bool isCrossPromoType() => type.trim() == 'cross_promo';
+
+    Widget imageUrlEditor({
+      required String label,
+      required String helper,
+      required TextEditingController controller,
+      required String uploadSuffix,
+      required StateSetter setDialogState,
+    }) {
+      return Column(
+        children: [
+          TextField(
+            controller: controller,
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: 'Consigliato 1200x400 px',
+            ),
+            onChanged: (_) => setDialogState(() {}),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: uploadingImage
+                      ? null
+                      : () async {
+                          final docId = idController.text.trim().isEmpty
+                              ? 'new_banner'
+                              : idController.text.trim();
+                          setDialogState(() => uploadingImage = true);
+                          final uploadedUrl =
+                              await _pickAndUploadPromotionBannerImage(
+                            docId: '${docId}_$uploadSuffix',
+                          );
+                          if (uploadedUrl != null) {
+                            controller.text = uploadedUrl;
+                          }
+                          setDialogState(() => uploadingImage = false);
+                        },
+                  icon: uploadingImage
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.upload_file),
+                  label: Text(
+                    uploadingImage ? 'Caricamento...' : 'Carica immagine',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: uploadingImage
+                      ? null
+                      : () async {
+                          final selectedUrl =
+                              await _showPromotionBannerImageHistory();
+                          if (selectedUrl != null) {
+                            controller.text = selectedUrl;
+                            setDialogState(() {});
+                          }
+                        },
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Scegli dallo storico'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              helper,
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (controller.text.trim().isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AspectRatio(
+                aspectRatio: 3,
+                child: Image.network(
+                  controller.text.trim(),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    color: Colors.black12,
+                    alignment: Alignment.center,
+                    child: const Text('Anteprima non disponibile'),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
 
     final saved = await showDialog<bool>(
           context: context,
@@ -3284,37 +5317,25 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        value: type,
-                        decoration: const InputDecoration(labelText: 'Tipo'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'cross_promo',
-                            child: Text('cross_promo'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'generic_promo',
-                            child: Text('generic_promo'),
-                          ),
-                        ],
-                        onChanged: (value) =>
-                            setDialogState(() => type = value ?? type),
-                      ),
-                      const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        value: app,
-                        decoration:
-                            const InputDecoration(labelText: 'App visibile'),
-                        items: const [
-                          DropdownMenuItem(
-                              value: 'savein', child: Text('SaveIn')),
-                          DropdownMenuItem(
-                              value: 'both', child: Text('Entrambe')),
-                        ],
-                        onChanged: (value) =>
-                            setDialogState(() => app = value ?? app),
-                      ),
-                      const SizedBox(height: 10),
+                      if (!lockType) ...[
+                        DropdownButtonFormField<String>(
+                          value: type,
+                          decoration: const InputDecoration(labelText: 'Tipo'),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'cross_promo',
+                              child: Text('cross_promo'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'generic_promo',
+                              child: Text('generic_promo'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              setDialogState(() => type = value ?? type),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       TextField(
                         controller: titleController,
                         decoration: const InputDecoration(labelText: 'Titolo'),
@@ -3326,22 +5347,26 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         decoration:
                             const InputDecoration(labelText: 'Testo banner'),
                       ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: ctaController,
-                        decoration: const InputDecoration(
-                          labelText: 'Testo pulsante principale',
-                          hintText: 'Es. Scopri, Attiva promo, Avvia',
+                      if (isCrossPromoType()) ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: ctaController,
+                          decoration: const InputDecoration(
+                            labelText: 'Testo pulsante principale',
+                            hintText: 'Es. Scopri, Attiva promo, Avvia',
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: secondaryController,
-                        decoration: const InputDecoration(
-                          labelText: 'Testo pulsante secondario',
-                          hintText: 'Opzionale',
+                      ],
+                      if (isCrossPromoType()) ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: secondaryController,
+                          decoration: const InputDecoration(
+                            labelText: 'Testo pulsante secondario',
+                            hintText: 'Opzionale',
+                          ),
                         ),
-                      ),
+                      ],
                       const SizedBox(height: 10),
                       TextField(
                         controller: urlController,
@@ -3350,101 +5375,34 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      TextField(
-                        controller: imageUrlController,
-                        decoration: const InputDecoration(
-                          labelText: 'URL immagine banner',
-                          hintText: 'Consigliato 1200x400 px',
+                      if (type == 'generic_promo') ...[
+                        imageUrlEditor(
+                          label: 'URL immagine generic promo',
+                          helper:
+                              'Immagine mostrata per la promo generica. Questo e l’unico banner usato per generic_promo.',
+                          controller: imageUrlController,
+                          uploadSuffix: 'generic',
+                          setDialogState: setDialogState,
                         ),
-                        onChanged: (_) => setDialogState(() {}),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: uploadingImage
-                                  ? null
-                                  : () async {
-                                      final docId =
-                                          idController.text.trim().isEmpty
-                                              ? 'new_banner'
-                                              : idController.text.trim();
-                                      setDialogState(
-                                          () => uploadingImage = true);
-                                      final uploadedUrl =
-                                          await _pickAndUploadPromotionBannerImage(
-                                        docId: docId,
-                                      );
-                                      if (uploadedUrl != null) {
-                                        imageUrlController.text = uploadedUrl;
-                                      }
-                                      setDialogState(
-                                          () => uploadingImage = false);
-                                    },
-                              icon: uploadingImage
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.upload_file),
-                              label: Text(
-                                uploadingImage
-                                    ? 'Caricamento...'
-                                    : 'Carica immagine banner',
-                              ),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: uploadingImage
-                                  ? null
-                                  : () async {
-                                      final selectedUrl =
-                                          await _showPromotionBannerImageHistory();
-                                      if (selectedUrl != null) {
-                                        imageUrlController.text = selectedUrl;
-                                        setDialogState(() {});
-                                      }
-                                    },
-                              icon: const Icon(Icons.photo_library_outlined),
-                              label: const Text('Scegli dallo storico'),
-                            ),
-                          ],
+                      ] else ...[
+                        imageUrlEditor(
+                          label: 'URL immagine SaveIn',
+                          helper:
+                              'Immagine mostrata agli utenti SaveIn nella cross promo.',
+                          controller: saveInImageUrlController,
+                          uploadSuffix: 'savein',
+                          setDialogState: setDialogState,
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Formato consigliato: 1200x400 px. L’immagine viene mostrata come banner 3:1.',
-                          style: TextStyle(
-                            color: Color(0xFF6B7280),
-                            fontSize: 12,
-                          ),
+                        const SizedBox(height: 12),
+                        imageUrlEditor(
+                          label: 'URL immagine SmartChef',
+                          helper:
+                              'Immagine mostrata agli utenti SmartChef nella cross promo.',
+                          controller: smartChefImageUrlController,
+                          uploadSuffix: 'smartchef',
+                          setDialogState: setDialogState,
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (imageUrlController.text.trim().isNotEmpty)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: AspectRatio(
-                            aspectRatio: 3,
-                            child: Image.network(
-                              imageUrlController.text.trim(),
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                color: Colors.black12,
-                                alignment: Alignment.center,
-                                child: const Text('Anteprima non disponibile'),
-                              ),
-                            ),
-                          ),
-                        ),
+                      ],
                       const SizedBox(height: 10),
                       TextField(
                         controller: priorityController,
@@ -3532,20 +5490,29 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     final startsAt = _parseDateInput(startsAtController.text.trim());
     final endsAt =
         _parseDateInput(endsAtController.text.trim(), endOfDay: true);
+    final targetApp = type == 'cross_promo' ? 'both' : 'savein';
 
+    if (active) {
+      await _deactivateOtherPromotionBanners(id);
+    }
     await _firestore.collection('promotion_banners').doc(id).set({
       'active': active,
-      'app': app,
-      'apps': app == 'both' ? ['savein', 'smartchef'] : [app],
+      'app': targetApp,
+      'apps': targetApp == 'both' ? ['savein', 'smartchef'] : [targetApp],
       'type': type,
       'title': titleController.text.trim(),
       'message': messageController.text.trim(),
-      'ctaLabel': ctaController.text.trim(),
-      'secondaryCtaLabel': secondaryController.text.trim(),
-      'action': type == 'cross_promo' ? 'activate_cross_promo' : 'open_url',
+      'ctaLabel': isCrossPromoType() ? ctaController.text.trim() : '',
+      'secondaryCtaLabel':
+          isCrossPromoType() ? secondaryController.text.trim() : '',
+      'action': isCrossPromoType() ? 'activate_cross_promo' : 'open_url',
       'actionUrl': urlController.text.trim(),
-      'imageUrl': imageUrlController.text.trim(),
-      'targetApp': app,
+      'imageUrl': type == 'generic_promo' ? imageUrlController.text.trim() : '',
+      'saveinImageUrl':
+          type == 'cross_promo' ? saveInImageUrlController.text.trim() : '',
+      'smartchefImageUrl':
+          type == 'cross_promo' ? smartChefImageUrlController.text.trim() : '',
+      'targetApp': targetApp,
       'direction': type == 'cross_promo' ? 'savein_to_smartchef' : '',
       'priority': int.tryParse(priorityController.text.trim()) ?? 10,
       'oncePerUser': oncePerUser,
@@ -3795,7 +5762,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           padding: const EdgeInsets.all(16),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1200),
+              constraints: const BoxConstraints(maxWidth: 1400),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -3830,21 +5797,28 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                         value: '${stats.topCreators.length}',
                         color: Colors.orange.shade800,
                       ),
+                      _StatCard(
+                        label: 'Utenti SaveIn',
+                        value: '${stats.totalUsers}',
+                        color: Colors.green.shade700,
+                      ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  _buildFreePremiumStatsPanel(stats),
                   const SizedBox(height: 16),
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final wide = constraints.maxWidth >= 900;
-                      final sources = _buildGlobalRankingPanel(
-                        title: 'Top 10 provenienze',
+                      final tags = _buildGlobalRankingPanel(
+                        title: 'Top 20 tag più utilizzati',
                         subtitle:
-                            'Social, domini o siti da cui gli utenti salvano più post.',
-                        entries: stats.topSources,
-                        emptyText: 'Nessuna provenienza trovata.',
+                            'Tag più ricorrenti nei post salvati dagli utenti SaveIn.',
+                        entries: stats.topTags,
+                        emptyText: 'Nessun tag trovato.',
                       );
                       final folders = _buildGlobalRankingPanel(
-                        title: 'Cartelle più comuni',
+                        title: 'Top 20 nomi cartelle più utilizzati',
                         subtitle:
                             'Nomi cartella più ripetuti tra tutti gli utenti.',
                         entries: stats.topFolderNames,
@@ -3854,7 +5828,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       if (!wide) {
                         return Column(
                           children: [
-                            sources,
+                            tags,
                             const SizedBox(height: 16),
                             folders,
                           ],
@@ -3864,12 +5838,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(child: sources),
+                          Expanded(child: tags),
                           const SizedBox(width: 16),
                           Expanded(child: folders),
                         ],
                       );
                     },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildGlobalRankingPanel(
+                    title: 'Top 10 provenienze',
+                    subtitle:
+                        'Social, domini o siti da cui gli utenti salvano più post.',
+                    entries: stats.topSources,
+                    emptyText: 'Nessuna provenienza trovata.',
                   ),
                   const SizedBox(height: 16),
                   _buildGlobalRankingPanel(
@@ -3886,6 +5868,100 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildFreePremiumStatsPanel(_GlobalContentStats stats) {
+    final total = stats.totalUsers == 0 ? 1 : stats.totalUsers;
+    String percent(int value) => '${(value / total * 100).toStringAsFixed(1)}%';
+
+    Widget row({
+      required String label,
+      required int value,
+      required Color color,
+    }) {
+      final ratio = stats.totalUsers == 0 ? 0.0 : value / stats.totalUsers;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '$value (${percent(value)})',
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: ratio.clamp(0.0, 1.0),
+                minHeight: 10,
+                backgroundColor: const Color(0xFFE5E7EB),
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Differenza utenti Free / Premium',
+            style: TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Distribuzione dei piani degli utenti SaveIn. Gli admin sono separati dai Premium.',
+            style: TextStyle(color: Color(0xFF4B5563), fontSize: 13),
+          ),
+          const SizedBox(height: 14),
+          row(
+              label: 'Free',
+              value: stats.freeUsers,
+              color: Colors.blue.shade700),
+          row(
+            label: 'Premium',
+            value: stats.premiumUsers,
+            color: Colors.green.shade700,
+          ),
+          row(
+            label: 'Admin',
+            value: stats.adminUsers,
+            color: Colors.orange.shade800,
+          ),
+        ],
+      ),
     );
   }
 
@@ -4038,7 +6114,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           padding: const EdgeInsets.all(16),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1200),
+              constraints: const BoxConstraints(maxWidth: 1400),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -4451,12 +6527,74 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  Widget _buildUserSubNav() {
+    if (_selectedUserId == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text(
+            'Sezione utente:',
+            style: TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          _UserSectionTab(
+            label: 'Dettaglio',
+            selected: _activeSection == _AdminDashboardSection.userDetail,
+            onPressed: () {
+              setState(() {
+                _activeSection = _AdminDashboardSection.userDetail;
+              });
+            },
+          ),
+          _UserSectionTab(
+            label: 'Post salvati',
+            selected: _activeSection == _AdminDashboardSection.userPosts,
+            onPressed: () {
+              setState(() {
+                _activeSection = _AdminDashboardSection.userPosts;
+                _postsPage = 0;
+                _postSourceFilter = null;
+              });
+            },
+          ),
+          _UserSectionTab(
+            label: 'Cartelle',
+            selected: _activeSection == _AdminDashboardSection.userFolders,
+            onPressed: () {
+              setState(() {
+                _activeSection = _AdminDashboardSection.userFolders;
+                _foldersPage = 0;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildUserDetailPage(_AdminUserRecord? user) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
+          constraints: const BoxConstraints(maxWidth: 1400),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -4495,6 +6633,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                _buildUserSubNav(),
                 _buildDetailsPanel(user),
               ],
             ],
@@ -4604,8 +6743,47 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             },
                 ),
                 const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Chip(
+                        avatar: const Icon(Icons.workspace_premium_outlined),
+                        label: Text(
+                          'Scadenza Premium: ${_premiumExpiryLabel(user)}',
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _updatingUserIds.contains(user.id) ||
+                                !_canManageUserRoles
+                            ? null
+                            : () => _editUserPremiumExpiry(user),
+                        icon: const Icon(Icons.edit_calendar_outlined),
+                        label: const Text('Modifica scadenza'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
                 _InfoRow(
                     label: 'Creato il', value: _formatDate(user.createdAt)),
+                _InfoRow(
+                  label: 'Fine Premium',
+                  value: _premiumExpiryLabel(user),
+                  valueColor: user.premiumUntil != null &&
+                          user.premiumUntil!.isBefore(DateTime.now())
+                      ? Colors.red.shade700
+                      : null,
+                ),
                 _InfoRow(
                     label: 'Ultimo login', value: _formatDate(user.lastLogin)),
                 _InfoRow(
@@ -4618,6 +6796,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   label: 'Bloccato il',
                   value: _formatDate(user.blockedAt),
                 ),
+                const SizedBox(height: 16),
+                _buildAccountHistoryPanel(user),
                 const SizedBox(height: 16),
                 const Text(
                   'Consensi Marketing',
@@ -4976,6 +7156,368 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         ],
       ),
     );
+  }
+
+  Widget _buildAccountHistoryPanel(_AdminUserRecord user) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Storico account e piano',
+            style: TextStyle(
+              color: Color(0xFF111827),
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Registrazione, passaggi Free/Premium/Admin, scadenze e cross-promo. Non viene cancellato quando si azzera lo storico test cross-promo.',
+            style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          FutureBuilder<List<_AccountHistoryEntry>>(
+            future: _loadAccountHistoryEntries(user),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const LinearProgressIndicator();
+              }
+              if (snapshot.hasError) {
+                return Text(
+                  'Errore caricamento storico: ${snapshot.error}',
+                  style: const TextStyle(color: Color(0xFFB91C1C)),
+                );
+              }
+              final entries = snapshot.data ?? const <_AccountHistoryEntry>[];
+              return Column(
+                children: [
+                  if (entries.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Nessuno storico registrato. I prossimi eventi saranno salvati qui.',
+                        style:
+                            TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+                      ),
+                    ),
+                  ...entries.map((entry) {
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(entry.icon, color: entry.color),
+                      title: Text(
+                        entry.title,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: Text(
+                        '${_formatDate(entry.when)} • ${entry.source}\n${entry.detail}',
+                      ),
+                      isThreeLine: true,
+                    );
+                  }),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<List<_AccountHistoryEntry>> _loadAccountHistoryEntries(
+    _AdminUserRecord user,
+  ) async {
+    final entries = <_AccountHistoryEntry>[];
+    void add({
+      required DateTime? when,
+      required String title,
+      required String source,
+      required String detail,
+      IconData icon = Icons.history,
+      Color color = const Color(0xFF2563EB),
+    }) {
+      entries.add(_AccountHistoryEntry(
+        when: when,
+        title: title,
+        source: source,
+        detail: detail,
+        icon: icon,
+        color: color,
+      ));
+    }
+
+    String statusLabel(dynamic value) {
+      switch ((value ?? '').toString().trim().toLowerCase()) {
+        case 'started':
+          return 'prenotata';
+        case 'pending':
+          return 'in attesa';
+        case 'claimed':
+          return 'completata';
+        case 'sent':
+          return 'inviata';
+        case 'premium':
+          return 'Premium';
+        case 'free':
+          return 'Free';
+        case 'admin':
+          return 'Admin';
+        default:
+          final text = (value ?? '').toString().trim();
+          return text.isEmpty ? '—' : text;
+      }
+    }
+
+    String directionLabel(dynamic value) {
+      switch ((value ?? '').toString().trim()) {
+        case 'smartchef_to_savein':
+          return 'da SmartChef verso SaveIn!';
+        case 'savein_to_smartchef':
+          return 'da SaveIn! verso SmartChef';
+        default:
+          final text = (value ?? '').toString().trim();
+          return text.isEmpty ? '—' : text;
+      }
+    }
+
+    Future<String> promotionLabel(String id) async {
+      final promoId = id.trim();
+      if (promoId.isEmpty) return 'Promo';
+      if (promoId == 'smartchef_savein_launch') {
+        return 'Cross-promo SmartChef ↔ SaveIn!';
+      }
+      try {
+        final snap =
+            await _firestore.collection('promotion_banners').doc(promoId).get();
+        final data = snap.data() ?? <String, dynamic>{};
+        final label = (data['title'] ?? data['name'] ?? data['message'] ?? '')
+            .toString()
+            .trim();
+        return label.isEmpty ? promoId : label;
+      } catch (_) {
+        return promoId;
+      }
+    }
+
+    if (user.createdAt != null) {
+      add(
+        when: user.createdAt,
+        title: 'Registrazione account',
+        source: 'auth/signup',
+        detail: 'Account creato',
+        icon: Icons.person_add_alt_1,
+        color: const Color(0xFF15803D),
+      );
+    }
+
+    final adminLogs = await _firestore
+        .collection('admin_logs')
+        .where('targetUserId', isEqualTo: user.id)
+        .get();
+    for (final doc in adminLogs.docs) {
+      final data = doc.data();
+      final action = (data['action'] ?? '').toString();
+      final details = data['details'] is Map
+          ? Map<String, dynamic>.from(data['details'] as Map)
+          : <String, dynamic>{};
+      if (action == 'role_changed') {
+        final oldRole = details['oldRole'];
+        final newRole = details['newRole'];
+        final roleDetail = oldRole == null
+            ? 'Nuovo piano: ${statusLabel(newRole)}'
+            : '${statusLabel(oldRole)} → ${statusLabel(newRole)}';
+        add(
+          when: _parseDate(data['timestamp']),
+          title: 'Cambio piano account',
+          source: 'admin_logs',
+          detail: roleDetail,
+          icon: Icons.swap_horiz_outlined,
+          color: const Color(0xFF2563EB),
+        );
+      } else if (action == 'premium_expiry_changed') {
+        final premiumUntil = _parseDate(details['premiumUntil']);
+        add(
+          when: _parseDate(data['timestamp']),
+          title: premiumUntil == null
+              ? 'Scadenza Premium rimossa'
+              : 'Scadenza Premium aggiornata',
+          source: 'admin_logs',
+          detail: premiumUntil == null
+              ? 'Premium senza scadenza manuale'
+              : 'Premium fino a ${_formatDate(premiumUntil)}',
+          icon: Icons.workspace_premium_outlined,
+          color: const Color(0xFF7C3AED),
+        );
+      }
+    }
+
+    final userSnap = await _firestore.collection('users').doc(user.id).get();
+    final userData = userSnap.data() ?? <String, dynamic>{};
+    final birthdayOffer = userData['birthdayOffer'];
+    if (birthdayOffer is Map) {
+      final offer = Map<String, dynamic>.from(birthdayOffer);
+      add(
+        when: _parseDate(offer['assignedAt']),
+        title: 'Promo compleanno assegnata',
+        source: 'birthday_offer',
+        detail:
+            '${offer['offerName'] ?? 'Offerta compleanno'}${(offer['promoCode'] ?? '').toString().isNotEmpty ? ' · Codice: ${offer['promoCode']}' : ''}',
+        icon: Icons.cake_outlined,
+        color: const Color(0xFFDB2777),
+      );
+    }
+
+    try {
+      final audit = await _firestore
+          .collection('users')
+          .doc(user.id)
+          .collection('account_history')
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+      for (final doc in audit.docs) {
+        final data = doc.data();
+        final before = data['before'] is Map
+            ? Map<String, dynamic>.from(data['before'] as Map)
+            : <String, dynamic>{};
+        final after = data['after'] is Map
+            ? Map<String, dynamic>.from(data['after'] as Map)
+            : <String, dynamic>{};
+        final details = <String>[];
+        final beforeRole = before['role']?.toString();
+        final afterRole = after['role']?.toString();
+        if ((beforeRole ?? '').isNotEmpty || (afterRole ?? '').isNotEmpty) {
+          details.add('${beforeRole ?? '—'} → ${afterRole ?? '—'}');
+        }
+        final beforeUntil = _parseDate(before['premiumUntil']);
+        final afterUntil = _parseDate(after['premiumUntil']);
+        if (beforeUntil != null || afterUntil != null) {
+          details.add(
+            'Scadenza: ${_formatDate(beforeUntil)} → ${_formatDate(afterUntil)}',
+          );
+        }
+        if (after['durationDays'] != null) {
+          details.add('${after['durationDays']} giorni Premium');
+        }
+        add(
+          when: _parseDate(data['createdAt']),
+          title: (data['title'] as String?) ?? 'Evento account',
+          source: (data['source'] as String?) ?? '',
+          detail: details.isEmpty ? '—' : details.join(' · '),
+        );
+      }
+    } catch (e) {
+      add(
+        when: null,
+        title: 'Storico dettagliato non disponibile',
+        source: 'account_history',
+        detail:
+            'Uso lo storico admin disponibile. Dettaglio non caricato: ${e.toString().replaceFirst('Exception: ', '')}',
+        icon: Icons.info_outline,
+        color: const Color(0xFFB45309),
+      );
+    }
+
+    final redemptions = await _firestore
+        .collection('promotion_redemptions')
+        .where('userId', isEqualTo: user.id)
+        .get();
+    for (final doc in redemptions.docs) {
+      final data = doc.data();
+      final premiumUntil = _parseDate(data['premiumUntil']);
+      final promoTitle =
+          await promotionLabel((data['promotionId'] ?? '').toString());
+      final parts = <String>[
+        promoTitle,
+        'Stato: ${statusLabel(data['status'] ?? 'riscattato')}',
+        if ((data['direction'] ?? '').toString().isNotEmpty)
+          'Direzione: ${directionLabel(data['direction'])}',
+        if (premiumUntil != null) 'Premium fino a ${_formatDate(premiumUntil)}',
+      ];
+      add(
+        when: _parseDate(data['redeemedAt']),
+        title: 'Promo/banner utilizzato',
+        source: 'promotion_redemptions',
+        detail: parts.join(' · '),
+        icon: Icons.local_offer_outlined,
+        color: const Color(0xFF7C3AED),
+      );
+    }
+
+    final firstClaims = await _firestore
+        .collection('new_signup_premium_promo_claims')
+        .where('firstUserId', isEqualTo: user.id)
+        .get();
+    final lastClaims = await _firestore
+        .collection('new_signup_premium_promo_claims')
+        .where('lastUserId', isEqualTo: user.id)
+        .get();
+    final claimDocs = {
+      for (final doc in firstClaims.docs) doc.id: doc,
+      for (final doc in lastClaims.docs) doc.id: doc,
+    }.values;
+    for (final doc in claimDocs) {
+      final data = doc.data();
+      final premiumUntil = _parseDate(data['premiumUntil']);
+      final parts = <String>[
+        '${data['durationDays'] ?? '—'} giorni Premium',
+        if (premiumUntil != null) 'Premium fino a ${_formatDate(premiumUntil)}',
+      ];
+      add(
+        when: _parseDate(data['startedAt']),
+        title: 'Promo benvenuto riscattata',
+        source: 'new_signup_promo',
+        detail: parts.join(' · '),
+        icon: Icons.card_giftcard_outlined,
+        color: const Color(0xFFD97706),
+      );
+    }
+
+    final crossSource = await _firestore
+        .collection('cross_app_promos')
+        .where('sourceUid', isEqualTo: user.id)
+        .get();
+    final crossSaveIn = await _firestore
+        .collection('cross_app_promos')
+        .where('saveinUid', isEqualTo: user.id)
+        .get();
+    final crossDocs = {
+      for (final doc in crossSource.docs) doc.id: doc,
+      for (final doc in crossSaveIn.docs) doc.id: doc,
+    }.values;
+    for (final doc in crossDocs) {
+      final data = doc.data();
+      final direction = (data['direction'] ?? '').toString().isNotEmpty
+          ? data['direction']
+          : '${data['sourceApp'] ?? '?'}_to_${data['targetApp'] ?? '?'}';
+      add(
+        when: _parseDate(data['saveinClaimedAt']) ??
+            _parseDate(data['saveinStartedAt']) ??
+            _parseDate(data['updatedAt']) ??
+            _parseDate(data['createdAt']),
+        title: 'Cross-promo',
+        source: 'cross_app_promos',
+        detail:
+            'Direzione: ${directionLabel(direction)} · Stato: ${statusLabel(data['status'])} · ${data['durationDays'] ?? '—'} giorni Premium',
+        icon: Icons.compare_arrows_outlined,
+        color: const Color(0xFF0891B2),
+      );
+    }
+
+    entries.sort((a, b) {
+      final left = a.when ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final right = b.when ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return right.compareTo(left);
+    });
+    return entries.take(100).toList();
   }
 
   Widget _buildUserPostsPage(_AdminUserRecord? user) {
@@ -5490,7 +8032,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
+          constraints: const BoxConstraints(maxWidth: 1400),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -5508,6 +8050,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 style: const TextStyle(color: Color(0xFF4B5563), fontSize: 15),
               ),
               const SizedBox(height: 16),
+              _buildUserSubNav(),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -6002,32 +8545,77 @@ class _AdminNavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = selected ? Colors.white : const Color(0xFF374151);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: selected ? Colors.deepPurple : const Color(0xFFF8FAFC),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+          side: BorderSide(
+            color: selected ? Colors.deepPurple : const Color(0xFFCBD5E1),
+            width: 1.2,
+          ),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            height: 44,
+            constraints: const BoxConstraints(minWidth: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: foreground,
+                fontWeight: FontWeight.w700,
+                height: 1,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UserSectionTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  const _UserSectionTab({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Material(
-      color: selected ? Colors.deepPurple : const Color(0xFFF8FAFC),
+      color: selected ? Colors.white : Colors.transparent,
+      elevation: selected ? 1 : 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(8),
         side: BorderSide(
-          color: selected ? Colors.deepPurple : const Color(0xFFCBD5E1),
-          width: 1.2,
+          color: selected ? const Color(0xFF6366F1) : const Color(0xFFD1D5DB),
         ),
       ),
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          height: 44,
-          constraints: const BoxConstraints(minWidth: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-          alignment: Alignment.center,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           child: Text(
             label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
             style: TextStyle(
-              color: foreground,
-              fontWeight: FontWeight.w700,
-              height: 1,
+              color:
+                  selected ? const Color(0xFF4338CA) : const Color(0xFF374151),
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
         ),
@@ -6043,22 +8631,25 @@ class _AdminBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xFFF8FAFC),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(999),
-        side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
-      ),
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(999),
-        child: const SizedBox(
-          width: 44,
-          height: 44,
-          child: Icon(
-            Icons.arrow_back,
-            size: 20,
-            color: Color(0xFF374151),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Material(
+        color: const Color(0xFFF8FAFC),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+          side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: const SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(
+              Icons.arrow_back,
+              size: 20,
+              color: Color(0xFF374151),
+            ),
           ),
         ),
       ),
@@ -6308,7 +8899,7 @@ enum _AdminDashboardSection {
   userDetail,
   userPosts,
   userFolders,
-  plans,
+  planLimits,
   globalStats,
   finance,
   notifications,
@@ -6316,19 +8907,99 @@ enum _AdminDashboardSection {
   accesses,
 }
 
+enum _NotificationMode { notification, email }
+
+class _PromoDropdownHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _PromoDropdownHeader({
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: Colors.orange.shade700),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: Colors.orange.shade800,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PromoDropdownOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? inactiveLabel;
+
+  const _PromoDropdownOption({
+    required this.icon,
+    required this.title,
+    this.inactiveLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: const Color(0xFF667085)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        if (inactiveLabel != null) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7ED),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0xFFFED7AA)),
+            ),
+            child: Text(
+              inactiveLabel!,
+              style: const TextStyle(
+                color: Color(0xFFC2410C),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _PromotionBannerListRow extends StatelessWidget {
   final _PromotionBannerRecord banner;
   final Future<_PromotionBannerStats> Function(String id) loadStats;
   final ValueChanged<bool> onToggle;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
 
   const _PromotionBannerListRow({
     required this.banner,
     required this.loadStats,
     required this.onToggle,
     required this.onEdit,
-    required this.onDelete,
   });
 
   @override
@@ -6338,7 +9009,8 @@ class _PromotionBannerListRow extends StatelessWidget {
     final activeBg =
         banner.active ? const Color(0xFFDCFCE7) : const Color(0xFFF3F4F6);
     final title = banner.title.trim().isEmpty ? banner.id : banner.title.trim();
-    final hasImage = banner.imageUrl.trim().isNotEmpty;
+    final previewImageUrl = banner.previewImageUrl;
+    final hasImage = previewImageUrl.isNotEmpty;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -6355,7 +9027,7 @@ class _PromotionBannerListRow extends StatelessWidget {
                   aspectRatio: 3,
                   child: hasImage
                       ? Image.network(
-                          banner.imageUrl.trim(),
+                          previewImageUrl,
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(
                             color: const Color(0xFFF3F4F6),
@@ -6487,28 +9159,19 @@ class _PromotionBannerListRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: const Text(
-                      'Attivo',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(fontSize: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: () => onToggle(!banner.active),
+                    icon: Icon(
+                      banner.active ? Icons.pause_circle : Icons.play_arrow,
+                      size: 16,
                     ),
-                    value: banner.active,
-                    onChanged: onToggle,
-                    controlAffinity: ListTileControlAffinity.trailing,
+                    label: Text(banner.active ? 'Disattiva' : 'Attiva'),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed: onEdit,
                     icon: const Icon(Icons.edit, size: 16),
                     label: const Text('Modifica'),
-                  ),
-                  IconButton(
-                    tooltip: 'Elimina',
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline),
                   ),
                 ],
               ),
@@ -6610,7 +9273,8 @@ class _PromotionBannerHistoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = banner.title.trim().isEmpty ? banner.id : banner.title.trim();
-    final hasImage = banner.imageUrl.trim().isNotEmpty;
+    final previewImageUrl = banner.previewImageUrl;
+    final hasImage = previewImageUrl.isNotEmpty;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -6625,7 +9289,7 @@ class _PromotionBannerHistoryTile extends StatelessWidget {
               aspectRatio: 3,
               child: hasImage
                   ? Image.network(
-                      banner.imageUrl.trim(),
+                      previewImageUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(
                         color: const Color(0xFFF3F4F6),
@@ -6974,6 +9638,8 @@ class _PromotionBannerRecord {
   final String secondaryCtaLabel;
   final String actionUrl;
   final String imageUrl;
+  final String saveinImageUrl;
+  final String smartchefImageUrl;
   final int priority;
   final bool oncePerUser;
   final DateTime? startsAt;
@@ -6992,6 +9658,8 @@ class _PromotionBannerRecord {
     required this.secondaryCtaLabel,
     required this.actionUrl,
     required this.imageUrl,
+    required this.saveinImageUrl,
+    required this.smartchefImageUrl,
     required this.priority,
     required this.oncePerUser,
     required this.startsAt,
@@ -6999,6 +9667,15 @@ class _PromotionBannerRecord {
     required this.createdAt,
     required this.updatedAt,
   });
+
+  String get previewImageUrl {
+    if (app == 'smartchef' && smartchefImageUrl.trim().isNotEmpty) {
+      return smartchefImageUrl.trim();
+    }
+    if (saveinImageUrl.trim().isNotEmpty) return saveinImageUrl.trim();
+    if (smartchefImageUrl.trim().isNotEmpty) return smartchefImageUrl.trim();
+    return imageUrl.trim();
+  }
 
   factory _PromotionBannerRecord.fromDoc(
     QueryDocumentSnapshot<Map<String, dynamic>> doc,
@@ -7021,6 +9698,8 @@ class _PromotionBannerRecord {
       secondaryCtaLabel: (data['secondaryCtaLabel'] ?? '').toString(),
       actionUrl: (data['actionUrl'] ?? '').toString(),
       imageUrl: (data['imageUrl'] ?? '').toString(),
+      saveinImageUrl: (data['saveinImageUrl'] ?? '').toString(),
+      smartchefImageUrl: (data['smartchefImageUrl'] ?? '').toString(),
       priority: (data['priority'] as num?)?.toInt() ?? 0,
       oncePerUser: data['oncePerUser'] != false,
       startsAt: parseDate(data['startsAt']),
@@ -7199,23 +9878,38 @@ class _FinanceContentStats {
 class _GlobalContentStats {
   final int totalPosts;
   final int totalFolders;
+  final int totalUsers;
+  final int freeUsers;
+  final int premiumUsers;
+  final int adminUsers;
   final List<MapEntry<String, int>> topSources;
   final List<MapEntry<String, int>> topCreators;
+  final List<MapEntry<String, int>> topTags;
   final List<MapEntry<String, int>> topFolderNames;
 
   const _GlobalContentStats({
     required this.totalPosts,
     required this.totalFolders,
+    required this.totalUsers,
+    required this.freeUsers,
+    required this.premiumUsers,
+    required this.adminUsers,
     required this.topSources,
     required this.topCreators,
+    required this.topTags,
     required this.topFolderNames,
   });
 
   const _GlobalContentStats.empty()
       : totalPosts = 0,
         totalFolders = 0,
+        totalUsers = 0,
+        freeUsers = 0,
+        premiumUsers = 0,
+        adminUsers = 0,
         topSources = const [],
         topCreators = const [],
+        topTags = const [],
         topFolderNames = const [];
 }
 
@@ -7347,6 +10041,9 @@ class _AdminUserRecord {
   final DateTime? blockedAt;
   final DateTime? createdAt;
   final DateTime? lastLogin;
+  final DateTime? premiumUntil;
+  final DateTime? birthDate;
+  final String? gender;
   final bool acceptedMarketing;
   final DateTime? marketingConsentDate;
 
@@ -7362,6 +10059,9 @@ class _AdminUserRecord {
     required this.blockedAt,
     required this.createdAt,
     required this.lastLogin,
+    required this.premiumUntil,
+    this.birthDate,
+    this.gender,
     required this.acceptedMarketing,
     this.marketingConsentDate,
   });
@@ -7369,6 +10069,14 @@ class _AdminUserRecord {
   factory _AdminUserRecord.fromDoc(
       QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
+
+    // Filtro per app_id: escludiamo utenti SmartChef se presente un app_id diverso da 'savein'
+    // Se app_id è null, assumiamo sia SaveIn (vecchi utenti)
+    final appId = data['app_id'] as String?;
+    if (appId != null && appId != 'savein') {
+      // Restituiamo un record "vuoto" o marcato, che verrà filtrato dopo
+      return _AdminUserRecord.empty(doc.id);
+    }
 
     DateTime? parseDate(dynamic value) {
       if (value is Timestamp) return value.toDate();
@@ -7394,6 +10102,9 @@ class _AdminUserRecord {
       blockedAt: parseDate(data['blockedAt']),
       createdAt: parseDate(data['createdAt']),
       lastLogin: parseDate(data['lastLogin']),
+      premiumUntil: parseDate(data['premiumUntil']),
+      birthDate: parseDate(data['birthDate']),
+      gender: data['gender'] as String?,
       acceptedMarketing: marketing?['accepted'] ?? false,
       marketingConsentDate: parseDate(marketing?['lastModified']) ??
           parseDate(marketing?['consentDate']),
@@ -7402,6 +10113,44 @@ class _AdminUserRecord {
 
   DashboardAccessRole get effectiveDashboardRole =>
       role == AppUserRole.admin ? DashboardAccessRole.admin : dashboardRole;
+
+  bool get isPlaceholder => email == 'placeholder';
+
+  factory _AdminUserRecord.empty(String id) {
+    return _AdminUserRecord(
+      id: id,
+      name: '',
+      email: 'placeholder',
+      username: null,
+      role: AppUserRole.free,
+      dashboardRole: DashboardAccessRole.none,
+      isBlocked: false,
+      blockedReason: null,
+      blockedAt: null,
+      createdAt: null,
+      lastLogin: null,
+      premiumUntil: null,
+      acceptedMarketing: false,
+    );
+  }
+}
+
+class _AccountHistoryEntry {
+  final DateTime? when;
+  final String title;
+  final String source;
+  final String detail;
+  final IconData icon;
+  final Color color;
+
+  const _AccountHistoryEntry({
+    required this.when,
+    required this.title,
+    required this.source,
+    required this.detail,
+    required this.icon,
+    required this.color,
+  });
 }
 
 class _AdminLogRecord {
@@ -7438,6 +10187,8 @@ class _AdminLogRecord {
     switch (action) {
       case 'role_changed':
         return 'Ruolo utente aggiornato';
+      case 'premium_expiry_changed':
+        return 'Scadenza Premium aggiornata';
       case 'user_blocked':
         return 'Utente bloccato';
       case 'user_unblocked':
@@ -7452,9 +10203,13 @@ class _AdminLogRecord {
   String get subtitle {
     final newRole = details['newRole'];
     final reason = details['reason'];
+    final premiumUntil = details['premiumUntil'];
 
     if (newRole != null) {
       return 'Target: $targetUserId • Nuovo ruolo: $newRole';
+    }
+    if (premiumUntil != null) {
+      return 'Target: $targetUserId • Scadenza: $premiumUntil';
     }
     if (reason != null && reason.toString().trim().isNotEmpty) {
       return 'Target: $targetUserId • Motivo: $reason';

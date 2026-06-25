@@ -22,6 +22,7 @@
     }
   },
   "hosting": {
+    "site": "saveit-app-1784d",
     "public": "build/web",
     "ignore": [
       "firebase.json",

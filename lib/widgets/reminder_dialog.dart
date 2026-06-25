@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../models.dart';
+import 'package:savein/models.dart';
 import '../services/reminder_service.dart';
 
 class ReminderDialog extends StatefulWidget {
@@ -7,6 +7,7 @@ class ReminderDialog extends StatefulWidget {
   final String? postId;
   final String? postTitle;
   final String? postUrl;
+  final String? postFolderId;
 
   // Campi per reminder su cartella
   final String? targetFolderId;
@@ -20,6 +21,7 @@ class ReminderDialog extends StatefulWidget {
     required String this.postId,
     required String this.postTitle,
     required String this.postUrl,
+    this.postFolderId,
     required this.isDarkTheme,
   })  : targetFolderId = null,
         folderName = null;
@@ -33,7 +35,8 @@ class ReminderDialog extends StatefulWidget {
   })  : targetFolderId = folderId,
         postId = null,
         postTitle = null,
-        postUrl = null;
+        postUrl = null,
+        postFolderId = null;
 
   bool get isFolderMode => targetFolderId != null;
 
@@ -51,7 +54,8 @@ class ReminderDialog extends StatefulWidget {
     String? folderId,
     required this.isDarkTheme,
   })  : targetFolderId = null,
-        folderName = null;
+        folderName = null,
+        postFolderId = folderId;
 
   @override
   State<ReminderDialog> createState() => _ReminderDialogState();
@@ -63,13 +67,46 @@ class _ReminderDialogState extends State<ReminderDialog> {
   bool _saving = false;
 
   DateTime? _selectedDate;
-  TimeOfDay _selectedTime = const TimeOfDay(hour: 9, minute: 0);
-  bool _isYearly = true;
+  TimeOfDay? _selectedTime;
+  bool _isYearly = false;
+
+  TimeOfDay _initialPickerTime() {
+    final now = DateTime.now().add(const Duration(minutes: 5));
+    return TimeOfDay(hour: now.hour, minute: now.minute);
+  }
+
+  DateTime? _selectedDateTime() {
+    final date = _selectedDate;
+    final time = _selectedTime;
+    if (date == null || time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  String _formatItalianDate(DateTime date) {
+    const months = [
+      'gennaio',
+      'febbraio',
+      'marzo',
+      'aprile',
+      'maggio',
+      'giugno',
+      'luglio',
+      'agosto',
+      'settembre',
+      'ottobre',
+      'novembre',
+      'dicembre',
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
 
   @override
   void initState() {
     super.initState();
     _loadReminders();
+    // Pre-seleziona oggi come data predefinita
+    final now = DateTime.now();
+    _selectedDate = DateTime(now.year, now.month, now.day);
   }
 
   Future<void> _loadReminders() async {
@@ -89,7 +126,7 @@ class _ReminderDialogState extends State<ReminderDialog> {
   Future<void> _pickTime() async {
     final picked = await showTimePicker(
       context: context,
-      initialTime: _selectedTime,
+      initialTime: _selectedTime ?? _initialPickerTime(),
       builder: (context, child) {
         return Theme(
           data: widget.isDarkTheme
@@ -110,12 +147,17 @@ class _ReminderDialogState extends State<ReminderDialog> {
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? DateTime(now.year, now.month + 1, now.day),
-      firstDate: DateTime(now.year, now.month, now.day),
+      initialDate: _selectedDate ?? today,
+      firstDate: today.subtract(const Duration(days: 365)), // Permetti di vedere oggi chiaramente
       lastDate: DateTime(now.year + 5, 12, 31),
       helpText: 'Scegli il giorno del reminder',
+      cancelText: 'Annulla',
+      confirmText: 'Conferma',
+      fieldLabelText: 'Data reminder',
+      fieldHintText: 'gg/mm/aaaa',
       builder: (context, child) {
         return Theme(
           data: widget.isDarkTheme
@@ -135,7 +177,27 @@ class _ReminderDialogState extends State<ReminderDialog> {
   }
 
   Future<void> _saveReminder() async {
-    if (_selectedDate == null) return;
+    final selectedDateTime = _selectedDateTime();
+    if (selectedDateTime == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Seleziona data e ora del reminder.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (!selectedDateTime.isAfter(DateTime.now().subtract(const Duration(minutes: 1)))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Per oggi scegli un orario successivo a quello attuale.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       if (widget.isFolderMode) {
@@ -144,8 +206,8 @@ class _ReminderDialogState extends State<ReminderDialog> {
           folderName: widget.folderName ?? '',
           day: _selectedDate!.day,
           month: _selectedDate!.month,
-          hour: _selectedTime.hour,
-          minute: _selectedTime.minute,
+          hour: _selectedTime!.hour,
+          minute: _selectedTime!.minute,
           isYearly: _isYearly,
         );
       } else {
@@ -153,16 +215,19 @@ class _ReminderDialogState extends State<ReminderDialog> {
           postId: widget.postId!,
           postTitle: widget.postTitle ?? '',
           postUrl: widget.postUrl ?? '',
+          folderId: widget.postFolderId,
           day: _selectedDate!.day,
           month: _selectedDate!.month,
-          hour: _selectedTime.hour,
-          minute: _selectedTime.minute,
+          hour: _selectedTime!.hour,
+          minute: _selectedTime!.minute,
           isYearly: _isYearly,
         );
       }
       if (mounted) {
         setState(() {
           _selectedDate = null;
+          _selectedTime = null;
+          _isYearly = false;
           _saving = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -226,7 +291,9 @@ class _ReminderDialogState extends State<ReminderDialog> {
             Row(
               children: [
                 Icon(
-                  widget.isFolderMode ? Icons.folder_outlined : Icons.notifications_active,
+                  widget.isFolderMode
+                      ? Icons.folder_outlined
+                      : Icons.notifications_active,
                   color: widget.isFolderMode ? Colors.orange : Colors.blue,
                   size: 22,
                 ),
@@ -273,9 +340,10 @@ class _ReminderDialogState extends State<ReminderDialog> {
                 ),
               ),
               const SizedBox(height: 8),
-              ..._reminders.map((r) => _buildReminderChip(r, textColor, subtitleColor)),
+              ..._reminders
+                  .map((r) => _buildReminderChip(r, textColor, subtitleColor)),
               const SizedBox(height: 16),
-              Divider(color: subtitleColor.withOpacity(0.3)),
+              Divider(color: subtitleColor.withValues(alpha: 0.3)),
               const SizedBox(height: 12),
             ],
 
@@ -294,30 +362,34 @@ class _ReminderDialogState extends State<ReminderDialog> {
             GestureDetector(
               onTap: _pickDate,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: widget.isDarkTheme ? Colors.grey[800] : Colors.grey[100],
+                  color:
+                      widget.isDarkTheme ? Colors.grey[800] : Colors.grey[100],
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: _selectedDate != null
                         ? Colors.blue
-                        : subtitleColor.withOpacity(0.3),
+                        : subtitleColor.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Row(
                   children: [
                     Icon(
                       Icons.calendar_today,
-                      color: _selectedDate != null ? Colors.blue : subtitleColor,
+                      color:
+                          _selectedDate != null ? Colors.blue : subtitleColor,
                       size: 18,
                     ),
                     const SizedBox(width: 10),
                     Text(
                       _selectedDate != null
-                          ? '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}'
+                          ? _formatItalianDate(_selectedDate!)
                           : 'Scegli una data...',
                       style: TextStyle(
-                        color: _selectedDate != null ? textColor : subtitleColor,
+                        color:
+                            _selectedDate != null ? textColor : subtitleColor,
                         fontSize: 15,
                       ),
                     ),
@@ -332,25 +404,40 @@ class _ReminderDialogState extends State<ReminderDialog> {
             GestureDetector(
               onTap: _pickTime,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: widget.isDarkTheme ? Colors.grey[800] : Colors.grey[100],
+                  color:
+                      widget.isDarkTheme ? Colors.grey[800] : Colors.grey[100],
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: Colors.blue.withOpacity(0.6),
+                    color: _selectedTime != null
+                        ? Colors.blue
+                        : subtitleColor.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.access_time, color: Colors.blue, size: 18),
+                    Icon(
+                      Icons.access_time,
+                      color:
+                          _selectedTime != null ? Colors.blue : subtitleColor,
+                      size: 18,
+                    ),
                     const SizedBox(width: 10),
                     Text(
-                      _selectedTime.format(context),
-                      style: TextStyle(color: textColor, fontSize: 15),
+                      _selectedTime != null
+                          ? _selectedTime!.format(context)
+                          : 'Scegli un orario...',
+                      style: TextStyle(
+                        color:
+                            _selectedTime != null ? textColor : subtitleColor,
+                        fontSize: 15,
+                      ),
                     ),
                     const Spacer(),
                     Text(
-                      'Cambia orario',
+                      _selectedTime != null ? 'Cambia orario' : 'Seleziona',
                       style: TextStyle(color: subtitleColor, fontSize: 12),
                     ),
                   ],
@@ -398,7 +485,11 @@ class _ReminderDialogState extends State<ReminderDialog> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: (_selectedDate == null || _saving) ? null : _saveReminder,
+                onPressed: (_selectedDate == null ||
+                        _selectedTime == null ||
+                        _saving)
+                    ? null
+                    : _saveReminder,
                 icon: _saving
                     ? const SizedBox(
                         width: 16,
@@ -413,7 +504,7 @@ class _ReminderDialogState extends State<ReminderDialog> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.blue.withOpacity(0.5),
+                  disabledBackgroundColor: Colors.blue.withValues(alpha: 0.5),
                   disabledForegroundColor: Colors.white70,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
@@ -433,9 +524,9 @@ class _ReminderDialogState extends State<ReminderDialog> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.12),
+        color: Colors.blue.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blue.withOpacity(0.4)),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.4)),
       ),
       child: Row(
         children: [

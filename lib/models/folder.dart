@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../utils/constants.dart';
+import 'package:savein/utils/constants.dart';
 
 // Mock classes per la demo web
 class MockFolder {

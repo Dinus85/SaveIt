@@ -1,29 +1,83 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/auth_service.dart';
+
 class SaveInFirstLaunchTutorial {
   static const String seenKey = 'savein_first_launch_tutorial_seen_v1';
+  static Future<void>? _showingFuture;
+  static Future<void>? _externalWelcomeFuture;
+  static bool _shownInCurrentSession = false;
 
-  static Future<void> showIfNeeded(BuildContext context) async {
+  static void trackExternalWelcome(Future<void> future) {
+    _externalWelcomeFuture = future.whenComplete(() {
+      if (identical(_externalWelcomeFuture, future)) {
+        _externalWelcomeFuture = null;
+      }
+    });
+  }
+
+  static Future<void> waitForActiveWelcome() async {
+    final tutorialFuture = _showingFuture;
+    if (tutorialFuture != null) {
+      await tutorialFuture;
+    }
+    final welcomeFuture = _externalWelcomeFuture;
+    if (welcomeFuture != null) {
+      await welcomeFuture;
+    }
+  }
+
+  static bool consumeShownInCurrentSession() {
+    final shown = _shownInCurrentSession;
+    _shownInCurrentSession = false;
+    return shown;
+  }
+
+  static String _seenKeyForCurrentUser() {
+    final userId = AuthService().currentUser?.id;
+    if (userId == null || userId.trim().isEmpty) return seenKey;
+    return '${seenKey}_$userId';
+  }
+
+  static Future<bool> showIfNeeded(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(seenKey) == true) return;
-    if (!context.mounted) return;
+    final key = _seenKeyForCurrentUser();
+    if (prefs.getBool(key) == true) return false;
+    await waitForActiveWelcome();
+    if (prefs.getBool(key) == true) return false;
+    final showingFuture = _showingFuture;
+    if (showingFuture != null) {
+      await showingFuture;
+      _shownInCurrentSession = true;
+      return true;
+    }
+    if (!context.mounted) return false;
 
-    await show(context, markSeenOnClose: true);
+    _showingFuture = show(context, markSeenOnClose: true);
+    try {
+      await _showingFuture;
+      _shownInCurrentSession = true;
+      return true;
+    } finally {
+      _showingFuture = null;
+    }
   }
 
   static Future<void> show(
     BuildContext context, {
     bool markSeenOnClose = false,
+    String? welcomeUserName,
   }) async {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => SaveInFirstLaunchTutorialDialog(
+        welcomeUserName: welcomeUserName,
         onClose: () async {
           if (!markSeenOnClose) return;
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool(seenKey, true);
+          await prefs.setBool(_seenKeyForCurrentUser(), true);
         },
       ),
     );
@@ -32,9 +86,11 @@ class SaveInFirstLaunchTutorial {
 
 class SaveInFirstLaunchTutorialDialog extends StatefulWidget {
   final Future<void> Function() onClose;
+  final String? welcomeUserName;
 
   const SaveInFirstLaunchTutorialDialog({
     super.key,
+    this.welcomeUserName,
     required this.onClose,
   });
 
@@ -49,7 +105,14 @@ class _SaveInFirstLaunchTutorialDialogState
   int _index = 0;
   bool _closing = false;
 
-  static const List<_TutorialSlideData> _slides = [
+  late final List<_TutorialSlideData> _slides = [
+    _TutorialSlideData(
+      illustration: _TutorialIllustrationType.welcome,
+      title: 'Benvenuto in SaveIn!',
+      message:
+          'Ciao ${_welcomeName}! Il tuo account è pronto. Ti mostro in pochi passaggi come salvare, organizzare e ritrovare tutto quello che ti interessa.',
+      color: const Color(0xFF2563EB),
+    ),
     _TutorialSlideData(
       illustration: _TutorialIllustrationType.folders,
       title: 'Crea cartelle e sottocartelle',
@@ -61,24 +124,36 @@ class _SaveInFirstLaunchTutorialDialogState
       illustration: _TutorialIllustrationType.savePost,
       title: 'Salva i post dove vuoi',
       message:
-          'Quando trovi un contenuto utile, salvalo subito nella cartella giusta per ritrovarlo facilmente.',
+          'Quando trovi un contenuto interessante, condividilo con SaveIn! nella cartella giusta per ritrovarlo facilmente.',
       color: Color(0xFF7C3AED),
     ),
     _TutorialSlideData(
       illustration: _TutorialIllustrationType.tagsSearch,
-      title: 'Aggiungi tag e cerca',
+      title: 'Aggiungi tag o cerca per titolo',
       message:
-          'Usa tag come “legno”, “regalo” o “ricetta” e ritrova tutto dalla barra di ricerca.',
+          'Cerca per titolo o usa tag come legno, regalo o ricetta estiva e ritrova tutto tramite la barra di ricerca.',
       color: Color(0xFF2563EB),
     ),
     _TutorialSlideData(
       illustration: _TutorialIllustrationType.reminder,
       title: 'Aggiungi un reminder',
       message:
-          'Imposta un promemoria su una cartella, per esempio “Natale”, e SaveIn ti ricorda quando riaprirla.',
+          'Imposta un promemoria su una cartella, per esempio “Anniversario”, e SaveIn! ti ricorda quando riaprirla.',
       color: Color(0xFFEA580C),
     ),
   ];
+
+  String get _welcomeName {
+    final explicitName = widget.welcomeUserName?.trim();
+    if (explicitName != null && explicitName.isNotEmpty) {
+      return explicitName.split(' ').first;
+    }
+    final currentName = AuthService().currentUser?.name.trim();
+    if (currentName != null && currentName.isNotEmpty) {
+      return currentName.split(' ').first;
+    }
+    return 'Utente';
+  }
 
   @override
   void dispose() {
@@ -91,15 +166,6 @@ class _SaveInFirstLaunchTutorialDialogState
     _closing = true;
     await widget.onClose();
     if (mounted) Navigator.of(context).pop();
-  }
-
-  void _goTo(int page) {
-    if (page < 0 || page >= _slides.length) return;
-    _controller.animateToPage(
-      page,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-    );
   }
 
   @override
@@ -142,40 +208,6 @@ class _SaveInFirstLaunchTutorialDialogState
                     backgroundColor: Colors.black.withOpacity(0.08),
                   ),
                   icon: const Icon(Icons.close, color: Color(0xFF111827)),
-                ),
-              ),
-              Positioned(
-                left: 8,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: IconButton(
-                    tooltip: 'Slide precedente',
-                    onPressed: _index == 0 ? null : () => _goTo(_index - 1),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.9),
-                      disabledBackgroundColor: Colors.white.withOpacity(0.35),
-                    ),
-                    icon: const Icon(Icons.chevron_left, size: 34),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 8,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: IconButton(
-                    tooltip: 'Slide successiva',
-                    onPressed: _index == _slides.length - 1
-                        ? null
-                        : () => _goTo(_index + 1),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.9),
-                      disabledBackgroundColor: Colors.white.withOpacity(0.35),
-                    ),
-                    icon: const Icon(Icons.chevron_right, size: 34),
-                  ),
                 ),
               ),
               Positioned(
@@ -243,7 +275,13 @@ class _TutorialSlideData {
   });
 }
 
-enum _TutorialIllustrationType { folders, savePost, tagsSearch, reminder }
+enum _TutorialIllustrationType {
+  welcome,
+  folders,
+  savePost,
+  tagsSearch,
+  reminder
+}
 
 class _TutorialSlide extends StatelessWidget {
   final _TutorialSlideData slide;
@@ -253,7 +291,7 @@ class _TutorialSlide extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(34, 62, 34, 116),
+      padding: const EdgeInsets.fromLTRB(34, 54, 34, 96),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -268,25 +306,25 @@ class _TutorialSlide extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           _TutorialIllustration(slide: slide),
-          const SizedBox(height: 28),
+          const SizedBox(height: 18),
           Text(
             slide.title,
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Color(0xFF111827),
-              fontSize: 28,
+              fontSize: 25,
               fontWeight: FontWeight.w900,
               height: 1.05,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           Text(
             slide.message,
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Color(0xFF4B5563),
-              fontSize: 16,
-              height: 1.42,
+              fontSize: 14,
+              height: 1.28,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -304,6 +342,8 @@ class _TutorialIllustration extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     switch (slide.illustration) {
+      case _TutorialIllustrationType.welcome:
+        return _WelcomeIllustration(color: slide.color);
       case _TutorialIllustrationType.folders:
         return _FoldersIllustration(color: slide.color);
       case _TutorialIllustrationType.savePost:
@@ -313,6 +353,52 @@ class _TutorialIllustration extends StatelessWidget {
       case _TutorialIllustrationType.reminder:
         return _ReminderIllustration(color: slide.color);
     }
+  }
+}
+
+class _WelcomeIllustration extends StatelessWidget {
+  final Color color;
+
+  const _WelcomeIllustration({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return _IllustrationFrame(
+      color: color,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.24),
+                  blurRadius: 12,
+                  offset: const Offset(0, 7),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.celebration,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Image.asset(
+            'assets/icon/SaveIn!.png',
+            height: 50,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(height: 6),
+          _TagChip(color: color, label: 'iniziamo'),
+        ],
+      ),
+    );
   }
 }
 
