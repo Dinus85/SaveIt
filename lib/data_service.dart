@@ -16,6 +16,7 @@ import 'package:savein/services/auth_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/services/post_preview_cache.dart';
 import 'package:savein/services/post_preview_remote_storage.dart';
+import 'package:savein/services/screen_awake_service.dart';
 
 /// Exception per errori di autenticazione
 class AuthenticationRequiredException implements Exception {
@@ -1573,64 +1574,68 @@ class DataService {
 
   /// Condivide un post con un altro utente
   Future<void> sharePost(SavedPost post, String recipientEmail) async {
-    await _ensureShareFeatureEnabled('share_post', 'Condivisione Post');
+    return ScreenAwakeService.keepAwake(() async {
+      await _ensureShareFeatureEnabled('share_post', 'Condivisione Post');
 
-    final recipient = await findUserByEmail(recipientEmail);
-    if (recipient == null) {
-      throw Exception('Utente con email $recipientEmail non trovato');
-    }
+      final recipient = await findUserByEmail(recipientEmail);
+      if (recipient == null) {
+        throw Exception('Utente con email $recipientEmail non trovato');
+      }
 
-    if (recipient['id'] == currentUserId) {
-      throw Exception('Non puoi condividere con te stesso');
-    }
+      if (recipient['id'] == currentUserId) {
+        throw Exception('Non puoi condividere con te stesso');
+      }
 
-    final postToShare = await _ensureStableRemotePreviewForSharing(post);
+      final postToShare = await _ensureStableRemotePreviewForSharing(post);
 
-    await _firebaseService.shareItem(
-      resourceId: postToShare.id,
-      type: 'post',
-      recipientId: recipient['id'],
-      originalData: {
-        'url': postToShare.url,
-        'title': postToShare.title,
-        'description': postToShare.description,
-        'imageUrl': postToShare.imageUrl,
-        'creatorName': postToShare.creatorName,
-        'creatorUsername': postToShare.creatorUsername,
-        'previewStorageUrl': postToShare.previewStorageUrl,
-        'tags': postToShare.tags,
-        'folderId': postToShare.folderId,
-        'isShared': postToShare.isShared,
-      },
-    );
-    await PlanLimitsService.recordFeatureSuccess('share_post');
+      await _firebaseService.shareItem(
+        resourceId: postToShare.id,
+        type: 'post',
+        recipientId: recipient['id'],
+        originalData: {
+          'url': postToShare.url,
+          'title': postToShare.title,
+          'description': postToShare.description,
+          'imageUrl': postToShare.imageUrl,
+          'creatorName': postToShare.creatorName,
+          'creatorUsername': postToShare.creatorUsername,
+          'previewStorageUrl': postToShare.previewStorageUrl,
+          'tags': postToShare.tags,
+          'folderId': postToShare.folderId,
+          'isShared': postToShare.isShared,
+        },
+      );
+      await PlanLimitsService.recordFeatureSuccess('share_post');
+    });
   }
 
   /// Condivide una cartella con un altro utente
   Future<void> shareFolder(Folder folder, String recipientEmail) async {
-    await _ensureShareFeatureEnabled('share_folder', 'Condivisione Cartella');
+    return ScreenAwakeService.keepAwake(() async {
+      await _ensureShareFeatureEnabled('share_folder', 'Condivisione Cartella');
 
-    final recipient = await findUserByEmail(recipientEmail);
-    if (recipient == null) {
-      throw Exception('Utente con email $recipientEmail non trovato');
-    }
+      final recipient = await findUserByEmail(recipientEmail);
+      if (recipient == null) {
+        throw Exception('Utente con email $recipientEmail non trovato');
+      }
 
-    if (recipient['id'] == currentUserId) {
-      throw Exception('Non puoi condividere con te stesso');
-    }
+      if (recipient['id'] == currentUserId) {
+        throw Exception('Non puoi condividere con te stesso');
+      }
 
-    await _firebaseService.shareItem(
-      resourceId: folder.id,
-      type: 'folder',
-      recipientId: recipient['id'],
-      originalData: {
-        'rootId': folder.id,
-        'name': folder.name,
-        'color': folder.color,
-        'parentId': folder.parentId,
-      },
-    );
-    await PlanLimitsService.recordFeatureSuccess('share_folder');
+      await _firebaseService.shareItem(
+        resourceId: folder.id,
+        type: 'folder',
+        recipientId: recipient['id'],
+        originalData: {
+          'rootId': folder.id,
+          'name': folder.name,
+          'color': folder.color,
+          'parentId': folder.parentId,
+        },
+      );
+      await PlanLimitsService.recordFeatureSuccess('share_folder');
+    });
   }
 
   /// Ottiene gli elementi condivisi con l'utente corrente
@@ -2139,125 +2144,128 @@ class DataService {
     String? targetParentFolderId,
     String? rootTitle,
   }) async {
-    try {
-      if (kDebugMode) {
-        print('DEBUG: DataService - Inizio importazione cartella condivisa');
-      }
-
-      // 1. Parse dei dati
-      final sourcePosts = _parseSharedPostEntries(originalData['posts']);
-      final sourceFolders = _parseSharedFolderEntries(
-        originalData,
-        resourceId: resourceId,
-        sourcePosts: sourcePosts,
-      );
-      final rootId = _detectSharedRootId(
-        sourceFolders,
-        originalData,
-        resourceId,
-      );
-
-      if (kDebugMode) {
-        print(
-            'DEBUG: DataService - Root rilevata: $rootId, Folders: ${sourceFolders.length}, Posts: ${sourcePosts.length}');
-      }
-
-      // 2. Assicura che tutte le cartelle referenziate dai post siano incluse
-      _ensureFoldersReferencedByPosts(
-        sourceFolders: sourceFolders,
-        sourcePosts: sourcePosts,
-        rootId: rootId,
-      );
-
-      // 3. Attacca cartelle orfane alla root
-      _attachOrphanSharedFolders(sourceFolders, rootId);
-
-      // 4. Valida limiti (opzionale, ma utile per utenti free)
+    return ScreenAwakeService.keepAwake(() async {
       try {
-        final folders = await getFolders(forceRefresh: true);
-        Folder? folderById(String? folderId) {
-          if (folderId == null || folderId.isEmpty || folderId == 'all_folder')
-            return null;
-          try {
-            return folders.firstWhere((folder) => folder.id == folderId);
-          } catch (_) {
-            return null;
-          }
+        if (kDebugMode) {
+          print('DEBUG: DataService - Inizio importazione cartella condivisa');
         }
 
-        int folderLevel(String? folderId) {
-          final folder = folderById(folderId);
-          if (folder == null || folder.parentId == null) return 0;
-          return folderLevel(folder.parentId) + 1;
+        // 1. Parse dei dati
+        final sourcePosts = _parseSharedPostEntries(originalData['posts']);
+        final sourceFolders = _parseSharedFolderEntries(
+          originalData,
+          resourceId: resourceId,
+          sourcePosts: sourcePosts,
+        );
+        final rootId = _detectSharedRootId(
+          sourceFolders,
+          originalData,
+          resourceId,
+        );
+
+        if (kDebugMode) {
+          print(
+              'DEBUG: DataService - Root rilevata: $rootId, Folders: ${sourceFolders.length}, Posts: ${sourcePosts.length}');
         }
 
-        final targetParent = folderById(targetParentFolderId);
-        final depthRule = await PlanLimitsService.getRule('folder_levels',
-            forceRefresh: true);
+        // 2. Assicura che tutte le cartelle referenziate dai post siano incluse
+        _ensureFoldersReferencedByPosts(
+          sourceFolders: sourceFolders,
+          sourcePosts: sourcePosts,
+          rootId: rootId,
+        );
 
-        if (depthRule.limit > 0 && sourceFolders.isNotEmpty) {
-          final targetParentPathLength =
-              targetParent == null ? 0 : folderLevel(targetParent.id) + 1;
-          final maxSourceDepth = sourceFolders
-              .map((sourceFolder) =>
-                  _sharedSourceFolderDepth(sourceFolder, sourceFolders))
-              .fold<int>(
-                  0, (maxDepth, depth) => depth > maxDepth ? depth : maxDepth);
+        // 3. Attacca cartelle orfane alla root
+        _attachOrphanSharedFolders(sourceFolders, rootId);
 
-          if (targetParentPathLength + maxSourceDepth > depthRule.limit) {
-            if (kDebugMode) {
-              print(
-                  'WARNING: Limite profondità superato (${targetParentPathLength + maxSourceDepth} > ${depthRule.limit}). Procedo comunque ma alcune cartelle potrebbero essere appiattite.');
+        // 4. Valida limiti (opzionale, ma utile per utenti free)
+        try {
+          final folders = await getFolders(forceRefresh: true);
+          Folder? folderById(String? folderId) {
+            if (folderId == null ||
+                folderId.isEmpty ||
+                folderId == 'all_folder') return null;
+            try {
+              return folders.firstWhere((folder) => folder.id == folderId);
+            } catch (_) {
+              return null;
             }
           }
+
+          int folderLevel(String? folderId) {
+            final folder = folderById(folderId);
+            if (folder == null || folder.parentId == null) return 0;
+            return folderLevel(folder.parentId) + 1;
+          }
+
+          final targetParent = folderById(targetParentFolderId);
+          final depthRule = await PlanLimitsService.getRule('folder_levels',
+              forceRefresh: true);
+
+          if (depthRule.limit > 0 && sourceFolders.isNotEmpty) {
+            final targetParentPathLength =
+                targetParent == null ? 0 : folderLevel(targetParent.id) + 1;
+            final maxSourceDepth = sourceFolders
+                .map((sourceFolder) =>
+                    _sharedSourceFolderDepth(sourceFolder, sourceFolders))
+                .fold<int>(0,
+                    (maxDepth, depth) => depth > maxDepth ? depth : maxDepth);
+
+            if (targetParentPathLength + maxSourceDepth > depthRule.limit) {
+              if (kDebugMode) {
+                print(
+                    'WARNING: Limite profondità superato (${targetParentPathLength + maxSourceDepth} > ${depthRule.limit}). Procedo comunque ma alcune cartelle potrebbero essere appiattite.');
+              }
+            }
+          }
+        } catch (e) {
+          if (kDebugMode)
+            print('DEBUG: Errore durante validazione limiti import: $e');
         }
+
+        // 5. Crea le cartelle
+        final idMap = await _createImportedSharedFolders(
+          sourceFolders: sourceFolders,
+          rootId: rootId,
+          targetParentFolderId: targetParentFolderId,
+          originalData: originalData,
+          rootTitle: rootTitle,
+        );
+
+        final importedRootId = rootId.isNotEmpty
+            ? idMap[rootId]
+            : (idMap.isNotEmpty ? idMap.values.first : targetParentFolderId);
+
+        if (kDebugMode) {
+          print('DEBUG: Cartelle create. Root importata ID: $importedRootId');
+        }
+
+        // 6. Importa i post
+        await _importSharedFolderPosts(
+          sourcePosts: sourcePosts,
+          idMap: idMap,
+          rootId: rootId,
+          importedRootId: importedRootId,
+        );
+
+        // 7. Invalida cache una sola volta alla fine
+        if (kDebugMode) {
+          print(
+              'DEBUG: DataService - Importazione completata, invalidando cache');
+        }
+        invalidateCache(folders: true, posts: true);
+
+        // Notifica i listener del cambiamento strutturale
+        _notifyDataChange('cache_reloaded', {'userId': currentUserId});
+
+        return importedRootId ?? targetParentFolderId;
       } catch (e) {
-        if (kDebugMode)
-          print('DEBUG: Errore durante validazione limiti import: $e');
+        if (kDebugMode) {
+          print('ERRORE: Importazione cartella fallita: $e');
+        }
+        rethrow;
       }
-
-      // 5. Crea le cartelle
-      final idMap = await _createImportedSharedFolders(
-        sourceFolders: sourceFolders,
-        rootId: rootId,
-        targetParentFolderId: targetParentFolderId,
-        originalData: originalData,
-        rootTitle: rootTitle,
-      );
-
-      final importedRootId = rootId.isNotEmpty
-          ? idMap[rootId]
-          : (idMap.isNotEmpty ? idMap.values.first : targetParentFolderId);
-
-      if (kDebugMode) {
-        print('DEBUG: Cartelle create. Root importata ID: $importedRootId');
-      }
-
-      // 6. Importa i post
-      await _importSharedFolderPosts(
-        sourcePosts: sourcePosts,
-        idMap: idMap,
-        rootId: rootId,
-        importedRootId: importedRootId,
-      );
-
-      // 7. Invalida cache una sola volta alla fine
-      if (kDebugMode) {
-        print(
-            'DEBUG: DataService - Importazione completata, invalidando cache');
-      }
-      invalidateCache(folders: true, posts: true);
-
-      // Notifica i listener del cambiamento strutturale
-      _notifyDataChange('cache_reloaded', {'userId': currentUserId});
-
-      return importedRootId ?? targetParentFolderId;
-    } catch (e) {
-      if (kDebugMode) {
-        print('ERRORE: Importazione cartella fallita: $e');
-      }
-      rethrow;
-    }
+    });
   }
 
   /// Accetta un elemento condiviso (lo salva nella propria collezione)
@@ -2266,26 +2274,28 @@ class DataService {
     String? targetFolderId,
     String? targetParentFolderId,
   }) async {
-    await PlanLimitsService.consumeOrThrow(
-      'import_shared',
-      featureName: 'Importazione Contenuti',
-    );
+    return ScreenAwakeService.keepAwake(() async {
+      await PlanLimitsService.consumeOrThrow(
+        'import_shared',
+        featureName: 'Importazione Contenuti',
+      );
 
-    final result = await _firebaseService.importSharedResource(
-      shareId: sharedItem['id']?.toString(),
-      targetFolderId: targetFolderId,
-      targetParentFolderId: targetParentFolderId,
-    );
+      final result = await _firebaseService.importSharedResource(
+        shareId: sharedItem['id']?.toString(),
+        targetFolderId: targetFolderId,
+        targetParentFolderId: targetParentFolderId,
+      );
 
-    invalidateCache(folders: true, posts: true);
-    _notifyDataChange('cache_reloaded', {'userId': currentUserId});
-    await PlanLimitsService.recordFeatureSuccess('import_shared');
+      invalidateCache(folders: true, posts: true);
+      _notifyDataChange('cache_reloaded', {'userId': currentUserId});
+      await PlanLimitsService.recordFeatureSuccess('import_shared');
 
-    return (result['importedRootId'] ??
-            result['importedFolderId'] ??
-            targetFolderId ??
-            targetParentFolderId)
-        ?.toString();
+      return (result['importedRootId'] ??
+              result['importedFolderId'] ??
+              targetFolderId ??
+              targetParentFolderId)
+          ?.toString();
+    });
   }
 
   /// Importa un contenuto da share link copiandolo lato server dal proprietario.
@@ -2294,26 +2304,28 @@ class DataService {
     String? targetFolderId,
     String? targetParentFolderId,
   }) async {
-    await PlanLimitsService.consumeOrThrow(
-      'import_shared',
-      featureName: 'Importazione Contenuti',
-    );
+    return ScreenAwakeService.keepAwake(() async {
+      await PlanLimitsService.consumeOrThrow(
+        'import_shared',
+        featureName: 'Importazione Contenuti',
+      );
 
-    final result = await _firebaseService.importSharedResource(
-      token: token,
-      targetFolderId: targetFolderId,
-      targetParentFolderId: targetParentFolderId,
-    );
+      final result = await _firebaseService.importSharedResource(
+        token: token,
+        targetFolderId: targetFolderId,
+        targetParentFolderId: targetParentFolderId,
+      );
 
-    invalidateCache(folders: true, posts: true);
-    _notifyDataChange('cache_reloaded', {'userId': currentUserId});
-    await PlanLimitsService.recordFeatureSuccess('import_shared');
+      invalidateCache(folders: true, posts: true);
+      _notifyDataChange('cache_reloaded', {'userId': currentUserId});
+      await PlanLimitsService.recordFeatureSuccess('import_shared');
 
-    return (result['importedRootId'] ??
-            result['importedFolderId'] ??
-            targetFolderId ??
-            targetParentFolderId)
-        ?.toString();
+      return (result['importedRootId'] ??
+              result['importedFolderId'] ??
+              targetFolderId ??
+              targetParentFolderId)
+          ?.toString();
+    });
   }
 
   /// Rifiuta un elemento condiviso
