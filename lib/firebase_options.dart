@@ -53,13 +53,15 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCVIjnCAqi8gIy1sYpVMX-DSCMfwvFgptk',
-    appId: '1:776660339631:ios:016628f9f46386629e7d5a',
+    appId: '1:776660339631:ios:ac36b2aba03689b49e7d5a',
     messagingSenderId: '776660339631',
     projectId: 'saveit-app-1784d',
     storageBucket: 'saveit-app-1784d.firebasestorage.app',
-    androidClientId: '776660339631-da84644ndhbv3q5l5h3m9hl9tuv9mpgq.apps.googleusercontent.com',
-    iosClientId: '776660339631-utpt8pbescr42c5ir4eg9kt68nkalahs.apps.googleusercontent.com',
-    iosBundleId: 'com.example.saveit',
+    androidClientId:
+        '776660339631-bppg6krpb2n0jr9o45skr4b7fqha977i.apps.googleusercontent.com',
+    iosClientId:
+        '776660339631-qhgsdg8vin4gabllbbgd5526bffivosp.apps.googleusercontent.com',
+    iosBundleId: 'eu.savein.app',
   );
 
   static const FirebaseOptions web = FirebaseOptions(
@@ -77,9 +79,10 @@ class DefaultFirebaseOptions {
     messagingSenderId: '776660339631',
     projectId: 'saveit-app-1784d',
     storageBucket: 'saveit-app-1784d.firebasestorage.app',
-    androidClientId: '776660339631-da84644ndhbv3q5l5h3m9hl9tuv9mpgq.apps.googleusercontent.com',
-    iosClientId: '776660339631-utpt8pbescr42c5ir4eg9kt68nkalahs.apps.googleusercontent.com',
+    androidClientId:
+        '776660339631-da84644ndhbv3q5l5h3m9hl9tuv9mpgq.apps.googleusercontent.com',
+    iosClientId:
+        '776660339631-utpt8pbescr42c5ir4eg9kt68nkalahs.apps.googleusercontent.com',
     iosBundleId: 'com.example.saveit',
   );
-
 }
