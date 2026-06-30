@@ -308,19 +308,20 @@ mixin FolderServiceAnalytics on FolderServiceBase {
   // ============================================================================
   
   Map<String, int> getAccountStats() {
-    int totalFolders = folders.length;
-    
-    void countSubfolders(MockFolder folder) {
-      totalFolders += folder.children.length;
+    int totalFolders = 0;
+
+    void countFolder(MockFolder folder) {
+      if (folder.isSpecial) return;
+      totalFolders++;
       for (var child in folder.children) {
-        countSubfolders(child);
+        countFolder(child);
       }
     }
-    
+
     for (var folder in folders) {
-      countSubfolders(folder);
+      countFolder(folder);
     }
-    
+
     return {
       'totalPosts': allPosts.length,
       'totalFolders': totalFolders,

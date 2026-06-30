@@ -18,6 +18,7 @@ import 'package:savein/widgets/custom_bottom_nav.dart';
 import 'package:savein/widgets/first_launch_tutorial_dialog.dart';
 import 'package:savein/widgets/new_signup_premium_promo_dialog.dart';
 import 'package:savein/data_service.dart';
+import 'package:savein/services/folder_service.dart';
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -344,34 +345,12 @@ class AccountPage extends StatelessWidget {
     required this.folders,
   }) : super(key: key);
 
-  // Calcola il numero totale di post (simulato basato sulle cartelle)
   int _getTotalPosts() {
-    int totalPosts = 0;
-    for (var folder in folders) {
-      // Simula 1-2 post per cartella non vuota
-      if (folder.count != 'Vuota') {
-        totalPosts += 1;
-      }
-    }
-    return totalPosts > 0 ? totalPosts : 1; // Almeno 1 post per demo
+    return FolderService().getAccountStats()['totalPosts'] ?? 0;
   }
 
-  // Calcola il numero totale di cartelle e sottocartelle
   int _getTotalFolders() {
-    int totalFolders = folders.length;
-
-    void countSubfolders(MockFolder folder) {
-      totalFolders += folder.children.length;
-      for (var child in folder.children) {
-        countSubfolders(child);
-      }
-    }
-
-    for (var folder in folders) {
-      countSubfolders(folder);
-    }
-
-    return totalFolders;
+    return FolderService().getAccountStats()['totalFolders'] ?? 0;
   }
 
   String _formatBirthDate(DateTime? birthDate) {

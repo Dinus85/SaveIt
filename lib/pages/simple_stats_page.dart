@@ -315,7 +315,7 @@ class _SimpleStatsPageState extends State<SimpleStatsPage> with TickerProviderSt
             ),
             _buildStatCard(
               'Post Salvati', 
-              _folderService.allPosts.length.toString(),
+              (_folderService.getAccountStats()['totalPosts'] ?? 0).toString(),
               Icons.bookmark,
               Colors.green,
               themeColors,
@@ -323,7 +323,7 @@ class _SimpleStatsPageState extends State<SimpleStatsPage> with TickerProviderSt
             ),
             _buildStatCard(
               'Totale Cartelle', 
-              _calculateTotalFolders().toString(),
+              (_folderService.getAccountStats()['totalFolders'] ?? 0).toString(),
               Icons.folder,
               Colors.orange,
               themeColors,
@@ -2384,30 +2384,6 @@ class _SimpleStatsPageState extends State<SimpleStatsPage> with TickerProviderSt
     final weeklyAverage = _stats!.totalAppOpens / weeks;
     
     return weeklyAverage.toStringAsFixed(1);
-  }
-
-  // NUOVO: Calcola il totale di tutte le cartelle (incluse sottocartelle)
-  int _calculateTotalFolders() {
-    int count = 0;
-    
-    // Funzione ricorsiva per contare tutte le cartelle
-    void countFolder(folder) {
-      if (folder.isSpecial) return;
-      
-      count++;
-      
-      // Conta anche le sottocartelle
-      for (var child in folder.children) {
-        countFolder(child);
-      }
-    }
-    
-    // Conta tutte le cartelle a partire dalla lista principale
-    for (var folder in _folderService.folders) {
-      countFolder(folder);
-    }
-    
-    return count;
   }
 
   // NUOVO: Calcola le ricerche medie settimanali
