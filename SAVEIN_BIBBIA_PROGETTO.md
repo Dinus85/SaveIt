@@ -26,7 +26,7 @@ Alcuni identificativi tecnici restano volutamente invariati per non rompere Fire
 Identificativi tecnici ancora legacy:
 - Firebase project ID: `saveit-app-1784d`
 - Android package / Play Store package: `eu.savein.app`
-- iOS bundle ID: `com.example.saveit`
+- iOS bundle ID: `eu.savein.app`
 - Firebase auth domain: `saveit-app-1784d.firebaseapp.com`
 - Firebase storage bucket: `saveit-app-1784d.firebasestorage.app`
 
@@ -39,7 +39,8 @@ Firebase:
 - Project number / sender ID: `776660339631`
 - Web app ID: `1:776660339631:web:57dddde13817a4af9e7d5a`
 - Android app ID: `1:776660339631:android:ade29338a88973319e7d5a`
-- iOS/macOS app ID: `1:776660339631:ios:016628f9f46386629e7d5a`
+- iOS app ID: `1:776660339631:ios:ac36b2aba03689b49e7d5a`
+- macOS app ID legacy: `1:776660339631:ios:016628f9f46386629e7d5a`
 - Storage bucket: `saveit-app-1784d.firebasestorage.app`
 - Hosting public folder: `build/web`
 - Firestore rules file: `firestore.rules`
@@ -400,8 +401,8 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione preparata per prossima release: `pubspec.yaml` `1.0.0+8`.
-- Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
+- Versione mobile corrente: `pubspec.yaml` **`1.0.0+10`**. Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
+- **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`.
 
 ## Condivisione link pubblici (share links)
 
@@ -456,6 +457,26 @@ Payload cartella: `{ rootId, name, color, folders: [...], posts: [...] }`. La st
 | `PLAY_STORE_URL` | `https://play.google.com/store/apps/details?id=eu.savein.app` | Link Play Store |
 | `APP_STORE_URL` | `""` | Link App Store (opzionale, se vuoto il pulsante iOS non compare) |
 
+### SHA-256 Android App Links (`ASSET_LINKS` in `functions/index.js`)
+
+Package: `eu.savein.app`. Fingerprint configurati in produzione (giu 2026):
+
+| Certificato Play Console | SHA-256 | Uso |
+|---|---|---|
+| **App signing key** (Certificato della chiave di firma dell'app) | `88:71:25:D3:62:D3:2D:B6:FE:69:67:68:F8:02:BB:04:53:90:30:90:58:0C:69:5E:C6:12:9F:55:FD:95:4C:BD` | Installazioni da Play Store / test interno |
+| **Upload key** (Certificato della chiave di caricamento) | `89:09:D4:4A:58:D6:7C:FC:53:0B:1B:F7:7E:4D:85:36:14:BD:CA:4F:BB:0F:48:46:31:4A:3E:30:FC:A8:64:D2` | Build release firmate in locale con `savein-release.jks` |
+
+File da tenere allineati:
+- `functions/index.js` → costante `ASSET_LINKS`
+- `web/.well-known/assetlinks.json` → fallback nel repo
+- `build/web/.well-known/assetlinks.json` → ridistribuito su Firebase Hosting (priorità sul rewrite Function se presente come file statico)
+
+> **Attenzione:** il vecchio SHA `48:39:0D:...` non corrispondeva a nessun certificato SaveIn su Play Console e impediva l'apertura diretta dell'app dopo install da Play.
+
+Recupero fingerprint in Play Console:
+- **Protetto con Play** → **Firma dell'app** (URL diretto: `https://play.google.com/console/developers/app/keymanagement`)
+- Sezione **Certificato della chiave di firma dell'app** → SHA-256 (o copiare il JSON **Digital Asset Links**)
+
 ### Firebase Hosting rewrites (SaveIn — `firebase.json`)
 
 ```json
@@ -473,6 +494,25 @@ Payload cartella: `{ rootId, name, color, folders: [...], posts: [...] }`. La st
   <data android:scheme="https" android:host="savein.eu" android:pathPrefix="/s"/>
 </intent-filter>
 ```
+
+### Verifica post-release Android App Links
+
+Da ricordare dopo ogni nuova release Play/test interno:
+1. Installare SaveIn! dal link Play Console/test interno, non da APK locale.
+2. Tab **Tester** → **Copia link** opt-in → **Diventa tester** → installare **da Play Store**.
+3. Aprire sul telefono un link `https://savein.eu/s/test`.
+4. Se apre direttamente SaveIn!, gli App Links sono verificati.
+5. Se apre browser o chiede "Apri con", recuperare lo SHA-256 del **App signing key certificate** (non l'upload key):
+   - Play Console → **Protetto con Play** → **Firma dell'app**
+   - Copiare **Fingerprint del certificato SHA-256** in **Certificato della chiave di firma dell'app**
+6. Aggiornare `ASSET_LINKS` in `functions/index.js` e `web/.well-known/assetlinks.json`; copiare anche in `build/web/.well-known/assetlinks.json` se si fa deploy Hosting.
+7. Deploy Firebase (senza nuova build mobile):
+   ```powershell
+   cd C:\Users\dinop\saveit
+   firebase deploy --only functions:assetLinks,hosting
+   ```
+8. **Non serve** ricaricare `.aab`/TestFlight solo per SHA/assetlinks. Reinstallare dal Play test interno se l'app era già installata prima del fix.
+9. In `firebase.json` Hosting **non** ignorare la cartella `.well-known` (`**/.*` va evitato negli ignore): un file statico obsoleto su Hosting ha priorità sul rewrite verso la Function.
 
 ### File Flutter principali
 
@@ -1022,18 +1062,49 @@ flutter build appbundle --release
 ```
 Output: `build\app\outputs\bundle\release\app-release.aab`
 
-### Play Store — stato attuale (maggio 2026)
+### Play Store — stato attuale (giugno 2026)
 
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
-- Release di test interno: pubblicata ✅
+- Release di test interno: build **`1.0.0+10`** — fix avvio (cartelle vuote / blocco splash) + splash Android HD
+- **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - Test chiuso: da completare (richiede 12 tester per 14 giorni)
 - Produzione: da richiedere dopo test chiuso
+
+#### Quando serve una nuova release app vs solo deploy server
+
+| Modifica | Nuova `.aab` Android | Nuovo build iOS | Deploy Firebase | Deploy backend SaveIn |
+|---|---|---|---|---|
+| SHA-256 / `assetlinks.json` | **No** | **No** | **Sì** (`functions:assetLinks`, `hosting`) | No |
+| Fix Cloud Functions share link / email | No | No | **Sì** (`functions`, eventualmente `hosting`) | No |
+| Fix Flutter/Android/iOS, version bump | Sì | Sì | No* | No |
+
+\*Dashboard web SaveIn: `flutter build web --release` + `firebase deploy --only hosting`.
+
+#### Procedura test interno Play (Android)
+
+1. `flutter build appbundle --release`
+2. Play Console → **Test interni** → crea/pubblica release con `.aab`
+3. Tab **Tester** → lista email → **Copia link** opt-in
+4. Sul telefono: opt-in → installa da Play → prova `https://savein.eu/s/test`
+5. Dopo test ok → test chiuso → produzione
 
 Per arrivare in produzione Google richiede:
 1. Completare configurazione scheda store
 2. Test chiuso con almeno 12 tester per 14 giorni
 3. Richiedere accesso alla produzione
+
+### iOS / App Store — prossimi step
+
+Build iOS via **Codemagic** (workflow già funzionante; bundle `eu.savein.app`). Per pubblicazione App Store:
+1. Verificare Team Apple Developer, bundle ID `eu.savein.app`, display name `SaveIn!`, icone e `ios/Runner/GoogleService-Info.plist`.
+2. App su App Store Connect con lo stesso bundle ID.
+3. Configurare gli ID AdMob iOS reali e sostituire gli ID test in `ios/Runner/Info.plist` e nei servizi ads Flutter.
+4. Build release Codemagic → TestFlight → test → submit review.
+5. Completare privacy, scheda App Store, screenshot, classificazione età, tracking/privacy nutrition labels.
+6. Deep link iOS: Associated Domains + `apple-app-site-association` su `savein.eu` (indipendenti da `assetlinks.json` Android).
+
+Alternativa con Mac: aprire `ios/Runner.xcworkspace` con Xcode e caricare con Organizer/Transporter.
 
 ### Privacy Policy
 
@@ -1083,6 +1154,7 @@ L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla p
 - `assets/images/` deve esistere anche se vuota: è referenziata in `pubspec.yaml`. Non eliminarla.
 - L'`applicationId` Android è `eu.savein.app` — non cambiarlo, è registrato su Play Store e Firebase. Cambiarlo richiederebbe una nuova app su Play Store.
 - Non perdere `android/savein-release.jks` e la sua password: senza di essi è impossibile pubblicare aggiornamenti su Play Store.
+- Dopo fix SHA Android App Links, aggiornare `ASSET_LINKS`, `web/.well-known/assetlinks.json` e ridistribuire su Firebase Hosting; non ignorare `.well-known` negli ignore di `firebase.json`.
 - La Privacy Policy pubblica è su GitHub Pages (`dinus85.github.io/saveit-legal-content/privacy.html`). Per aggiornarla modificare `privacy.html` nel repo `Dinus85/saveit-legal-content`.
 - Per aggiornare gli ID AdMob iOS, creare l'app su AdMob per iOS e sostituire gli ID di test in `interstitial_ad_service.dart` e `ios/Runner/Info.plist`.
 - Le immagini banner promo stanno in Firebase Storage sotto `promotion_banners/` e sono gestite da funzioni admin-only. Non aprire regole Storage pubbliche in scrittura per gestire questi upload.
@@ -1122,3 +1194,25 @@ Deploy SmartChef backend:
 cd C:\Users\dinop\smart_chef_sm\backend
 gcloud run deploy smart-chef-backend --source . --region europe-west1 --project smartchef-82bc8
 ```
+
+## Aggiornamenti 30/06/2026
+
+- **Android App Links SaveIn**: corretti SHA-256 Play App Signing (`88:71:25:...`) e Upload key (`89:09:D4:...`) in `functions/index.js`, `web/.well-known/assetlinks.json` e Firebase Hosting; rimosso SHA errato `48:39:0D:...`. Deploy: `firebase deploy --only functions:assetLinks,hosting`.
+- **`firebase.json` Hosting SaveIn**: rimosso `**/.*` dagli ignore così `.well-known/assetlinks.json` può essere ridistribuito correttamente.
+- Dopo fix SHA: reinstallare SaveIn! dal link test interno Play e verificare `https://savein.eu/s/test`.
+
+Deploy rapido solo assetlinks:
+```powershell
+cd C:\Users\dinop\saveit
+New-Item -ItemType Directory -Force -Path build\web\.well-known | Out-Null
+Copy-Item web\.well-known\assetlinks.json build\web\.well-known\assetlinks.json -Force
+firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
+```
+
+## Aggiornamenti 01/07/2026
+
+- **Fix avvio SaveIn Android (build `1.0.0+10`)**:
+  - `AuthService.initialize`: profilo da cache locale subito; Firestore in background con timeout 8s (evita blocco splash).
+  - `WebHomePage`: loading cartelle fin dal primo frame; sync cache prima, refresh server in background.
+  - **Splash Android**: logo HD dedicato (`drawable/splash_logo.png`) al posto di `ic_launcher` adattivo sfocato.
+- Dopo install da Play test interno: disinstallare versione precedente, reinstallare dal link opt-in.

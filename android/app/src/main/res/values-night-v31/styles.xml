@@ -2,7 +2,8 @@
 <resources>
     <style name="LaunchTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowSplashScreenBackground">@color/splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
         <item name="android:windowBackground">@drawable/launch_background</item>
         <item name="android:colorBackground">@color/splash_background</item>
         <item name="android:statusBarColor">@color/splash_background</item>

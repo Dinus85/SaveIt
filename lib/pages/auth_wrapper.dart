@@ -349,6 +349,7 @@ class AuthWrapper extends StatelessWidget {
                   width: 120,
                   height: 120,
                   fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
                 ),
               ),
             ),

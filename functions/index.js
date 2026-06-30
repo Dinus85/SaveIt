@@ -58,7 +58,7 @@ const ASSET_LINKS = [
       namespace: "android_app",
       package_name: "eu.savein.app",
       sha256_cert_fingerprints: [
-        "48:39:0D:D5:FF:B3:8F:35:68:64:AC:75:56:AD:FD:68:B7:5B:FE:F5:79:57:F2:A8:DC:78:CD:B6:49:8D:69:F6",
+        "88:71:25:D3:62:D3:2D:B6:FE:69:67:68:F8:02:BB:04:53:90:30:90:58:0C:69:5E:C6:12:9F:55:FD:95:4C:BD",
         "89:09:D4:4A:58:D6:7C:FC:53:0B:1B:F7:7E:4D:85:36:14:BD:CA:4F:BB:0F:48:46:31:4A:3E:30:FC:A8:64:D2",
       ],
     },

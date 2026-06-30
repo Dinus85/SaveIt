@@ -1117,7 +1117,7 @@ class _WebHomePageState extends State<WebHomePage>
 
   List<SearchResult> _searchResults = [];
   bool _isSearching = false;
-  bool _isInitializing = false;
+  bool _isInitializing = true;
   bool _isRefreshing = false; // Previene loop
   StreamSubscription<firebase_auth.User?>? _authBannerSubscription;
 
@@ -1669,10 +1669,28 @@ class _WebHomePageState extends State<WebHomePage>
     try {
       if (kDebugMode) DebugLogger.logStart('Inizializzazione FolderService');
 
-      // Svuota la cache Firebase prima di caricare: garantisce che al login
-      // (anche dopo un cambio utente) vengano sempre letti dati freschi dal server.
-      await DataService.instance.reloadFromDisk();
-      await _folderService.initializeHybridData();
+      await _folderService
+          .initializeHybridData()
+          .timeout(const Duration(seconds: 25));
+
+      // Refresh server in background senza bloccare la prima UI.
+      unawaited(() async {
+        try {
+          await DataService.instance.reloadFromDisk();
+          await _folderService.syncWithDataService().timeout(
+                const Duration(seconds: 25),
+              );
+          if (mounted) {
+            setState(() {
+              _forceRefresh();
+            });
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            DebugLogger.logError('Refresh background cartelle fallito', e);
+          }
+        }
+      }());
 
       // Verifica integrita' solo in debug, senza bloccare lo startup.
       if (kDebugMode) {

@@ -449,9 +449,11 @@ class AuthService extends ChangeNotifier {
   Future<(DocumentSnapshot<Map<String, dynamic>>?, bool)> _fetchUserDocument(
       String userId) async {
     try {
-      final doc = await _firestore.collection('users').doc(userId).get(
-            const GetOptions(source: Source.server),
-          );
+      final doc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .get(const GetOptions(source: Source.server))
+          .timeout(const Duration(seconds: 8));
       return (doc, true);
     } catch (e) {
       if (kDebugMode) {
@@ -727,23 +729,31 @@ class AuthService extends ChangeNotifier {
         },
       );
 
-      // Caricamento iniziale utente
+      // Caricamento iniziale utente: cache locale subito, Firestore in background.
       final firebaseUser = _firebaseAuth.currentUser;
       if (firebaseUser != null) {
-        if (kDebugMode)
+        if (kDebugMode) {
           print(
               'DEBUG: Utente Firebase attivo all\'avvio: ${firebaseUser.email}');
+        }
 
-        // Blocchiamo temporaneamente il listener per evitare doppie chiamate durante l'init
         _isProcessingAuthStateChange = true;
         try {
-          await _loadUserData(firebaseUser);
+          final cachedUser = await _loadCachedUserIfAny(firebaseUser);
+          _currentUser = cachedUser ?? _userFromFirebase(firebaseUser);
         } finally {
           _isProcessingAuthStateChange = false;
         }
+
+        unawaited(_loadUserData(firebaseUser).catchError((Object e) {
+          if (kDebugMode) {
+            print('DEBUG: loadUserData background fallito: $e');
+          }
+        }));
       } else {
-        if (kDebugMode)
+        if (kDebugMode) {
           print('DEBUG: Nessun utente Firebase autenticato all\'avvio');
+        }
         _currentUser = null;
       }
 
