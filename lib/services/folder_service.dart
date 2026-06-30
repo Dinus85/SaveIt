@@ -603,7 +603,8 @@ class FolderService extends FolderServiceBase
   }
 
   Future<void> initializeHybridData() async {
-    await syncWithDataService();
+    // Carica prima cartelle (UI rapida), post in background.
+    await syncStartupWithDataService();
   }
 
   Future<void> debugCompareData() async {

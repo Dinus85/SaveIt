@@ -28,6 +28,8 @@ mixin FolderServiceSync on FolderServiceBase {
     if (kDebugMode)
       print('DEBUG: ========== SINCRONIZZAZIONE CON PARENTID ==========');
 
+    await _syncAuthFromAuthServiceIfNeeded();
+
     startActionTiming('sync_data');
     updateHealthStatus(ServiceHealthStatus.authenticating);
 
@@ -80,27 +82,37 @@ mixin FolderServiceSync on FolderServiceBase {
     }
   }
 
+  Future<void> _syncAuthFromAuthServiceIfNeeded() async {
+    if (isAuthenticated && currentUserId != null) return;
+
+    final authService = AuthService();
+    final user = authService.currentUser;
+    if (user != null) {
+      isAuthenticated = true;
+      currentUserId = user.id;
+      if (kDebugMode) {
+        print('DEBUG: Auth sincronizzata da AuthService (userId: ${user.id})');
+      }
+      return;
+    }
+
+    final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (firebaseUser != null) {
+      isAuthenticated = true;
+      currentUserId = firebaseUser.uid;
+      if (kDebugMode) {
+        print(
+            'DEBUG: Auth sincronizzata da FirebaseAuth (userId: ${firebaseUser.uid})');
+      }
+    }
+  }
+
   Future<void> syncStartupWithDataService() async {
     if (kDebugMode) {
       print('DEBUG: ========== SINCRONIZZAZIONE STARTUP LEGGERA ==========');
     }
 
-    // FIX RACE CONDITION: executeAuthenticatedOperation controlla FolderService.isAuthenticated,
-    // che viene impostato tramite lo stream Firebase Auth (event queue). Ma questo metodo
-    // gira nella microtask queue - processata PRIMA degli eventi. Quindi isAuthenticated
-    // sarebbe sempre false al cold start anche se AuthService.initialize() e' gia' stato
-    // completato in main(). Sincronizziamo esplicitamente da AuthService.currentUser.
-    if (!isAuthenticated) {
-      final authService = AuthService();
-      final user = authService.currentUser;
-      if (user != null) {
-        isAuthenticated = true;
-        currentUserId = user.id;
-        if (kDebugMode) {
-          print('DEBUG: Auth sincronizzata da AuthService (userId: ${user.id})');
-        }
-      }
-    }
+    await _syncAuthFromAuthServiceIfNeeded();
 
     startActionTiming('startup_sync_data');
     updateHealthStatus(ServiceHealthStatus.authenticating);

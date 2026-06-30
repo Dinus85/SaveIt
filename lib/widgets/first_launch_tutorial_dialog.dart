@@ -41,6 +41,9 @@ class SaveInFirstLaunchTutorial {
   }
 
   static Future<bool> showIfNeeded(BuildContext context) async {
+    final userId = AuthService().currentUser?.id;
+    if (userId == null || userId.trim().isEmpty) return false;
+
     final prefs = await SharedPreferences.getInstance();
     final key = _seenKeyForCurrentUser();
     if (prefs.getBool(key) == true) return false;
@@ -69,6 +72,14 @@ class SaveInFirstLaunchTutorial {
     bool markSeenOnClose = false,
     String? welcomeUserName,
   }) async {
+    final hasWelcomeFlow =
+        welcomeUserName != null && welcomeUserName.trim().isNotEmpty;
+    final userId = AuthService().currentUser?.id;
+    if (!hasWelcomeFlow &&
+        (userId == null || userId.trim().isEmpty)) {
+      return;
+    }
+
     await showDialog<void>(
       context: context,
       barrierDismissible: false,

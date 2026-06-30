@@ -401,8 +401,8 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente: `pubspec.yaml` **`1.0.0+10`**. Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
-- **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`.
+- Versione mobile corrente: `pubspec.yaml` **`1.0.0+14`**. Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
+- **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
 
@@ -1065,8 +1065,8 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 ### Play Store — stato attuale (giugno 2026)
 
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
-- Release di test interno: build **`1.0.0+10`** — fix avvio (cartelle vuote / blocco splash) + splash Android HD
-- **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`
+- Release di test interno: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
+- **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - Test chiuso: da completare (richiede 12 tester per 14 giorni)
 - Produzione: da richiedere dopo test chiuso
@@ -1216,3 +1216,15 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
   - `WebHomePage`: loading cartelle fin dal primo frame; sync cache prima, refresh server in background.
   - **Splash Android**: logo HD dedicato (`drawable/splash_logo.png`) al posto di `ic_launcher` adattivo sfocato.
 - Dopo install da Play test interno: disinstallare versione precedente, reinstallare dal link opt-in.
+
+## Aggiornamenti 02/07/2026
+
+- **Fix startup SaveIn (build `1.0.0+14`)** — richiede nuova `.aab`/`.ipa`:
+  - `WebHomePage`: rimosso bug `if (_isInitializing) return` che bloccava `_initializeFolderService()` → buffering infinito e cartelle vuote.
+  - `initializeHybridData()` usa `syncStartupWithDataService()` (cartelle subito, post in background).
+  - `FolderServiceSync`: sync auth esplicita da `AuthService`/`FirebaseAuth` prima del caricamento dati.
+  - Tutorial e permessi notifiche reminder **solo post-login** (`SaveInFirstLaunchTutorial.showIfNeeded`, `AppNotificationListener`).
+  - Timer di sicurezza 30s per uscire dal loading anche se sync lento.
+- **Dashboard web SaveIn**: ripristinato deploy Flutter web completo su Firebase Hosting (prima era online solo uno stub HTML da 103 byte). Link: `https://savein.eu/dashboard`, `https://savein.eu/?admin=1`, `https://saveit-app-1784d.web.app/dashboard`.
+- **Android App Links SaveIn**: test `https://savein.eu/s/test` **OK** da install Play test interno (lug 2026).
+- **AdMob iOS SaveIn**: App ID iOS in `Info.plist` ok; ad unit interstitial/banner iOS in `interstitial_ad_service.dart` ancora ID test Google — da sostituire quando si creano le unità iOS su AdMob.

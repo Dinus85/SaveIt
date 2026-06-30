@@ -265,12 +265,6 @@ Future<void> _initializeNonBlockingStartupServices() async {
     await ReminderService.instance.initialize().timeout(
           const Duration(seconds: 5),
         );
-    await ReminderService.instance.requestPermissions().timeout(
-          const Duration(seconds: 5),
-        );
-    await ReminderService.instance.rescheduleAllReminders().timeout(
-          const Duration(seconds: 10),
-        );
   } catch (e) {
     if (kDebugMode) {
       print('DEBUG: inizializzazione reminder non bloccante fallita: $e');
@@ -322,16 +316,6 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     _initServices();
     _initAppLinks();
     _loadUserPreferences(); // âœ… AGGIUNGI QUESTA RIGA
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_maybeShowFirstLaunchTutorial());
-    });
-  }
-
-  Future<void> _maybeShowFirstLaunchTutorial() async {
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-    final context = navigatorKey.currentContext;
-    if (context == null || !context.mounted) return;
-    await SaveInFirstLaunchTutorial.showIfNeeded(context);
   }
 
   Future<void> _initAppLinks() async {
@@ -1118,6 +1102,7 @@ class _WebHomePageState extends State<WebHomePage>
   List<SearchResult> _searchResults = [];
   bool _isSearching = false;
   bool _isInitializing = true;
+  bool _folderServiceInitStarted = false;
   bool _isRefreshing = false; // Previene loop
   StreamSubscription<firebase_auth.User?>? _authBannerSubscription;
 
@@ -1657,17 +1642,30 @@ class _WebHomePageState extends State<WebHomePage>
   }
 
   Future<void> _initializeFolderService() async {
-    if (_isInitializing) return;
+    if (_folderServiceInitStarted) return;
+    _folderServiceInitStarted = true;
 
-    // 🔥 FIX: Controlla mounted prima di setState
-    if (mounted) {
-      setState(() {
-        _isInitializing = true;
-      });
-    }
+    var initCompleted = false;
+    final safetyTimer = Timer(const Duration(seconds: 30), () {
+      if (!initCompleted && mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    });
 
     try {
       if (kDebugMode) DebugLogger.logStart('Inizializzazione FolderService');
+
+      // Mostra subito i dati in cache (se presenti) mentre parte il sync server.
+      final userId = AuthService().currentUser?.id ??
+          firebase_auth.FirebaseAuth.instance.currentUser?.uid;
+      if (userId != null && _folderService.loadFromCache(userId) && mounted) {
+        setState(() {
+          _forceRefresh();
+          _isInitializing = false;
+        });
+      }
 
       await _folderService
           .initializeHybridData()
@@ -1726,6 +1724,8 @@ class _WebHomePageState extends State<WebHomePage>
         if (kDebugMode) DebugLogger.logError('Retry fallito', retryError);
       }
     } finally {
+      initCompleted = true;
+      safetyTimer.cancel();
       if (mounted) {
         setState(() {
           _isInitializing = false;

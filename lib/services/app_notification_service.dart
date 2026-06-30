@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../firebase_options.dart';
+import 'reminder_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -264,9 +265,23 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
       debugPrint('In-app notification stream failed: $error');
     });
     unawaited(AppNotificationService.instance.initializeForUser(widget.userId));
+    unawaited(_initializeReminderNotifications());
     final pending = AppNotificationService.instance.takePendingOpenedPayloads();
     for (final payload in pending) {
       unawaited(_handlePushOpenedPayload(payload));
+    }
+  }
+
+  Future<void> _initializeReminderNotifications() async {
+    try {
+      await ReminderService.instance.requestPermissions().timeout(
+            const Duration(seconds: 5),
+          );
+      await ReminderService.instance.rescheduleAllReminders().timeout(
+            const Duration(seconds: 10),
+          );
+    } catch (e) {
+      debugPrint('Reminder notification init skipped/failed: $e');
     }
   }
 
