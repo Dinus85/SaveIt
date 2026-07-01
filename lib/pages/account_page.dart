@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:savein/models/folder.dart';
 import 'package:savein/utils/theme_helpers.dart';
@@ -9,6 +10,7 @@ import 'package:savein/pages/terms_conditions_page.dart';
 import 'package:savein/pages/marketing_communications_page.dart';
 import 'package:savein/services/access_control_service.dart';
 import 'package:savein/services/auth_service.dart';
+import 'package:savein/services/billing_service.dart';
 import 'package:savein/services/promo_popup_service.dart';
 import 'package:savein/pages/login_page.dart';
 import 'package:savein/pages/help_center_page.dart';
@@ -2168,6 +2170,10 @@ class _PlanComparisonSlidesDialogState
     extends State<_PlanComparisonSlidesDialog> {
   final PageController _controller = PageController();
   int _index = 0;
+  ProductDetails? _product;
+  bool _loadingProduct = true;
+  bool _purchasing = false;
+  bool _restoring = false;
 
   static const _slides = [
     _PlanSlideData(
@@ -2198,6 +2204,98 @@ class _PlanComparisonSlidesDialogState
       color: Color(0xFFEA580C),
     ),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProduct();
+  }
+
+  Future<void> _loadProduct() async {
+    if (!BillingService.isSupportedPlatform) {
+      if (mounted) setState(() => _loadingProduct = false);
+      return;
+    }
+    final product = await BillingService.loadProduct();
+    if (!mounted) return;
+    setState(() {
+      _product = product;
+      _loadingProduct = false;
+    });
+  }
+
+  Future<void> _purchasePremium() async {
+    final product = _product;
+    if (product == null || _purchasing) return;
+    setState(() => _purchasing = true);
+    try {
+      final result = await BillingService.purchaseAndVerify(product);
+      await AuthService().reloadCurrentUserFromFirestore();
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Premium attivo fino al ${_formatPremiumDate(result.premiumUntil)}.',
+          ),
+          backgroundColor: const Color(0xFF15803D),
+        ),
+      );
+    } on BillingException catch (e) {
+      if (!mounted) return;
+      if (e.code != BillingErrorCode.purchaseCancelled) {
+        _showBillingMessage(e.message);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _showBillingMessage('Acquisto non riuscito. Riprova.');
+    } finally {
+      if (mounted) setState(() => _purchasing = false);
+    }
+  }
+
+  Future<void> _restorePremium() async {
+    if (_restoring) return;
+    setState(() => _restoring = true);
+    try {
+      final result = await BillingService.restorePurchases();
+      if (result != null) {
+        await AuthService().reloadCurrentUserFromFirestore();
+        if (!mounted) return;
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Premium ripristinato fino al ${_formatPremiumDate(result.premiumUntil)}.',
+            ),
+            backgroundColor: const Color(0xFF15803D),
+          ),
+        );
+        return;
+      }
+      _showBillingMessage('Nessun abbonamento attivo da ripristinare.');
+    } on BillingException catch (e) {
+      if (!mounted) return;
+      _showBillingMessage(e.message);
+    } catch (_) {
+      if (!mounted) return;
+      _showBillingMessage('Ripristino non riuscito. Riprova.');
+    } finally {
+      if (mounted) setState(() => _restoring = false);
+    }
+  }
+
+  void _showBillingMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  String _formatPremiumDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
+  }
 
   @override
   void dispose() {
@@ -2301,42 +2399,102 @@ class _PlanComparisonSlidesDialogState
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                  child: Row(
+                  child: Column(
                     children: [
-                      IconButton(
-                        onPressed: _index == 0 ? null : () => _goTo(_index - 1),
-                        icon: const Icon(Icons.chevron_left),
-                      ),
-                      Expanded(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: List.generate(
-                            _slides.length,
-                            (i) => AnimatedContainer(
-                              duration: const Duration(milliseconds: 180),
-                              margin: const EdgeInsets.symmetric(horizontal: 3),
-                              width: i == _index ? 18 : 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                color: i == _index
-                                    ? _slides[_index].color
-                                    : Colors.black26,
-                                borderRadius: BorderRadius.circular(999),
+                      if (_index == _slides.length - 1 &&
+                          BillingService.isSupportedPlatform) ...[
+                        if (_loadingProduct)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else if (_product != null) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: (_purchasing || _restoring)
+                                  ? null
+                                  : _purchasePremium,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                              ),
+                              child: Text(
+                                _purchasing
+                                    ? 'Acquisto in corso...'
+                                    : 'Passa a Premium (${_product!.price}/mese)',
+                                style: const TextStyle(fontWeight: FontWeight.w900),
                               ),
                             ),
                           ),
-                        ),
+                          const SizedBox(height: 6),
+                          TextButton(
+                            onPressed: (_purchasing || _restoring)
+                                ? null
+                                : _restorePremium,
+                            child: Text(
+                              _restoring
+                                  ? 'Ripristino...'
+                                  : 'Ripristina acquisti',
+                            ),
+                          ),
+                        ] else
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              'Abbonamento non ancora disponibile su questo store.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.grey.shade700,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                      ],
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed:
+                                _index == 0 ? null : () => _goTo(_index - 1),
+                            icon: const Icon(Icons.chevron_left),
+                          ),
+                          Expanded(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: List.generate(
+                                _slides.length,
+                                (i) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 3),
+                                  width: i == _index ? 18 : 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: i == _index
+                                        ? _slides[_index].color
+                                        : Colors.black26,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_index == _slides.length - 1)
+                            FilledButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('Chiudi'),
+                            )
+                          else
+                            IconButton(
+                              onPressed: () => _goTo(_index + 1),
+                              icon: const Icon(Icons.chevron_right),
+                            ),
+                        ],
                       ),
-                      if (_index == _slides.length - 1)
-                        FilledButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('Chiudi'),
-                        )
-                      else
-                        IconButton(
-                          onPressed: () => _goTo(_index + 1),
-                          icon: const Icon(Icons.chevron_right),
-                        ),
                     ],
                   ),
                 ),

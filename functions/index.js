@@ -3967,3 +3967,16 @@ exports.assetLinks = onRequest(
       res.status(200).send(JSON.stringify(ASSET_LINKS));
     }
 );
+
+const appStoreBilling = require("./app_store_billing");
+Object.assign(
+    exports,
+    appStoreBilling.register({
+      db,
+      admin,
+      onCall,
+      onRequest,
+      HttpsError,
+      writeAccountHistory,
+    }),
+);
