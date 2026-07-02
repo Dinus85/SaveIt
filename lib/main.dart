@@ -1176,6 +1176,7 @@ class _WebHomePageState extends State<WebHomePage>
 
     _searchController.addListener(_onSearchChanged);
     AuthService().addListener(_schedulePromotionBannerRefresh);
+    AuthService().addListener(_handleLoggedOutWhileHomeVisible);
     _authBannerSubscription =
         firebase_auth.FirebaseAuth.instance.authStateChanges().listen((user) {
       final newUid = user?.uid;
@@ -1272,6 +1273,7 @@ class _WebHomePageState extends State<WebHomePage>
 
     // Ora rimuovi i listener e disponi i controller
     AuthService().removeListener(_schedulePromotionBannerRefresh);
+    AuthService().removeListener(_handleLoggedOutWhileHomeVisible);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     homeHighlightFolderNotifier.removeListener(_onHomeHighlightFolderChanged);
@@ -1427,6 +1429,40 @@ class _WebHomePageState extends State<WebHomePage>
     } catch (e) {
       if (kDebugMode) print('DEBUG: Errore caricamento banner: $e');
     }
+  }
+
+  // Rete di sicurezza: se per qualsiasi motivo questa WebHomePage resta
+  // visibile dopo un logout (es. perché non è più annidata dentro un
+  // AuthWrapper vivo e reattivo), la chiudiamo forzatamente sostituendo
+  // l'intero stack con un AuthWrapper nuovo di zecca, che mostrerà
+  // correttamente LoginPage. Usiamo un breve ritardo prima di controllare
+  // 'mounted': se il meccanismo reattivo standard di AuthWrapper ha già
+  // fatto il suo lavoro, questo widget sarà già stato smontato e non faremo
+  // nulla di duplicato.
+  void _handleLoggedOutWhileHomeVisible() {
+    if (AuthService().isLoggedIn) return;
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted || AuthService().isLoggedIn) return;
+
+      debugPrint(
+          'DEBUG LOGOUT: WebHomePage ancora visibile dopo logout, forzo reset a AuthWrapper');
+
+      navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => AuthWrapper(
+            isDarkTheme: widget.isDarkTheme,
+            onThemeChanged: widget.onThemeChanged,
+            marketingProfileEnabled: widget.marketingProfileEnabled,
+            marketingCommsEnabled: widget.marketingCommsEnabled,
+            onMarketingProfileChanged: widget.onMarketingProfileChanged,
+            onMarketingCommsChanged: widget.onMarketingCommsChanged,
+            onSharedContent: widget.onSharedContent,
+          ),
+        ),
+        (route) => false,
+      );
+    });
   }
 
   void _schedulePromotionBannerRefresh() {
