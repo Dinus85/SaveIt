@@ -66,33 +66,51 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Widget build(BuildContext context) {
     final authService = AuthService();
 
-    // CORREZIONE: Usa StreamBuilder che ascolta direttamente Firebase Auth
-    return StreamBuilder<User?>(
-      stream: _userStream,
-      builder: (context, snapshot) {
-        // Mostra loading durante inizializzazione o while waiting for stream
-        if (!authService.isInitialized ||
-            snapshot.connectionState == ConnectionState.waiting) {
-          return _buildLoadingScreen();
-        }
+    // Oltre allo stream di Firebase Auth, ascoltiamo anche AuthService
+    // direttamente (ChangeNotifier): il login via email chiama
+    // notifyListeners() in modo sincrono e affidabile (tramite
+    // _waitForUserSync), mentre lo stream authStateChanges() a volte
+    // impiega troppo per emettere il nuovo utente. Senza questo secondo
+    // "trigger" di rebuild, la UI poteva restare bloccata sulla pagina di
+    // login anche se il login era già avvenuto con successo (bastava
+    // chiudere e riaprire l'app per vederlo).
+    return AnimatedBuilder(
+      animation: authService,
+      builder: (context, _) {
+        return StreamBuilder<User?>(
+          stream: _userStream,
+          builder: (context, snapshot) {
+            // Mostra loading durante inizializzazione o while waiting for stream
+            if (!authService.isInitialized ||
+                snapshot.connectionState == ConnectionState.waiting) {
+              return _buildLoadingScreen();
+            }
 
-        // Se c'è un errore nel stream
-        if (snapshot.hasError) {
-          return _buildErrorScreen(snapshot.error.toString());
-        }
+            // Se c'è un errore nel stream
+            if (snapshot.hasError) {
+              return _buildErrorScreen(snapshot.error.toString());
+            }
 
-        final user = snapshot.data;
+            // Fonte di verità primaria: AuthService().isLoggedIn/currentUser,
+            // aggiornati in modo sincrono ad ogni login/logout. Non usiamo lo
+            // snapshot dello stream come fallback quando AuthService dice
+            // esplicitamente "disconnesso": altrimenti, durante il breve
+            // istante tra un logout e l'arrivo del relativo evento sullo
+            // stream, torneremmo a mostrare la schermata autenticata.
+            final user = authService.isLoggedIn ? authService.currentUser : null;
 
-        // Se non è loggato, mostra login
-        if (user == null) {
-          return LoginPage(
-            isDarkTheme: isDarkTheme,
-            onThemeChanged: onThemeChanged,
-          );
-        }
+            // Se non è loggato, mostra login
+            if (user == null) {
+              return LoginPage(
+                isDarkTheme: isDarkTheme,
+                onThemeChanged: onThemeChanged,
+              );
+            }
 
-        // Se è loggato, verifica se serve migrazione
-        return _buildAuthenticatedFlow(user);
+            // Se è loggato, verifica se serve migrazione
+            return _buildAuthenticatedFlow(user);
+          },
+        );
       },
     );
   }

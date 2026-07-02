@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import '../utils/theme_helpers.dart';
 import '../services/auth_service.dart';
 import 'registration_page.dart';
-import '../main.dart';
 
 // PAGINA DI LOGIN CORRETTA - NON SERVE PIÃ™ NAVIGAZIONE MANUALE
 class LoginPage extends StatefulWidget {
@@ -666,21 +665,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         _showSuccessSnackBar(
             'Login Google completato! Benvenuto ${userName.split(' ').first}!');
 
-        if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => WebHomePage(
-              isDarkTheme: widget.isDarkTheme,
-              marketingProfileEnabled: false,
-              marketingCommsEnabled: false,
-              onThemeChanged: widget.onThemeChanged,
-              onMarketingProfileChanged: (value) {},
-              onMarketingCommsChanged: (value) {},
-              onSharedContent: (content) {},
-            ),
-          ),
-          (route) => false,
-        );
+        // NON pushiamo una WebHomePage "orfana": distruggerebbe AuthWrapper,
+        // che invece deve restare vivo per gestire correttamente un futuro
+        // logout e i controlli di migrazione/account bloccato. AuthWrapper
+        // ascolta sia lo stream di Firebase Auth sia AuthService stesso, e
+        // mostrerà automaticamente la Home.
       } else {
         print('DEBUG: GOOGLE SIGN-IN FALLITO: ${result.message}');
         final pendingGoogleEmail = AuthService().pendingGoogleEmail;
@@ -699,21 +688,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       if (firebaseHasUser) {
         print('DEBUG: Errore nell\'UI ma Firebase Auth Google ha successo');
         _showSuccessSnackBar('Login Google completato!');
-        if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => WebHomePage(
-              isDarkTheme: widget.isDarkTheme,
-              marketingProfileEnabled: false,
-              marketingCommsEnabled: false,
-              onThemeChanged: widget.onThemeChanged,
-              onMarketingProfileChanged: (value) {},
-              onMarketingCommsChanged: (value) {},
-              onSharedContent: (content) {},
-            ),
-          ),
-          (route) => false,
-        );
+        // AuthWrapper mostrerà automaticamente la Home (vedi commento sopra).
       } else {
         _showErrorDialog(
             'Errore durante l\'autenticazione con Google. Verifica la connessione.');
@@ -739,22 +714,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             result.user?.name ?? AuthService().currentUser?.name ?? 'Utente';
         _showSuccessSnackBar(
             'Login Apple completato! Benvenuto ${userName.split(' ').first}!');
-
-        if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => WebHomePage(
-              isDarkTheme: widget.isDarkTheme,
-              marketingProfileEnabled: false,
-              marketingCommsEnabled: false,
-              onThemeChanged: widget.onThemeChanged,
-              onMarketingProfileChanged: (value) {},
-              onMarketingCommsChanged: (value) {},
-              onSharedContent: (content) {},
-            ),
-          ),
-          (route) => false,
-        );
+        // AuthWrapper mostrerà automaticamente la Home (non pushiamo una
+        // WebHomePage "orfana": distruggerebbe AuthWrapper e romperebbe il
+        // logout/i controlli di migrazione successivi).
       } else {
         _showErrorDialog(result.message ?? 'Errore durante il login con Apple');
       }
@@ -762,21 +724,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       print('ERRORE: Apple Sign-In: $e');
       if (AuthService().isLoggedIn) {
         _showSuccessSnackBar('Login Apple completato!');
-        if (!mounted) return;
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => WebHomePage(
-              isDarkTheme: widget.isDarkTheme,
-              marketingProfileEnabled: false,
-              marketingCommsEnabled: false,
-              onThemeChanged: widget.onThemeChanged,
-              onMarketingProfileChanged: (value) {},
-              onMarketingCommsChanged: (value) {},
-              onSharedContent: (content) {},
-            ),
-          ),
-          (route) => false,
-        );
+        // AuthWrapper mostrerà automaticamente la Home (vedi commento sopra).
       } else {
         _showErrorDialog(
             'Errore durante l\'autenticazione con Apple. Verifica la connessione.');
