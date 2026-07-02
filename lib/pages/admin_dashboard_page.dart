@@ -349,7 +349,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   bool _matchesFilters(_AdminUserRecord user) {
     if (user.isPlaceholder) return false;
-    final matchesRole = _roleFilter == null || user.role == _roleFilter;
+    final matchesRole =
+        _roleFilter == null || user.effectiveRole == _roleFilter;
     if (!matchesRole) return false;
 
     // ✅ NUOVO: Filtro marketing
@@ -2091,9 +2092,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                 SizedBox(
                                     width: 70,
                                     child: _RoleChip(
-                                      role: user.role,
-                                      color: _roleColor(user.role),
-                                      label: _roleLabel(user.role),
+                                      role: user.effectiveRole,
+                                      color: _roleColor(user.effectiveRole),
+                                      label: _roleLabel(user.effectiveRole),
                                     )),
                               ),
                               DataCell(
@@ -4191,9 +4192,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                               DataCell(
                                   Text(_formatDate(user.marketingConsentDate))),
                               DataCell(_RoleChip(
-                                role: user.role,
-                                color: _roleColor(user.role),
-                                label: _roleLabel(user.role),
+                                role: user.effectiveRole,
+                                color: _roleColor(user.effectiveRole),
+                                label: _roleLabel(user.effectiveRole),
                               )),
                               DataCell(_StatusChip(
                                 label: user.isBlocked ? 'Bloccato' : 'Attivo',
@@ -6704,9 +6705,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   runSpacing: 8,
                   children: [
                     _RoleChip(
-                      role: user.role,
-                      color: _roleColor(user.role),
-                      label: _roleLabel(user.role),
+                      role: user.effectiveRole,
+                      color: _roleColor(user.effectiveRole),
+                      label: _roleLabel(user.effectiveRole),
                     ),
                   ],
                 ),
@@ -10113,6 +10114,26 @@ class _AdminUserRecord {
 
   DashboardAccessRole get effectiveDashboardRole =>
       role == AppUserRole.admin ? DashboardAccessRole.admin : dashboardRole;
+
+  // Rispecchia User.effectiveRole lato app: un utente con role='premium' ma
+  // premiumUntil scaduto deve risultare Free anche in dashboard, altrimenti
+  // il badge mostra "Premium" mentre la colonna scadenza lo segnala in rosso
+  // come scaduto, generando una UI contraddittoria.
+  AppUserRole get effectiveRole {
+    if (role == AppUserRole.admin) return AppUserRole.admin;
+    if (role == AppUserRole.premium && _isPremiumExpiryActive(premiumUntil)) {
+      return AppUserRole.premium;
+    }
+    return AppUserRole.free;
+  }
+
+  static bool _isPremiumExpiryActive(DateTime? until) {
+    if (until == null) return true;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expiryDay = DateTime(until.year, until.month, until.day);
+    return !today.isAfter(expiryDay);
+  }
 
   bool get isPlaceholder => email == 'placeholder';
 
