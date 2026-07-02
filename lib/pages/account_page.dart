@@ -18,6 +18,7 @@ import 'package:savein/pages/login_page.dart';
 import 'package:savein/pages/help_center_page.dart';
 import 'package:savein/pages/contact_page.dart';
 import 'package:savein/pages/auth_wrapper.dart';
+import 'package:savein/main.dart' show navigatorKey;
 import 'package:savein/widgets/custom_bottom_nav.dart';
 import 'package:savein/widgets/first_launch_tutorial_dialog.dart';
 import 'package:savein/widgets/new_signup_premium_promo_dialog.dart';
@@ -832,21 +833,42 @@ class AccountPage extends StatelessWidget {
             onPressed: () async {
               Navigator.pop(dialogContext);
 
-              print('DEBUG: Iniziando logout da AccountPage');
+              debugPrint('DEBUG LOGOUT: 1) Chiuso dialog conferma');
 
-              await AuthService().logout();
-              if (!pageContext.mounted) return;
+              try {
+                await AuthService().logout();
+                debugPrint('DEBUG LOGOUT: 2) AuthService().logout() completato');
 
-              print('DEBUG: Logout completato - navigazione forzata a LoginPage');
-              Navigator.of(pageContext, rootNavigator: true).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (_) => LoginPage(
-                    isDarkTheme: isDarkTheme,
-                    onThemeChanged: onThemeChanged,
-                  ),
-                ),
-                (route) => false,
-              );
+                final loginPage = LoginPage(
+                  isDarkTheme: isDarkTheme,
+                  onThemeChanged: onThemeChanged,
+                );
+
+                // Usiamo prioritariamente il navigatorKey globale (agganciato
+                // direttamente al MaterialApp): non dipende dal fatto che
+                // 'pageContext' sia ancora valido/montato in quel momento.
+                final rootNavState = navigatorKey.currentState;
+                if (rootNavState != null) {
+                  debugPrint('DEBUG LOGOUT: 3) Navigo con navigatorKey globale');
+                  rootNavState.pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => loginPage),
+                    (route) => false,
+                  );
+                } else if (pageContext.mounted) {
+                  debugPrint('DEBUG LOGOUT: 3) navigatorKey nullo, uso pageContext');
+                  Navigator.of(pageContext, rootNavigator: true)
+                      .pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => loginPage),
+                    (route) => false,
+                  );
+                } else {
+                  debugPrint(
+                      'DEBUG LOGOUT: 3) ERRORE - nessun navigator disponibile per la navigazione');
+                }
+              } catch (e, stack) {
+                debugPrint('DEBUG LOGOUT: ERRORE durante logout/navigazione: $e');
+                debugPrint('$stack');
+              }
             },
             child: Text('Disconnetti', style: TextStyle(color: Colors.red)),
           ),
@@ -2082,8 +2104,7 @@ class AccountPage extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                onPressed: () =>
-                    _showPlanComparisonSlides(context, startAtPremium: true),
+                onPressed: () => _showPremiumPurchaseDialog(context),
                 icon: const Icon(Icons.workspace_premium_rounded),
                 label: const Text('Diventa Premium'),
               ),
@@ -2186,6 +2207,15 @@ class AccountPage extends StatelessWidget {
       context: context,
       builder: (_) => _PlanComparisonSlidesDialog(
         initialPage: startAtPremium ? 2 : 0,
+      ),
+    );
+  }
+
+  void _showPremiumPurchaseDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => const _PlanComparisonSlidesDialog(
+        purchaseOnly: true,
       ),
     );
   }
@@ -2308,9 +2338,11 @@ class AccountPage extends StatelessWidget {
 
 class _PlanComparisonSlidesDialog extends StatefulWidget {
   final int initialPage;
+  final bool purchaseOnly;
 
   const _PlanComparisonSlidesDialog({
     this.initialPage = 0,
+    this.purchaseOnly = false,
   });
 
   @override
@@ -2478,6 +2510,10 @@ class _PlanComparisonSlidesDialogState
     final size = MediaQuery.sizeOf(context);
     final width = size.width < 520 ? size.width * 0.9 : 460.0;
     final height = size.height < 720 ? size.height * 0.82 : 560.0;
+
+    if (widget.purchaseOnly) {
+      return _buildPurchaseOnlyDialog(context, width);
+    }
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -2673,6 +2709,213 @@ class _PlanComparisonSlidesDialogState
       ),
     );
   }
+
+  Widget _buildPurchaseOnlyDialog(BuildContext context, double width) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: Container(
+        width: width,
+        constraints: const BoxConstraints(maxHeight: 620),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 28,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: DefaultTextStyle(
+          style: const TextStyle(color: Color(0xFF111827)),
+          child: IconTheme(
+            data: const IconThemeData(color: Color(0xFF111827)),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF15803D), Color(0xFF2563EB)],
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(
+                          Icons.workspace_premium_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Diventa Premium ✨',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Grazie per voler sostenere SaveIn! 💙\n'
+                    'Con Premium sblocchi un’esperienza più libera, ordinata e senza annunci.',
+                    style: TextStyle(
+                      color: Color(0xFF4B5563),
+                      fontSize: 14,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const _PremiumBenefitRow(
+                    icon: Icons.folder_copy_outlined,
+                    text: '📁 Più libertà con cartelle e organizzazione.',
+                  ),
+                  const _PremiumBenefitRow(
+                    icon: Icons.tag_outlined,
+                    text: '🏷️ Tag manuali per ritrovare prima i contenuti.',
+                  ),
+                  const _PremiumBenefitRow(
+                    icon: Icons.block_outlined,
+                    text: '🚫 Esperienza senza annunci.',
+                  ),
+                  const _PremiumBenefitRow(
+                    icon: Icons.favorite_rounded,
+                    text: '🙏 Aiuti a migliorare SaveIn! giorno dopo giorno.',
+                  ),
+                  const SizedBox(height: 14),
+                  if (!BillingService.isSupportedPlatform)
+                    const _PremiumUnavailableMessage(
+                      message:
+                          'Abbonamento disponibile solo dall’app iOS o Android.',
+                    )
+                  else if (_loadingProduct)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 18),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else if (_product != null) ...[
+                    FilledButton(
+                      onPressed:
+                          (_purchasing || _restoring) ? null : _purchasePremium,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF15803D),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: Text(
+                        _purchasing
+                            ? 'Acquisto in corso...'
+                            : 'Attiva Premium a ${_product!.price}/mese ✨',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _SubscriptionDisclosure(
+                      price: _product!.price,
+                      onOpenPrivacy: () => _openLegalUrl(_privacyPolicyUri),
+                      onOpenTerms: () => _openLegalUrl(_termsUri),
+                    ),
+                    TextButton(
+                      onPressed:
+                          (_purchasing || _restoring) ? null : _restorePremium,
+                      child: Text(
+                        _restoring ? 'Ripristino...' : 'Ripristina acquisti',
+                      ),
+                    ),
+                  ] else
+                    const _PremiumUnavailableMessage(
+                      message:
+                          'Abbonamento non ancora disponibile su questo store.',
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PremiumBenefitRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _PremiumBenefitRow({
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFF15803D), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFF111827),
+                fontWeight: FontWeight.w700,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumUnavailableMessage extends StatelessWidget {
+  final String message;
+
+  const _PremiumUnavailableMessage({
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Color(0xFF92400E),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }
 
 class _SubscriptionDisclosure extends StatelessWidget {
@@ -2688,6 +2931,8 @@ class _SubscriptionDisclosure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final storeName = _currentStoreName();
+    final termsLabel = _termsLabel();
     final textStyle = TextStyle(
       color: Colors.grey.shade700,
       fontSize: 11.5,
@@ -2717,10 +2962,11 @@ class _SubscriptionDisclosure extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Il pagamento viene addebitato sull’Apple ID. L’abbonamento si '
+            'Il pagamento viene addebitato dall’account $storeName. '
+            'L’abbonamento si '
             'rinnova automaticamente salvo disdetta almeno 24 ore prima della '
-            'scadenza. Puoi gestirlo o annullarlo in Impostazioni > Apple ID > '
-            'Abbonamenti.',
+            'scadenza. Puoi gestirlo o annullarlo dalle impostazioni ufficiali '
+            'degli abbonamenti $storeName.',
             style: textStyle,
           ),
           const SizedBox(height: 6),
@@ -2733,13 +2979,34 @@ class _SubscriptionDisclosure extends StatelessWidget {
               ),
               InkWell(
                 onTap: onOpenTerms,
-                child: Text('Termini di utilizzo (EULA)', style: linkStyle),
+                child: Text(termsLabel, style: linkStyle),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  String _currentStoreName() {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return 'Google Play';
+    }
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      return 'Apple ID';
+    }
+    return 'dello store';
+  }
+
+  String _termsLabel() {
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      return 'Termini di utilizzo (EULA)';
+    }
+    return 'Termini di utilizzo';
   }
 }
 
