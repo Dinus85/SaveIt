@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Import necessario per TextInput
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import '../utils/theme_helpers.dart';
 import '../services/auth_service.dart';
 import 'registration_page.dart';
@@ -93,10 +94,17 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                   SizedBox(height: 40),
                   _buildHeader(themeColors),
                   SizedBox(height: 48),
-                  _buildGoogleSignInButton(themeColors),
-                  SizedBox(height: 24),
-                  _buildDivider(themeColors),
-                  SizedBox(height: 24),
+                  if (_shouldShowGoogleSignIn)
+                    _buildGoogleSignInButton(themeColors),
+                  if (_shouldShowAppleSignIn) ...[
+                    if (_shouldShowGoogleSignIn) SizedBox(height: 12),
+                    _buildAppleSignInButton(themeColors),
+                  ],
+                  if (_shouldShowProviderDivider) ...[
+                    SizedBox(height: 24),
+                    _buildDivider(themeColors),
+                    SizedBox(height: 24),
+                  ],
                   _buildLoginForm(themeColors),
                   SizedBox(height: 24),
                   _buildRememberAndForgotSection(themeColors),
@@ -113,6 +121,19 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       ),
     );
   }
+
+  bool get _shouldShowGoogleSignIn {
+    if (kIsWeb) return true;
+    return defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  bool get _shouldShowAppleSignIn =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  bool get _shouldShowProviderDivider =>
+      _shouldShowGoogleSignIn || _shouldShowAppleSignIn;
 
   Widget _buildHeader(ThemeColors themeColors) {
     return Column(
@@ -272,6 +293,51 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             SizedBox(width: 12),
             Text(
               'Continua con Google',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppleSignInButton(ThemeColors themeColors) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _signInWithApple,
+        style: ButtonStyle(
+          backgroundColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.disabled)) {
+                return Colors.grey.shade400;
+              }
+              return Colors.black;
+            },
+          ),
+          foregroundColor: MaterialStateProperty.all(Colors.white),
+          overlayColor: MaterialStateProperty.all(Colors.white12),
+          surfaceTintColor: MaterialStateProperty.all(Colors.transparent),
+          elevation: MaterialStateProperty.all(2),
+          padding:
+              MaterialStateProperty.all(EdgeInsets.symmetric(vertical: 16)),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.black, width: 1),
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.apple, color: Colors.white, size: 24),
+            SizedBox(width: 12),
+            Text(
+              'Continua con Apple',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -651,6 +717,69 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       } else {
         _showErrorDialog(
             'Errore durante l\'autenticazione con Google. Verifica la connessione.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _signInWithApple() async {
+    setState(() => _isLoading = true);
+
+    try {
+      print('DEBUG: Tentativo Apple Sign-In');
+
+      final result = await AuthService().loginWithApple();
+      final firebaseHasUser = AuthService().isLoggedIn;
+
+      if (result.success || firebaseHasUser) {
+        final userName =
+            result.user?.name ?? AuthService().currentUser?.name ?? 'Utente';
+        _showSuccessSnackBar(
+            'Login Apple completato! Benvenuto ${userName.split(' ').first}!');
+
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => WebHomePage(
+              isDarkTheme: widget.isDarkTheme,
+              marketingProfileEnabled: false,
+              marketingCommsEnabled: false,
+              onThemeChanged: widget.onThemeChanged,
+              onMarketingProfileChanged: (value) {},
+              onMarketingCommsChanged: (value) {},
+              onSharedContent: (content) {},
+            ),
+          ),
+          (route) => false,
+        );
+      } else {
+        _showErrorDialog(result.message ?? 'Errore durante il login con Apple');
+      }
+    } catch (e) {
+      print('ERRORE: Apple Sign-In: $e');
+      if (AuthService().isLoggedIn) {
+        _showSuccessSnackBar('Login Apple completato!');
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => WebHomePage(
+              isDarkTheme: widget.isDarkTheme,
+              marketingProfileEnabled: false,
+              marketingCommsEnabled: false,
+              onThemeChanged: widget.onThemeChanged,
+              onMarketingProfileChanged: (value) {},
+              onMarketingCommsChanged: (value) {},
+              onSharedContent: (content) {},
+            ),
+          ),
+          (route) => false,
+        );
+      } else {
+        _showErrorDialog(
+            'Errore durante l\'autenticazione con Apple. Verifica la connessione.');
       }
     } finally {
       if (mounted) {

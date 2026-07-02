@@ -150,7 +150,10 @@ class InterstitialAdService {
     await prefs.setInt(_successfulImportsKey(userId), current + 1);
   }
 
-  bool get _shouldUseAds => !kIsWeb && _accessService.hasAds;
+  bool get _shouldUseAds =>
+      !kIsWeb &&
+      defaultTargetPlatform != TargetPlatform.iOS &&
+      _accessService.hasAds;
 
   String? get _currentUserId => _authService.currentUser?.id;
 

@@ -3980,3 +3980,6 @@ Object.assign(
       writeAccountHistory,
     }),
 );
+
+const legalContentPage = require("./legal_content_page");
+Object.assign(exports, legalContentPage.register({onRequest}));

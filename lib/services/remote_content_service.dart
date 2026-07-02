@@ -41,7 +41,7 @@ class RemoteContentService {
   factory RemoteContentService() => _instance;
   RemoteContentService._internal();
 
-  // URLs GitHub
+  // URLs GitHub — stessa sorgente di https://savein.eu/privacy (Cloud Function renderPrivacyPage)
   static const String _baseGitHubUrl =
       'https://raw.githubusercontent.com/Dinus85/saveit-legal-content/main';
 

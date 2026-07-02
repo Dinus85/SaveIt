@@ -47,6 +47,8 @@
 	<true/>
 	
 	<!-- AGGIUNTE PER GOOGLE SIGN-IN -->
+	<key>GIDClientID</key>
+	<string>776660339631-qhgsdg8vin4gabllbbgd5526bffivosp.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

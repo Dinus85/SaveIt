@@ -73,6 +73,20 @@
         }
       },
       {
+        "source": "/privacy",
+        "function": {
+          "functionId": "renderPrivacyPage",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/terms",
+        "function": {
+          "functionId": "renderTermsPage",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

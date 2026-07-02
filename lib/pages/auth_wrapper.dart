@@ -602,7 +602,7 @@ class _CrossPromoNotificationGateState
                   ),
                   _premiumFeatureRow(
                     Icons.block_rounded,
-                    'Nessuna pubblicità interstitial durante l’uso',
+                    'Nessuna pubblicità durante l’uso',
                   ),
                   _premiumFeatureRow(
                     Icons.auto_awesome_rounded,

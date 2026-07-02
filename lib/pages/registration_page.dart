@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import '../utils/theme_helpers.dart';
 import '../pages/privacy_policy_page.dart';
 import '../pages/terms_conditions_page.dart';
@@ -244,10 +245,17 @@ class _RegistrationPageState extends State<RegistrationPage> {
             children: [
               _buildHeader(themeColors),
               SizedBox(height: 32),
-              _buildGoogleSignUpButton(themeColors),
-              SizedBox(height: 24),
-              _buildDivider(themeColors),
-              SizedBox(height: 24),
+              if (_shouldShowGoogleSignIn)
+                _buildGoogleSignUpButton(themeColors),
+              if (_shouldShowAppleSignIn) ...[
+                if (_shouldShowGoogleSignIn) SizedBox(height: 12),
+                _buildAppleSignUpButton(themeColors),
+              ],
+              if (_shouldShowProviderDivider) ...[
+                SizedBox(height: 24),
+                _buildDivider(themeColors),
+                SizedBox(height: 24),
+              ],
               _buildRegistrationForm(themeColors),
               SizedBox(height: 24),
               _buildConsentSection(themeColors),
@@ -262,6 +270,19 @@ class _RegistrationPageState extends State<RegistrationPage> {
       ),
     );
   }
+
+  bool get _shouldShowGoogleSignIn {
+    if (kIsWeb) return true;
+    return defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  bool get _shouldShowAppleSignIn =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  bool get _shouldShowProviderDivider =>
+      _shouldShowGoogleSignIn || _shouldShowAppleSignIn;
 
   Widget _buildHeader(ThemeColors themeColors) {
     return Column(
@@ -352,6 +373,51 @@ class _RegistrationPageState extends State<RegistrationPage> {
             SizedBox(width: 12),
             Text(
               'Continua con Google',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppleSignUpButton(ThemeColors themeColors) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _signUpWithApple,
+        style: ButtonStyle(
+          backgroundColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.disabled)) {
+                return Colors.grey.shade400;
+              }
+              return Colors.black;
+            },
+          ),
+          foregroundColor: MaterialStateProperty.all(Colors.white),
+          overlayColor: MaterialStateProperty.all(Colors.white12),
+          surfaceTintColor: MaterialStateProperty.all(Colors.transparent),
+          elevation: MaterialStateProperty.all(2),
+          padding:
+              MaterialStateProperty.all(EdgeInsets.symmetric(vertical: 16)),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.black, width: 1),
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.apple, color: Colors.white, size: 24),
+            SizedBox(width: 12),
+            Text(
+              'Continua con Apple',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -1079,6 +1145,50 @@ class _RegistrationPageState extends State<RegistrationPage> {
     } catch (e) {
       _showErrorDialog(
           'Errore durante la registrazione con Google. Verifica la connessione.');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _signUpWithApple() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final result = await AuthService().loginWithApple();
+
+      if (result.success && result.user != null) {
+        final userName = result.user!.name.split(' ').first;
+
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+                builder: (context) => WebHomePage(
+                      isDarkTheme: widget.isDarkTheme,
+                      marketingProfileEnabled: false,
+                      marketingCommsEnabled: false,
+                      onThemeChanged: widget.onThemeChanged,
+                      onMarketingProfileChanged: (value) {},
+                      onMarketingCommsChanged: (value) {},
+                      onSharedContent: (content) {},
+                    )),
+            (route) => false,
+          );
+
+          Future.delayed(Duration(milliseconds: 300), () {
+            if (mounted) {
+              _showWelcomeDialog(userName, isNewUser: true);
+            }
+          });
+        }
+      } else {
+        _showErrorDialog(
+            result.message ?? 'Errore durante la registrazione con Apple');
+      }
+    } catch (e) {
+      _showErrorDialog(
+          'Errore durante la registrazione con Apple. Verifica la connessione.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

@@ -810,9 +810,9 @@ class _NewSignupPremiumPromoDialogState
       icon: Icons.insights_outlined,
       title: 'Statistiche e pubblicità',
       freeText:
-          'Con Free hai statistiche base e possono essere mostrati annunci interstitial durante l’uso dell’app.',
+          'Con Free hai statistiche base e possono essere mostrati annunci durante l’uso dell’app.',
       premiumText:
-          'Con Premium hai statistiche più complete e usi SaveIn senza annunci interstitial.',
+          'Con Premium hai statistiche più complete e usi SaveIn senza annunci.',
       color: Color(0xFF7C3AED),
     ),
   ];

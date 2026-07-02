@@ -64,7 +64,7 @@ class _NewSignupPremiumPromoDialogState
           'Usa SaveIn! con un’esperienza più pulita, continua e piacevole. Meno interruzioni, più concentrazione sui contenuti che vuoi salvare e ritrovare.',
       color: Color(0xFFEA580C),
       highlights: [
-        'Niente annunci interstitial',
+        'Niente annunci',
         'Esperienza più fluida',
         'Attivazione immediata della prova',
       ],

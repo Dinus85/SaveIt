@@ -2168,6 +2168,9 @@ class _PlanComparisonSlidesDialog extends StatefulWidget {
 
 class _PlanComparisonSlidesDialogState
     extends State<_PlanComparisonSlidesDialog> {
+  static final Uri _privacyPolicyUri = Uri.parse('https://savein.eu/privacy');
+  static final Uri _termsUri = Uri.parse('https://savein.eu/terms');
+
   final PageController _controller = PageController();
   int _index = 0;
   ProductDetails? _product;
@@ -2198,9 +2201,9 @@ class _PlanComparisonSlidesDialogState
       icon: Icons.block_outlined,
       title: '🚀 Pubblicità',
       freeText:
-          'Con Free possono essere mostrati annunci interstitial durante l’uso dell’app.',
+          'Con Free possono essere mostrati annunci durante l’uso dell’app.',
       premiumText:
-          'Con Premium usi SaveIn senza annunci interstitial e con un’esperienza più fluida ✨',
+          'Con Premium usi SaveIn senza annunci e con un’esperienza più fluida ✨',
       color: Color(0xFFEA580C),
     ),
   ];
@@ -2289,6 +2292,10 @@ class _PlanComparisonSlidesDialogState
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
+  }
+
+  Future<void> _openLegalUrl(Uri uri) async {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   String _formatPremiumDate(DateTime date) {
@@ -2431,6 +2438,13 @@ class _PlanComparisonSlidesDialogState
                               ),
                             ),
                           ),
+                          const SizedBox(height: 10),
+                          _SubscriptionDisclosure(
+                            price: _product!.price,
+                            onOpenPrivacy: () =>
+                                _openLegalUrl(_privacyPolicyUri),
+                            onOpenTerms: () => _openLegalUrl(_termsUri),
+                          ),
                           const SizedBox(height: 6),
                           TextButton(
                             onPressed: (_purchasing || _restoring)
@@ -2502,6 +2516,74 @@ class _PlanComparisonSlidesDialogState
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SubscriptionDisclosure extends StatelessWidget {
+  final String price;
+  final VoidCallback onOpenPrivacy;
+  final VoidCallback onOpenTerms;
+
+  const _SubscriptionDisclosure({
+    required this.price,
+    required this.onOpenPrivacy,
+    required this.onOpenTerms,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textStyle = TextStyle(
+      color: Colors.grey.shade700,
+      fontSize: 11.5,
+      height: 1.35,
+    );
+    final linkStyle = textStyle.copyWith(
+      color: const Color(0xFF2563EB),
+      fontWeight: FontWeight.w800,
+      decoration: TextDecoration.underline,
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'SaveIn Premium: abbonamento mensile con rinnovo automatico a '
+            '$price al mese.',
+            style: textStyle,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Il pagamento viene addebitato sull’Apple ID. L’abbonamento si '
+            'rinnova automaticamente salvo disdetta almeno 24 ore prima della '
+            'scadenza. Puoi gestirlo o annullarlo in Impostazioni > Apple ID > '
+            'Abbonamenti.',
+            style: textStyle,
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 12,
+            children: [
+              InkWell(
+                onTap: onOpenPrivacy,
+                child: Text('Privacy Policy', style: linkStyle),
+              ),
+              InkWell(
+                onTap: onOpenTerms,
+                child: Text('Termini di utilizzo (EULA)', style: linkStyle),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
