@@ -790,32 +790,21 @@ class LogoutButton extends StatelessWidget {
                     await AuthService().logout();
                     debugPrint('DEBUG LOGOUT: 2) AuthService().logout() completato (LogoutButton)');
 
-                    // NON ci affidiamo solo alla reattività di AuthWrapper:
-                    // forziamo una navigazione esplicita verso LoginPage,
-                    // rimuovendo tutto lo stack corrente. Così la schermata
-                    // corretta viene mostrata anche se, per qualsiasi motivo,
-                    // AuthWrapper non si fosse ancora aggiornato.
-                    final loginPage = LoginPage(
-                      isDarkTheme: isDarkTheme ??
-                          (Theme.of(parentContext).brightness ==
-                              Brightness.dark),
-                      onThemeChanged: onThemeChanged ?? (_) {},
-                    );
-
+                    // NON pushiamo una LoginPage "orfana": distruggerebbe
+                    // AuthWrapper (la prima route dello stack) e con esso la
+                    // reattività che, al prossimo login, deve far apparire
+                    // automaticamente la Home. Chiudiamo solo le pagine
+                    // aperte sopra AuthWrapper: essendo ora uno
+                    // StatefulWidget con lo stream creato una sola volta,
+                    // mostrerà correttamente LoginPage non appena riemerge.
                     final rootNavState = navigatorKey.currentState;
                     if (rootNavState != null) {
-                      debugPrint('DEBUG LOGOUT: 3) Navigo con navigatorKey globale (LogoutButton)');
-                      rootNavState.pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => loginPage),
-                        (route) => false,
-                      );
+                      debugPrint('DEBUG LOGOUT: 3) popUntil con navigatorKey globale (LogoutButton)');
+                      rootNavState.popUntil((route) => route.isFirst);
                     } else if (parentContext.mounted) {
                       debugPrint('DEBUG LOGOUT: 3) navigatorKey nullo, uso parentContext (LogoutButton)');
                       Navigator.of(parentContext, rootNavigator: true)
-                          .pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (_) => loginPage),
-                        (route) => false,
-                      );
+                          .popUntil((route) => route.isFirst);
                     } else {
                       debugPrint(
                           'DEBUG LOGOUT: 3) ERRORE - nessun navigator disponibile (LogoutButton)');

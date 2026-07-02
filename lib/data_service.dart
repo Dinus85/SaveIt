@@ -1515,15 +1515,29 @@ class DataService {
     };
   }
 
-  /// Handle logout ottimizzato
-  void handleUserLogout() {
-    final userId = currentUserId;
+  /// Handle logout ottimizzato.
+  ///
+  /// [previousUserId] va passato dal chiamante quando disponibile: al momento
+  /// in cui questo metodo viene invocato durante un logout reale,
+  /// AuthService().currentUser è già null, quindi 'currentUserId' qui
+  /// non identifica più l'utente che si sta disconnettendo.
+  void handleUserLogout({String? previousUserId}) {
+    final userId = previousUserId ?? currentUserId;
     print('DEBUG: DataService (FASE 8) - Gestendo logout utente: $userId');
 
-    // Clear cache for this specific user
+    // Clear cache for this specific user (se conosciuto)
     _clearUserCache(userId);
 
-    // Clear Firebase service cache
+    // IMPORTANTE: pulisce sempre tutta la cache multi-utente, non solo quella
+    // dell'utente indicato: evita che un logout senza previousUserId noto
+    // lasci in memoria i dati di un altro utente.
+    _userFoldersCache.clear();
+    _userPostsCache.clear();
+    _cacheTimestamps.clear();
+
+    // Clear Firebase service cache (cache GLOBALE non per-utente:
+    // deve essere sempre svuotata ad ogni logout, altrimenti il prossimo
+    // utente che fa login riceve le cartelle/post dell'utente precedente)
     _firebaseService.clearCache();
 
     print(

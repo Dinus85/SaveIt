@@ -157,16 +157,13 @@ class _AccountDeletionLoadingPageReactiveState
               print(
                   'DEBUG: Countdown completato - Navigando forzatamente al login');
 
-              // Forza la Login: in alcune navigazioni la root e' gia' la Home.
+              // Torna alla prima route (AuthWrapper), che essendo ormai
+              // disconnessi mostrerà automaticamente LoginPage. Evitiamo di
+              // pushare una LoginPage "orfana": distruggerebbe AuthWrapper e
+              // con esso la reattività necessaria per il prossimo login.
               if (mounted) {
-                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => LoginPage(
-                      isDarkTheme: widget.isDarkTheme,
-                      onThemeChanged: widget.onThemeChanged,
-                    ),
-                  ),
-                  (route) => false,
+                Navigator.of(context, rootNavigator: true).popUntil(
+                  (route) => route.isFirst,
                 );
               }
             }
@@ -839,28 +836,21 @@ class AccountPage extends StatelessWidget {
                 await AuthService().logout();
                 debugPrint('DEBUG LOGOUT: 2) AuthService().logout() completato');
 
-                final loginPage = LoginPage(
-                  isDarkTheme: isDarkTheme,
-                  onThemeChanged: onThemeChanged,
-                );
-
-                // Usiamo prioritariamente il navigatorKey globale (agganciato
-                // direttamente al MaterialApp): non dipende dal fatto che
-                // 'pageContext' sia ancora valido/montato in quel momento.
+                // NON pushiamo una LoginPage "orfana": distruggerebbe
+                // AuthWrapper (che resta la prima route dello stack) e con
+                // esso la reattività che, al prossimo login, deve far
+                // apparire automaticamente la Home. Ci limitiamo a chiudere
+                // tutte le pagine aperte sopra AuthWrapper: essendo ora
+                // uno StatefulWidget con lo stream creato una sola volta,
+                // mostrerà correttamente LoginPage non appena riemerge.
                 final rootNavState = navigatorKey.currentState;
                 if (rootNavState != null) {
-                  debugPrint('DEBUG LOGOUT: 3) Navigo con navigatorKey globale');
-                  rootNavState.pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => loginPage),
-                    (route) => false,
-                  );
+                  debugPrint('DEBUG LOGOUT: 3) popUntil con navigatorKey globale');
+                  rootNavState.popUntil((route) => route.isFirst);
                 } else if (pageContext.mounted) {
                   debugPrint('DEBUG LOGOUT: 3) navigatorKey nullo, uso pageContext');
                   Navigator.of(pageContext, rootNavigator: true)
-                      .pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => loginPage),
-                    (route) => false,
-                  );
+                      .popUntil((route) => route.isFirst);
                 } else {
                   debugPrint(
                       'DEBUG LOGOUT: 3) ERRORE - nessun navigator disponibile per la navigazione');

@@ -160,12 +160,20 @@ abstract class FolderServiceBase {
       if (isAuthenticated) {
         await handleUserLogin();
       } else {
+        // IMPORTANTE: a questo punto AuthService().currentUser è già null
+        // (viene azzerato prima di emettere l'evento di logout sullo stream),
+        // quindi DataService.handleUserLogout() da solo non riesce più a
+        // capire quale utente pulire dalla sua cache per-utente. Ripuliamo
+        // sempre anche la cache GLOBALE di FirebaseDataService qui, altrimenti
+        // il prossimo utente che fa login si ritrova le cartelle/post
+        // dell'utente precedente ancora in cache.
+        DataService.instance.handleUserLogout(previousUserId: previousUserId);
         await handleUserLogout();
       }
     } else if (isAuthenticated && previousUserId != currentUserId) {
       // Stesso stato (loggato), ma utente diverso: svuota e ricarica
       print('DEBUG: Cambio utente da $previousUserId a $currentUserId - forcing reload');
-      DataService.instance.handleUserLogout();
+      DataService.instance.handleUserLogout(previousUserId: previousUserId);
       await handleUserLogout();
       await handleUserLogin();
     }
