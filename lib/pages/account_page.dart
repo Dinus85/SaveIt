@@ -458,7 +458,7 @@ class AccountPage extends StatelessWidget {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: backgroundColor,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -809,6 +809,7 @@ class AccountPage extends StatelessWidget {
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
+    final pageContext = context;
 
     showDialog(
       context: context,
@@ -824,27 +825,21 @@ class AccountPage extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('Annulla', style: TextStyle(color: hintColor)),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
 
               print('DEBUG: Iniziando logout da AccountPage');
 
               await AuthService().logout();
-              if (!context.mounted) return;
+              if (!pageContext.mounted) return;
 
-              print('DEBUG: Logout completato - navigazione a LoginPage');
-              Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (_) => LoginPage(
-                    isDarkTheme: isDarkTheme,
-                    onThemeChanged: onThemeChanged,
-                  ),
-                ),
-                (route) => false,
+              print('DEBUG: Logout completato - ritorno al root AuthWrapper');
+              Navigator.of(pageContext, rootNavigator: true).popUntil(
+                (route) => route.isFirst,
               );
             },
             child: Text('Disconnetti', style: TextStyle(color: Colors.red)),

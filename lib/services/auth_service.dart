@@ -1344,6 +1344,12 @@ class AuthService extends ChangeNotifier {
     try {
       if (kDebugMode) print('DEBUG: 🔥 Logout utente: ${_currentUser?.name}');
 
+      _currentUser = null;
+      await _userProfileSubscription?.cancel();
+      _userProfileSubscription = null;
+      await _clearLocalData(preserveUserProfileCache: true);
+      notifyListeners();
+
       await _firebaseAuth.signOut();
 
       try {
