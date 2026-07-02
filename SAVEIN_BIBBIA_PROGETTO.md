@@ -401,7 +401,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente: `pubspec.yaml` **`1.0.0+14`**. Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
+- Versione mobile corrente: `pubspec.yaml` **`1.0.0+20`**. Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -1228,3 +1228,61 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
 - **Dashboard web SaveIn**: ripristinato deploy Flutter web completo su Firebase Hosting (prima era online solo uno stub HTML da 103 byte). Link: `https://savein.eu/dashboard`, `https://savein.eu/?admin=1`, `https://saveit-app-1784d.web.app/dashboard`.
 - **Android App Links SaveIn**: test `https://savein.eu/s/test` **OK** da install Play test interno (lug 2026).
 - **AdMob iOS SaveIn**: App ID iOS in `Info.plist` ok; ad unit interstitial/banner iOS in `interstitial_ad_service.dart` ancora ID test Google — da sostituire quando si creano le unità iOS su AdMob.
+
+### App Store review, login e abbonamenti (build `1.0.0+20`)
+
+- **App Store rejection fix**:
+  - Aggiunto **Sign in with Apple** su iOS/macOS (`sign_in_with_apple`, `AuthService.loginWithApple`, `Runner.entitlements`).
+  - Login social separati per piattaforma: Apple su iOS/macOS, Google su Android/Web; email/password resta disponibile.
+  - Fix crash Google Sign-In iOS aggiungendo `GIDClientID` e URL scheme corretti in `ios/Runner/Info.plist`.
+  - Interstitial forzati disabilitati su iOS in `InterstitialAdService`; su testi Premium usare "annunci" generico, non "interstitial".
+  - Paywall Premium con disclosure obbligatoria: rinnovo automatico, prezzo, Privacy Policy, Termini di utilizzo/EULA.
+
+- **Legal pages pubbliche SaveIn**:
+  - `https://savein.eu/privacy` e `https://savein.eu/terms` sono servite da Cloud Functions pubbliche (`renderPrivacyPage`, `renderTermsPage`) via Firebase Hosting rewrite.
+  - La sorgente e' il repo GitHub legal content (`privacy_policy.json`, `terms_conditions.json`), non una pagina protetta dell'app.
+  - File backend: `functions/legal_content_page.js`; registrazione in `functions/index.js`; rewrites in `firebase.json`.
+
+- **Premium iOS / App Store**:
+  - Product ID in codice e backend: `savein_premium_monthly`.
+  - `BillingService` usa `in_app_purchase` e verifica iOS tramite callable `verifyAppStorePurchase`.
+  - Backend App Store in `functions/app_store_billing.js`: verifica transazioni e webhook App Store Server Notifications v2.
+  - App Store Connect deve avere auto-renewable subscription mensile a 1,99 EUR e URL webhook configurato.
+  - Il rinnovo automatico non puo essere gestito con checkbox interno: l'app deve rimandare alla gestione ufficiale abbonamenti Apple.
+
+- **Premium Android / Google Play Billing**:
+  - Product ID Google Play: `savein_premium_monthly`.
+  - Base plan Google Play: `monthly`, tipo rinnovo automatico, periodo ogni mese, prezzo impostato (1,99 EUR base; prezzi locali generati da Play).
+  - Finche' il base plan non e' attivo e prezzato, `BillingService.loadProduct()` restituisce `null` e l'app mostra "Abbonamento non ancora disponibile su questo store".
+  - Callable deployata: `verifyGooglePlayPurchase` in `functions/google_play_billing.js`.
+  - Dipendenza backend: `googleapis`.
+  - La funzione aggiorna `users/{uid}` con `role=premium`, `premiumUntil`, `premiumSource=google_play` e `googleSubscription`; scrive storico in `account_history`.
+  - Il service account `saveit-app-1784d@appspot.gserviceaccount.com` deve essere aggiunto in Play Console utenti/autorizzazioni solo per SaveIn con permessi ordini/abbonamenti e dati finanziari se richiesti.
+
+- **Google Sign-In Android da Play Store**:
+  - Firebase Android app corretta: `eu.savein.app`.
+  - Aggiunti in Firebase gli SHA Play App Signing:
+    - SHA-1: `84:7D:B1:D6:ED:63:D9:4D:E0:E3:33:D0:51:43:77:91:6F:95:B1:27`
+    - SHA-256: `88:71:25:D3:62:D3:2D:B6:FE:69:67:68:F8:02:BB:04:53:90:30:90:58:0C:69:5E:C6:12:9F:55:FD:95:4C:BD`
+  - Dopo aggiunta SHA, scaricare e sostituire `android/app/google-services.json`.
+  - Serve nuova `.aab` per incorporare `google-services.json`; non serve deploy Firebase.
+
+- **Account page / Premium UI**:
+  - Utenti Free: pulsante diretto `Diventa Premium` in Account.
+  - Dialog Free/Premium: se il prodotto store e' disponibile mostra il bottone acquisto con prezzo e `Ripristina acquisti`.
+  - Utenti Premium/Admin: mostra `Scadenza Premium`; per Premium store mostra box "Rinnovo automatico gestito dallo store" con pulsante `Gestisci rinnovo automatico`.
+  - Link gestione abbonamenti:
+    - iOS: `itms-apps://apps.apple.com/account/subscriptions`
+    - Android: `https://play.google.com/store/account/subscriptions?package=eu.savein.app&sku=savein_premium_monthly`
+  - Popup `Versione corrente`: usa `package_info_plus` per mostrare versione/build reali e testo non deve andare in overflow.
+
+- **Logout**:
+  - `AuthService.logout()` pulisce subito `_currentUser`, listener profilo e cache locale prima di attendere `FirebaseAuth.signOut()`.
+  - `AccountPage` dopo logout torna al root navigator (`AuthWrapper`) invece di creare manualmente una nuova `LoginPage`.
+  - Fix build successivo: nei dialog usare `builder: (dialogContext)` se si chiama `Navigator.pop(dialogContext)`.
+
+- **Release/build**:
+  - Versione mobile aggiornata a `1.0.0+20`.
+  - Qualsiasi modifica Flutter (`lib/...`, `pubspec.yaml`, `google-services.json`) richiede nuova build/release app.
+  - Modifiche solo Play Console su prezzo/base plan abbonamento non richiedono build ne' deploy.
+  - Deploy Firebase necessario solo per Functions/Hosting/Firestore rules modificati; non necessario per cambio `google-services.json`, prezzo Play o fix Flutter gia committato.

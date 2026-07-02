@@ -837,9 +837,15 @@ class AccountPage extends StatelessWidget {
               await AuthService().logout();
               if (!pageContext.mounted) return;
 
-              print('DEBUG: Logout completato - ritorno al root AuthWrapper');
-              Navigator.of(pageContext, rootNavigator: true).popUntil(
-                (route) => route.isFirst,
+              print('DEBUG: Logout completato - navigazione forzata a LoginPage');
+              Navigator.of(pageContext, rootNavigator: true).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => LoginPage(
+                    isDarkTheme: isDarkTheme,
+                    onThemeChanged: onThemeChanged,
+                  ),
+                ),
+                (route) => false,
               );
             },
             child: Text('Disconnetti', style: TextStyle(color: Colors.red)),
