@@ -783,6 +783,8 @@ class _FolderDetailPageState extends State<FolderDetailPage>
               if (AuthService().currentUser != null && !_isSearching)
                 LogoutButton(
                   onLogoutComplete: () {},
+                  isDarkTheme: widget.isDarkTheme,
+                  onThemeChanged: widget.onThemeChanged,
                 ),
             ],
           ),

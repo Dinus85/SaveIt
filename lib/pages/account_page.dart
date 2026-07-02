@@ -1075,7 +1075,11 @@ class AccountPage extends StatelessWidget {
                         ),
                       ),
                       if (currentUser != null)
-                        LogoutButton(onLogoutComplete: () {}),
+                        LogoutButton(
+                          onLogoutComplete: () {},
+                          isDarkTheme: isDarkTheme,
+                          onThemeChanged: onThemeChanged,
+                        ),
                     ],
                   ),
                 ),

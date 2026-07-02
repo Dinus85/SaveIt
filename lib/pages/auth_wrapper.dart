@@ -9,10 +9,7 @@ import '../widgets/migration_ui.dart';
 import '../main.dart';
 
 // WRAPPER COMPLETAMENTE REATTIVO CON MIGRAZIONE INTEGRATA
-class AuthWrapper extends StatelessWidget {
-  static Future<bool>? _migrationCheckFuture;
-  static String? _migrationCheckUserId;
-
+class AuthWrapper extends StatefulWidget {
   final bool isDarkTheme;
   final Function(bool) onThemeChanged;
   final bool marketingProfileEnabled;
@@ -33,12 +30,45 @@ class AuthWrapper extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  static Future<bool>? _migrationCheckFuture;
+  static String? _migrationCheckUserId;
+
+  // IMPORTANTE: lo stream viene creato UNA SOLA VOLTA (in initState) e non
+  // ad ogni build. Prima veniva creato leggendo 'AuthService().userStream'
+  // direttamente dentro build(): essendo un getter che genera un nuovo
+  // stream ogni volta, ogni rebuild di AuthWrapper (es. per un banner promo,
+  // un cambio tema, ecc.) faceva ripartire da zero la sottoscrizione a
+  // Firebase Auth, causando in alcuni casi un disallineamento tra lo stato
+  // reale (disconnesso) e la schermata mostrata dopo il logout.
+  late final Stream<User?> _userStream;
+
+  bool get isDarkTheme => widget.isDarkTheme;
+  Function(bool) get onThemeChanged => widget.onThemeChanged;
+  bool get marketingProfileEnabled => widget.marketingProfileEnabled;
+  bool get marketingCommsEnabled => widget.marketingCommsEnabled;
+  Function(bool) get onMarketingProfileChanged =>
+      widget.onMarketingProfileChanged;
+  Function(bool) get onMarketingCommsChanged =>
+      widget.onMarketingCommsChanged;
+  Function(SharedContent) get onSharedContent => widget.onSharedContent;
+
+  @override
+  void initState() {
+    super.initState();
+    _userStream = AuthService().userStream;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final authService = AuthService();
 
     // CORREZIONE: Usa StreamBuilder che ascolta direttamente Firebase Auth
     return StreamBuilder<User?>(
-      stream: authService.userStream,
+      stream: _userStream,
       builder: (context, snapshot) {
         // Mostra loading durante inizializzazione o while waiting for stream
         if (!authService.isInitialized ||
@@ -667,12 +697,16 @@ class LogoutButton extends StatelessWidget {
   final VoidCallback? onLogoutComplete;
   final EdgeInsetsGeometry? padding;
   final BoxConstraints? constraints;
+  final bool? isDarkTheme;
+  final Function(bool)? onThemeChanged;
 
   const LogoutButton({
     Key? key,
     this.onLogoutComplete,
     this.padding,
     this.constraints,
+    this.isDarkTheme,
+    this.onThemeChanged,
   }) : super(key: key);
 
   @override
@@ -749,24 +783,48 @@ class LogoutButton extends StatelessWidget {
                   // Chiudi il dialog prima di iniziare il logout
                   Navigator.pop(dialogContext);
 
+                  debugPrint('DEBUG LOGOUT: 1) Chiuso dialog conferma (LogoutButton)');
+
                   try {
                     // Esegui il logout
                     await AuthService().logout();
-                    
-                    // Il logout triggera il rebuild di AuthWrapper che mostrerà LoginPage.
-                    // Dobbiamo però assicurarci di chiudere tutte le pagine aperte sopra AuthWrapper (come AccountPage).
-                    
-                    // Usiamo il navigatorKey globale se disponibile, altrimenti il context del genitore.
-                    // popUntil(route.isFirst) ci riporta alla primissima pagina dell'app (AuthWrapper).
-                    if (navigatorKey.currentState != null) {
-                      navigatorKey.currentState!.popUntil((route) => route.isFirst);
+                    debugPrint('DEBUG LOGOUT: 2) AuthService().logout() completato (LogoutButton)');
+
+                    // NON ci affidiamo solo alla reattività di AuthWrapper:
+                    // forziamo una navigazione esplicita verso LoginPage,
+                    // rimuovendo tutto lo stack corrente. Così la schermata
+                    // corretta viene mostrata anche se, per qualsiasi motivo,
+                    // AuthWrapper non si fosse ancora aggiornato.
+                    final loginPage = LoginPage(
+                      isDarkTheme: isDarkTheme ??
+                          (Theme.of(parentContext).brightness ==
+                              Brightness.dark),
+                      onThemeChanged: onThemeChanged ?? (_) {},
+                    );
+
+                    final rootNavState = navigatorKey.currentState;
+                    if (rootNavState != null) {
+                      debugPrint('DEBUG LOGOUT: 3) Navigo con navigatorKey globale (LogoutButton)');
+                      rootNavState.pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => loginPage),
+                        (route) => false,
+                      );
                     } else if (parentContext.mounted) {
-                      Navigator.of(parentContext, rootNavigator: true).popUntil((route) => route.isFirst);
+                      debugPrint('DEBUG LOGOUT: 3) navigatorKey nullo, uso parentContext (LogoutButton)');
+                      Navigator.of(parentContext, rootNavigator: true)
+                          .pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => loginPage),
+                        (route) => false,
+                      );
+                    } else {
+                      debugPrint(
+                          'DEBUG LOGOUT: 3) ERRORE - nessun navigator disponibile (LogoutButton)');
                     }
-                    
+
                     onLogoutComplete?.call();
-                  } catch (e) {
-                    debugPrint('Errore durante logout: $e');
+                  } catch (e, stack) {
+                    debugPrint('DEBUG LOGOUT: ERRORE durante logout/navigazione (LogoutButton): $e');
+                    debugPrint('$stack');
                     if (parentContext.mounted) {
                       ScaffoldMessenger.of(parentContext).showSnackBar(
                         SnackBar(content: Text('Errore durante il logout: $e')),
