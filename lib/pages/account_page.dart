@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:savein/models/folder.dart';
 import 'package:savein/utils/theme_helpers.dart';
@@ -447,10 +449,12 @@ class AccountPage extends StatelessWidget {
     await SaveInFirstLaunchTutorial.show(context);
   }
 
-  void _showVersionInfo(BuildContext context) {
+  Future<void> _showVersionInfo(BuildContext context) async {
     final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
     final textColor = isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
+    final packageInfo = await PackageInfo.fromPlatform();
+    if (!context.mounted) return;
 
     showDialog(
       context: context,
@@ -460,26 +464,35 @@ class AccountPage extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
         ),
         title: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
           children: [
             Image.asset(
               'assets/icon/SaveIn!.png',
-              height: 56,
+              height: 44,
               fit: BoxFit.contain,
             ),
             SizedBox(width: 8),
-            Text('Versione Corrente', style: TextStyle(color: textColor)),
+            Expanded(
+              child: Text(
+                'Versione corrente',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: textColor),
+              ),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Versione: 1.0.0', style: TextStyle(color: subtitleColor)),
+            Text('Versione: ${packageInfo.version}',
+                style: TextStyle(color: subtitleColor)),
             SizedBox(height: 8),
-            Text('Build: 2025.01.08', style: TextStyle(color: subtitleColor)),
+            Text('Build: ${packageInfo.buildNumber}',
+                style: TextStyle(color: subtitleColor)),
             SizedBox(height: 8),
-            Text('Piattaforma: Web Demo',
+            Text('Piattaforma: ${_currentPlatformLabel()}',
                 style: TextStyle(color: subtitleColor)),
             SizedBox(height: 16),
             Text(
@@ -496,6 +509,24 @@ class AccountPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _currentPlatformLabel() {
+    if (kIsWeb) return 'Web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'Android';
+      case TargetPlatform.iOS:
+        return 'iOS';
+      case TargetPlatform.macOS:
+        return 'macOS';
+      case TargetPlatform.windows:
+        return 'Windows';
+      case TargetPlatform.linux:
+        return 'Linux';
+      case TargetPlatform.fuchsia:
+        return 'Fuchsia';
+    }
   }
 
   Future<void> _backupInstagramPreviews(BuildContext context) async {
@@ -2007,6 +2038,8 @@ class AccountPage extends StatelessWidget {
                 ],
               ),
             ),
+            SizedBox(height: 10),
+            _buildManageSubscriptionBox(context),
           ],
           SizedBox(height: 12),
           SizedBox(
@@ -2030,15 +2063,129 @@ class AccountPage extends StatelessWidget {
               label: const Text('Vedi differenze Free/Premium'),
             ),
           ),
+          if (role == AppUserRole.free) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF15803D),
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                onPressed: () =>
+                    _showPlanComparisonSlides(context, startAtPremium: true),
+                icon: const Icon(Icons.workspace_premium_rounded),
+                label: const Text('Diventa Premium'),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  void _showPlanComparisonSlides(BuildContext context) {
+  Widget _buildManageSubscriptionBox(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.autorenew_rounded,
+                color: Color(0xFF2563EB),
+                size: 20,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Rinnovo automatico gestito dallo store',
+                  style: TextStyle(
+                    color: Color(0xFF1E3A8A),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Puoi attivare o disattivare il rinnovo dalla schermata ufficiale '
+            'degli abbonamenti Apple/Google. SaveIn aggiorna piano e scadenza '
+            'quando lo store conferma rinnovi o scadenze.',
+            style: TextStyle(
+              color: Color(0xFF1E40AF),
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: () => _openStoreSubscriptions(context),
+            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+            label: const Text('Gestisci rinnovo automatico'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openStoreSubscriptions(BuildContext context) async {
+    final uri = _storeSubscriptionsUri();
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Gestione abbonamenti non disponibile su questa piattaforma',
+          ),
+        ),
+      );
+      return;
+    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Uri? _storeSubscriptionsUri() {
+    if (kIsWeb) return null;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return Uri.parse('itms-apps://apps.apple.com/account/subscriptions');
+      case TargetPlatform.android:
+        return Uri.parse(
+          'https://play.google.com/store/account/subscriptions'
+          '?package=eu.savein.app&sku=$kSaveInPremiumProductId',
+        );
+      default:
+        return null;
+    }
+  }
+
+  void _showPlanComparisonSlides(
+    BuildContext context, {
+    bool startAtPremium = false,
+  }) {
     showDialog<void>(
       context: context,
-      builder: (_) => const _PlanComparisonSlidesDialog(),
+      builder: (_) => _PlanComparisonSlidesDialog(
+        initialPage: startAtPremium ? 2 : 0,
+      ),
     );
   }
 
@@ -2159,7 +2306,11 @@ class AccountPage extends StatelessWidget {
 }
 
 class _PlanComparisonSlidesDialog extends StatefulWidget {
-  const _PlanComparisonSlidesDialog();
+  final int initialPage;
+
+  const _PlanComparisonSlidesDialog({
+    this.initialPage = 0,
+  });
 
   @override
   State<_PlanComparisonSlidesDialog> createState() =>
@@ -2171,8 +2322,8 @@ class _PlanComparisonSlidesDialogState
   static final Uri _privacyPolicyUri = Uri.parse('https://savein.eu/privacy');
   static final Uri _termsUri = Uri.parse('https://savein.eu/terms');
 
-  final PageController _controller = PageController();
-  int _index = 0;
+  late final PageController _controller;
+  late int _index;
   ProductDetails? _product;
   bool _loadingProduct = true;
   bool _purchasing = false;
@@ -2211,6 +2362,8 @@ class _PlanComparisonSlidesDialogState
   @override
   void initState() {
     super.initState();
+    _index = widget.initialPage.clamp(0, _slides.length - 1).toInt();
+    _controller = PageController(initialPage: _index);
     _loadProduct();
   }
 

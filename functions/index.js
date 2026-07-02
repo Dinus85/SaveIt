@@ -3983,3 +3983,15 @@ Object.assign(
 
 const legalContentPage = require("./legal_content_page");
 Object.assign(exports, legalContentPage.register({onRequest}));
+
+const googlePlayBilling = require("./google_play_billing");
+Object.assign(
+    exports,
+    googlePlayBilling.register({
+      db,
+      admin,
+      onCall,
+      HttpsError,
+      writeAccountHistory,
+    }),
+);

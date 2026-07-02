@@ -222,10 +222,7 @@ class BillingService {
       return _verifyWithAppStore(purchase);
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
-      throw const BillingException(
-        BillingErrorCode.platformNotSupported,
-        'Abbonamento Android non ancora configurato. Usa iOS o le promo Premium.',
-      );
+      return _verifyWithGooglePlay(purchase);
     }
     throw const BillingException(
       BillingErrorCode.platformNotSupported,
@@ -277,6 +274,51 @@ class BillingService {
     }
   }
 
+  static Future<BillingVerifyResult> _verifyWithGooglePlay(
+    PurchaseDetails purchase,
+  ) async {
+    final purchaseToken = _extractGooglePurchaseToken(purchase);
+    if (purchaseToken == null || purchaseToken.isEmpty) {
+      throw const BillingException(
+        BillingErrorCode.verificationFailed,
+        'Token acquisto Google Play non valido.',
+      );
+    }
+
+    try {
+      final callable = _functions.httpsCallable('verifyGooglePlayPurchase');
+      final response = await callable.call<Map<String, dynamic>>({
+        'purchaseToken': purchaseToken,
+        'productId': purchase.productID,
+      });
+      final data = Map<String, dynamic>.from(response.data);
+      final premiumUntilRaw = data['premiumUntil']?.toString();
+      if (premiumUntilRaw == null || premiumUntilRaw.isEmpty) {
+        throw const BillingException(
+          BillingErrorCode.verificationFailed,
+          'Risposta verifica Premium Google Play non valida.',
+        );
+      }
+      return BillingVerifyResult(
+        premiumUntil: DateTime.parse(premiumUntilRaw).toLocal(),
+        autoRenew: (data['autoRenew'] as bool?) ?? true,
+        productId: (data['productId'] as String?) ?? kSaveInPremiumProductId,
+        originalTransactionId: data['state']?.toString(),
+      );
+    } on FirebaseFunctionsException catch (e) {
+      throw BillingException(
+        BillingErrorCode.verificationFailed,
+        e.message ?? 'Verifica acquisto Google Play fallita.',
+      );
+    } catch (e) {
+      if (e is BillingException) rethrow;
+      throw BillingException(
+        BillingErrorCode.verificationFailed,
+        'Errore durante la verifica Google Play: $e',
+      );
+    }
+  }
+
   static String? _extractTransactionId(PurchaseDetails purchase) {
     final purchaseId = purchase.purchaseID?.trim();
     if (purchaseId != null && purchaseId.isNotEmpty) {
@@ -290,6 +332,27 @@ class BillingService {
       final decoded = jsonDecode(localData);
       if (decoded is Map<String, dynamic>) {
         for (final key in ['transactionId', 'originalTransactionId', 'transaction_id']) {
+          final value = decoded[key]?.toString().trim();
+          if (value != null && value.isNotEmpty) return value;
+        }
+      }
+    } catch (_) {
+      return localData;
+    }
+    return null;
+  }
+
+  static String? _extractGooglePurchaseToken(PurchaseDetails purchase) {
+    final serverData = purchase.verificationData.serverVerificationData.trim();
+    if (serverData.isNotEmpty) return serverData;
+
+    final localData = purchase.verificationData.localVerificationData.trim();
+    if (localData.isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(localData);
+      if (decoded is Map<String, dynamic>) {
+        for (final key in ['purchaseToken', 'token']) {
           final value = decoded[key]?.toString().trim();
           if (value != null && value.isNotEmpty) return value;
         }
