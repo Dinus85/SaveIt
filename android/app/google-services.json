@@ -39,10 +39,10 @@
               "client_type": 3
             },
             {
-              "client_id": "776660339631-utpt8pbescr42c5ir4eg9kt68nkalahs.apps.googleusercontent.com",
+              "client_id": "776660339631-qhgsdg8vin4gabllbbgd5526bffivosp.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.saveit"
+                "bundle_id": "eu.savein.app"
               }
             }
           ]
@@ -66,6 +66,14 @@
           }
         },
         {
+          "client_id": "776660339631-m43i0dlsus5cdpd2bvhn1nnujje8irbs.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "eu.savein.app",
+            "certificate_hash": "847db1d6ed63d94de0e333d0514377916f95b127"
+          }
+        },
+        {
           "client_id": "776660339631-1a3563ekhlqbkpqqv17m1f1cvg2ekr2s.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -83,10 +91,10 @@
               "client_type": 3
             },
             {
-              "client_id": "776660339631-utpt8pbescr42c5ir4eg9kt68nkalahs.apps.googleusercontent.com",
+              "client_id": "776660339631-qhgsdg8vin4gabllbbgd5526bffivosp.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.saveit"
+                "bundle_id": "eu.savein.app"
               }
             }
           ]
