@@ -67,5 +67,9 @@
 	</array>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-1397392558961350~4643419177</string>
+
+	<!-- Esenzione crittografia: l'app usa solo HTTPS/TLS standard, nessuna crittografia proprietaria -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
