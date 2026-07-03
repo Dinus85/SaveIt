@@ -1099,7 +1099,7 @@ Per arrivare in produzione Google richiede:
 Build iOS via **Codemagic** (workflow già funzionante; bundle `eu.savein.app`). Per pubblicazione App Store:
 1. Verificare Team Apple Developer, bundle ID `eu.savein.app`, display name `SaveIn!`, icone e `ios/Runner/GoogleService-Info.plist`.
 2. App su App Store Connect con lo stesso bundle ID.
-3. Configurare gli ID AdMob iOS reali e sostituire gli ID test in `ios/Runner/Info.plist` e nei servizi ads Flutter.
+3. ~~Configurare gli ID AdMob iOS reali e sostituire gli ID test in `ios/Runner/Info.plist` e nei servizi ads Flutter.~~ **FATTO 03/07/2026** (vedi sezione "Google AdMob" sotto) — serve pero' ancora una nuova build iOS per renderlo effettivo sui dispositivi.
 4. Build release Codemagic → TestFlight → test → submit review.
 5. Completare privacy, scheda App Store, screenshot, classificazione età, tracking/privacy nutrition labels.
 6. Deep link iOS: Associated Domains + `apple-app-site-association` su `savein.eu` (indipendenti da `assetlinks.json` Android).
@@ -1121,18 +1121,23 @@ Il file HTML locale di riferimento è `privacy.html` nella root del progetto Flu
 - **App ID Android**: `ca-app-pub-1397392558961350~2159050629`
 - **Interstitial Android**: `ca-app-pub-1397392558961350/5839880574`
 - **Banner Android**: `ca-app-pub-1397392558961350/4746290759`
-- iOS: usa ancora gli ID di test Google — da aggiornare quando si crea l'app iOS su AdMob
+- **App ID iOS**: `ca-app-pub-1397392558961350~4643419177` (in `ios/Runner/Info.plist`)
+- **Interstitial iOS (reale, dal 03/07/2026)**: `ca-app-pub-1397392558961350/9950660131`
+- **Banner iOS (reale, dal 03/07/2026)**: `ca-app-pub-1397392558961350/4315988838`
 
 Configurazione nei file:
-- App ID → `android/app/src/main/AndroidManifest.xml`
+- App ID → `android/app/src/main/AndroidManifest.xml` (Android) e `ios/Runner/Info.plist` (iOS)
 - Ad Unit IDs → `lib/services/interstitial_ad_service.dart`
 
 Logica ads:
 - Solo utenti Free (`AppAccessService().hasAds`)
 - **Interstitial**: mostrato prima di apertura post remindato e ogni 5 import
 - **Banner**: mostrato nella home ogni 4 cartelle (dopo la 4ª, 8ª, 12ª...) tramite `BannerAdWidget` in `lib/widgets/banner_ad_widget.dart`
+- **IMPORTANTE (verificato 03/07/2026)**: sia `InterstitialAdService._shouldUseAds` sia `BannerAdWidget` hanno un controllo esplicito `defaultTargetPlatform == TargetPlatform.iOS` che **disattiva completamente gli ads su iOS**, indipendentemente dagli ID configurati (vedi nota "App Store rejection fix" build `1.0.0+20`, introdotto perche' Apple review aveva contestato gli interstitial). Quindi ora che gli ID iOS reali sono stati creati e inseriti nel codice, gli ads su iOS **restano comunque disattivati** finche' questo blocco non viene rimosso deliberatamente — non e' un bug, e' una scelta di design da rivalutare in futuro se si vuole monetizzare anche su iOS.
 
 L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla pubblicazione su Play Store).
+
+**Stato collegamento store in AdMob (03/07/2026)**: tentativo di collegare l'app Android SaveIn in AdMob non riuscito — AdMob non trova app che non siano ancora pubblicate pubblicamente su Play Store (SaveIn Android e' ancora in test chiuso). Da riprovare dopo la pubblicazione in produzione. Stesso discorso per iOS, disponibile solo dopo pubblicazione live su App Store. Finche' il collegamento store non e' fatto, AdMob applica il limite "Pubblicazione annunci limitata".
 
 ---
 
@@ -1156,7 +1161,7 @@ L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla p
 - Non perdere `android/savein-release.jks` e la sua password: senza di essi è impossibile pubblicare aggiornamenti su Play Store.
 - Dopo fix SHA Android App Links, aggiornare `ASSET_LINKS`, `web/.well-known/assetlinks.json` e ridistribuire su Firebase Hosting; non ignorare `.well-known` negli ignore di `firebase.json`.
 - La Privacy Policy pubblica è su GitHub Pages (`dinus85.github.io/saveit-legal-content/privacy.html`). Per aggiornarla modificare `privacy.html` nel repo `Dinus85/saveit-legal-content`.
-- Per aggiornare gli ID AdMob iOS, creare l'app su AdMob per iOS e sostituire gli ID di test in `interstitial_ad_service.dart` e `ios/Runner/Info.plist`.
+- Gli ID AdMob iOS reali sono gia' stati creati e inseriti in `interstitial_ad_service.dart` (03/07/2026); ricordarsi pero' che gli ads restano disattivati su iOS lato codice (`_shouldUseAds`/`BannerAdWidget`) finche' non si decide di riattivarli.
 - Le immagini banner promo stanno in Firebase Storage sotto `promotion_banners/` e sono gestite da funzioni admin-only. Non aprire regole Storage pubbliche in scrittura per gestire questi upload.
 - La promo benvenuto nuovi iscritti deve passare sempre dalle Cloud Functions `getNewSignupPremiumPromoEligibility` e `activateNewSignupPremiumPromo`. Non riattivarla con scritture dirette client su `users/{uid}`: serve lo storico permanente per email in `new_signup_premium_promo_claims`.
 - Quando si modifica la promo benvenuto deployare sia Functions sia regole Firestore: `firebase deploy --only functions,firestore:rules`. Per la dashboard web serve anche build/deploy hosting.
@@ -1227,7 +1232,7 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
   - Timer di sicurezza 30s per uscire dal loading anche se sync lento.
 - **Dashboard web SaveIn**: ripristinato deploy Flutter web completo su Firebase Hosting (prima era online solo uno stub HTML da 103 byte). Link: `https://savein.eu/dashboard`, `https://savein.eu/?admin=1`, `https://saveit-app-1784d.web.app/dashboard`.
 - **Android App Links SaveIn**: test `https://savein.eu/s/test` **OK** da install Play test interno (lug 2026).
-- **AdMob iOS SaveIn**: App ID iOS in `Info.plist` ok; ad unit interstitial/banner iOS in `interstitial_ad_service.dart` ancora ID test Google — da sostituire quando si creano le unità iOS su AdMob.
+- **AdMob iOS SaveIn**: App ID iOS in `Info.plist` ok; ad unit interstitial/banner iOS reali create e inserite in `interstitial_ad_service.dart` il 03/07/2026 (vedi sezione "Google AdMob" e aggiornamento 03/07/2026 sotto). Ricordare che restano comunque disattivate su iOS lato codice.
 
 ### App Store review, login e abbonamenti (build `1.0.0+20`)
 
@@ -1318,3 +1323,13 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
 - **Causa**: `_AdminUserRecord` (modello usato solo da `admin_dashboard_page.dart`) non aveva un equivalente di `User.effectiveRole` (gia' presente lato app in `auth_service.dart`): i badge leggevano il campo grezzo `role` di Firestore senza controllare la scadenza.
 - **Fix**: aggiunto `_AdminUserRecord.effectiveRole` (stessa logica di `User.effectiveRole`: premium valido solo se `premiumUntil` e' oggi o futuro). Applicato ai 3 badge ruolo (tabella utenti, tabella storico/marketing, vista dettaglio) e al `Filtro ruolo` della ricerca. Il dropdown di modifica manuale del ruolo continua a mostrare `user.role` grezzo (e' il campo che si sta effettivamente editando).
 - **Deploy**: solo web, nessuna build mobile richiesta. `flutter build web --release` + `firebase deploy --only hosting`, gia' pubblicato su `https://savein.eu/dashboard`.
+
+## Aggiornamenti 03/07/2026
+
+- **AdMob iOS SaveIn — ID reali creati**: sostituiti gli ID di test Google in `lib/services/interstitial_ad_service.dart` con gli ID reali creati su AdMob:
+  - Interstitial iOS: `ca-app-pub-1397392558961350/9950660131`
+  - Banner iOS: `ca-app-pub-1397392558961350/4315988838`
+  - **Nota**: gli ads restano comunque disattivati lato codice su iOS (`_shouldUseAds` in `InterstitialAdService`, controllo `TargetPlatform.iOS` in `BannerAdWidget`), scelta presa per l'App Store rejection fix build `1.0.0+20`. Con gli ID reali pronti, riattivarli su iOS e' ora solo questione di rimuovere quei controlli quando si decide di farlo.
+  - Serve una **nuova build iOS** (bump versione, Codemagic → TestFlight) perche' il cambio ID sia effettivo; finche' non si fa una nuova build i dispositivi iOS gia' installati continuano a usare il binario con gli ID vecchi (anche se comunque gli ads iOS sono disattivati lato codice, quindi impatto pratico nullo finche' restano disattivati).
+- **Tentativo collegamento store in AdMob**: provato a collegare l'app Android SaveIn in AdMob per rimuovere il limite "Pubblicazione annunci limitata" — AdMob non trova l'app perche' SaveIn Android e' ancora in test chiuso su Play Store, non pubblicata pubblicamente. Da riprovare dopo il rilascio in produzione. Rimandato dall'utente, nessuna azione ulteriore per ora.
+- **SmartChef**: nella stessa sessione sono stati creati e inseriti anche gli ID AdMob iOS reali per SmartChef (progetto separato, vedi `SMART_CHEF_BIBLE.md` e `SMART_CHEF_ADS_SETUP_TODO.md` nella root di `smart_chef_sm`).

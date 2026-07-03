@@ -16,12 +16,12 @@ class InterstitialAdService {
   static const String _androidInterstitialAdUnitId =
       'ca-app-pub-1397392558961350/5839880574';
   static const String _iosInterstitialAdUnitId =
-      'ca-app-pub-3940256099942544/4411468910'; // TODO: sostituire con ID iOS reale
+      'ca-app-pub-1397392558961350/9950660131';
 
   static const String androidBannerAdUnitId =
       'ca-app-pub-1397392558961350/4746290759';
   static const String iosBannerAdUnitId =
-      'ca-app-pub-3940256099942544/6300978111'; // TODO: sostituire con ID iOS reale
+      'ca-app-pub-1397392558961350/4315988838';
 
   final AppAccessService _accessService = AppAccessService();
   final AuthService _authService = AuthService();
