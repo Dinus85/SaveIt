@@ -1366,7 +1366,14 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<AuthResult> deleteAccount() async {
+  /// true se il metodo di accesso corrente e' email/password: la UI deve
+  /// chiedere la password attuale prima di poter eliminare l'account (serve
+  /// per la riautenticazione, vedi [deleteAccount]).
+  bool get currentAccountUsesPassword =>
+      (_firebaseAuth.currentUser?.providerData ?? const [])
+          .any((p) => p.providerId == 'password');
+
+  Future<AuthResult> deleteAccount({String? currentPassword}) async {
     if (_currentUser == null || _firebaseAuth.currentUser == null) {
       return AuthResult(
         success: false,
@@ -1374,11 +1381,27 @@ class AuthService extends ChangeNotifier {
       );
     }
 
+    final firebaseUser = _firebaseAuth.currentUser!;
+
     try {
       _isDeletingAccount = true;
       final userEmail = _currentUser!.email;
       final userId = _currentUser!.id;
       if (kDebugMode) print('DEBUG: 🔥 Eliminazione account: $userEmail');
+
+      // STEP 0 (FIX 03/07/2026): riautentica PRIMA di toccare qualsiasi dato.
+      // Prima si cancellavano subito tutti i dati Firestore e SOLO DOPO si
+      // provava a eliminare l'account Firebase Auth: se quel passaggio
+      // falliva (tipicamente 'requires-recent-login', molto comune se non si
+      // e' fatto login di recente), l'utente restava loggato con un account
+      // ormai svuotato, e tornava a una Home vuota invece che al Login.
+      final reauthFailure = await _reauthenticateForDeletion(
+        firebaseUser: firebaseUser,
+        currentPassword: currentPassword,
+      );
+      if (reauthFailure != null) {
+        return reauthFailure;
+      }
 
       try {
         await _googleSignIn.signOut();
@@ -1388,8 +1411,29 @@ class AuthService extends ChangeNotifier {
 
       await _deleteCurrentUserData(userId: userId, email: userEmail);
 
-      await _firebaseAuth.currentUser!.delete();
-      if (kDebugMode) print('DEBUG: Account Firebase eliminato');
+      try {
+        await firebaseUser.delete();
+        if (kDebugMode) print('DEBUG: Account Firebase eliminato');
+      } catch (e) {
+        // I dati Firestore sono gia' stati cancellati a questo punto. Anche
+        // se l'eliminazione dell'account Auth fallisce qui (raro, essendoci
+        // gia' riautenticati sopra), non lasciamo l'utente "loggato" con un
+        // account ormai svuotato: forziamo comunque la disconnessione locale
+        // cosi' l'app torna al Login e non a una Home vuota.
+        if (kDebugMode) {
+          print('ERRORE eliminazione account Auth dopo pulizia dati: $e');
+        }
+        await _forceLocalSignOutAfterPartialDeletion(userId: userId);
+        final detail = e is firebase_auth.FirebaseAuthException
+            ? _getFirebaseErrorMessage(e)
+            : e.toString();
+        return AuthResult(
+          success: false,
+          message: 'I tuoi dati sono stati eliminati, ma non è stato '
+              'possibile completare la rimozione dell\'account ($detail). '
+              'Sei stato disconnesso; contatta l\'assistenza se il problema persiste.',
+        );
+      }
 
       try {
         await _firebaseAuth.signOut();
@@ -1408,11 +1452,6 @@ class AuthService extends ChangeNotifier {
         success: true,
         message: 'Account eliminato con successo',
       );
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      String message = _getFirebaseErrorMessage(e);
-      if (kDebugMode)
-        print('ERRORE Firebase Auth Delete: ${e.code} - $message');
-      return AuthResult(success: false, message: message);
     } catch (e) {
       if (kDebugMode) print('ERRORE eliminazione account: $e');
       return AuthResult(
@@ -1422,6 +1461,139 @@ class AuthService extends ChangeNotifier {
     } finally {
       _isDeletingAccount = false;
     }
+  }
+
+  /// Riautentica l'utente prima di procedere con l'eliminazione, in modo che
+  /// `firebaseUser.delete()` non fallisca piu' tardi con 'requires-recent-login'
+  /// quando i dati Firestore sono gia' stati cancellati. Ritorna `null` se la
+  /// riautenticazione riesce, altrimenti un [AuthResult] di fallimento da
+  /// restituire subito senza aver toccato alcun dato.
+  Future<AuthResult?> _reauthenticateForDeletion({
+    required firebase_auth.User firebaseUser,
+    String? currentPassword,
+  }) async {
+    final providerIds =
+        firebaseUser.providerData.map((p) => p.providerId).toList();
+
+    try {
+      if (providerIds.contains('google.com')) {
+        final googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          return AuthResult(
+            success: false,
+            message: 'Riautenticazione con Google annullata. '
+                'Riprova per eliminare l\'account.',
+          );
+        }
+        final googleAuth = await googleUser.authentication;
+        final credential = firebase_auth.GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+        await firebaseUser.reauthenticateWithCredential(credential);
+        return null;
+      }
+
+      if (providerIds.contains('apple.com')) {
+        final isAvailable = await SignInWithApple.isAvailable();
+        if (!isAvailable) {
+          return AuthResult(
+            success: false,
+            message: 'Accedi con Apple non è disponibile su questo '
+                'dispositivo. Riprova più tardi per eliminare l\'account.',
+          );
+        }
+        final rawNonce = _generateNonce();
+        final nonce = _sha256ofString(rawNonce);
+        final appleCredential = await SignInWithApple.getAppleIDCredential(
+          scopes: const [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+          nonce: nonce,
+        );
+        final identityToken = appleCredential.identityToken;
+        if (identityToken == null || identityToken.isEmpty) {
+          return AuthResult(
+            success: false,
+            message: 'Apple non ha restituito un token valido. '
+                'Riprova per eliminare l\'account.',
+          );
+        }
+        final credential = firebase_auth.OAuthProvider('apple.com').credential(
+          idToken: identityToken,
+          rawNonce: rawNonce,
+          accessToken: appleCredential.authorizationCode,
+        );
+        await firebaseUser.reauthenticateWithCredential(credential);
+        return null;
+      }
+
+      if (providerIds.contains('password')) {
+        if (currentPassword == null || currentPassword.isEmpty) {
+          return AuthResult(
+            success: false,
+            message: 'Inserisci la password attuale per confermare '
+                'l\'eliminazione dell\'account.',
+          );
+        }
+        final email = firebaseUser.email;
+        if (email == null || email.isEmpty) {
+          return AuthResult(
+            success: false,
+            message: 'Impossibile verificare l\'account: email mancante.',
+          );
+        }
+        final credential = firebase_auth.EmailAuthProvider.credential(
+          email: email,
+          password: currentPassword,
+        );
+        await firebaseUser.reauthenticateWithCredential(credential);
+        return null;
+      }
+
+      // Provider non riconosciuto: procediamo comunque, sara' 'delete()' a
+      // segnalare se serve altro.
+      return null;
+    } on firebase_auth.FirebaseAuthException catch (e) {
+      if (kDebugMode) {
+        print('ERRORE riautenticazione per eliminazione account: '
+            '${e.code} - $e');
+      }
+      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        return AuthResult(success: false, message: 'Password errata. Riprova.');
+      }
+      return AuthResult(
+        success: false,
+        message: 'Non è stato possibile confermare la tua identità '
+            '(${_getFirebaseErrorMessage(e)}). L\'account NON è stato eliminato.',
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('ERRORE riautenticazione per eliminazione account: $e');
+      }
+      return AuthResult(
+        success: false,
+        message: 'Non è stato possibile confermare la tua identità. '
+            'L\'account NON è stato eliminato. Riprova.',
+      );
+    }
+  }
+
+  Future<void> _forceLocalSignOutAfterPartialDeletion({
+    required String userId,
+  }) async {
+    try {
+      await _firebaseAuth.signOut();
+    } catch (_) {}
+    _currentUser = null;
+    try {
+      await _clearLocalData(deletedUserId: userId);
+    } catch (_) {}
+    try {
+      await _clearAnalyticsServices();
+    } catch (_) {}
+    notifyListeners();
   }
 
   Future<void> _deleteCurrentUserData({

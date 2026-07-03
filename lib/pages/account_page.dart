@@ -92,11 +92,13 @@ class PasswordCriterion {
 class _AccountDeletionLoadingPageReactive extends StatefulWidget {
   final bool isDarkTheme;
   final Function(bool) onThemeChanged;
+  final String? currentPassword;
 
   const _AccountDeletionLoadingPageReactive({
     Key? key,
     required this.isDarkTheme,
     required this.onThemeChanged,
+    this.currentPassword,
   }) : super(key: key);
 
   @override
@@ -132,7 +134,8 @@ class _AccountDeletionLoadingPageReactiveState
       });
 
       // Avvia eliminazione
-      final result = await AuthService().deleteAccount();
+      final result = await AuthService()
+          .deleteAccount(currentPassword: widget.currentPassword);
 
       if (result.success) {
         print(
@@ -176,7 +179,10 @@ class _AccountDeletionLoadingPageReactiveState
           _statusMessage = 'Errore durante l\'eliminazione: ${result.message}';
         });
 
-        // Torna alla pagina account dopo 3 secondi
+        // FIX 03/07/2026: ora la riautenticazione avviene PRIMA di cancellare
+        // qualsiasi dato, quindi se arriviamo qui i dati dell'utente sono
+        // ancora intatti: tornare indietro (verso la Home, dato che questa
+        // pagina ha sostituito AccountPage con pushReplacement) è sicuro.
         Future.delayed(Duration(seconds: 3), () {
           if (mounted) {
             Navigator.of(context).pop();
@@ -874,102 +880,153 @@ class AccountPage extends StatelessWidget {
     final subtitleColor = isDarkTheme ? Colors.grey.shade300 : Colors.black54;
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
 
+    // FIX 03/07/2026: gli account email/password richiedono la password
+    // attuale per la riautenticazione (necessaria prima di eliminare, vedi
+    // AuthService.deleteAccount). Senza password Firebase rifiuterebbe
+    // 'delete()' con 'requires-recent-login' DOPO aver gia' cancellato tutti
+    // i dati Firestore.
+    final needsPassword = AuthService().currentAccountUsesPassword;
+    final passwordController = TextEditingController();
+    bool obscurePassword = true;
+    String? passwordError;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: backgroundColor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Row(
-          children: [
-            Icon(Icons.warning, color: Colors.red, size: 28),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Elimina Account',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: backgroundColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.red, size: 28),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Elimina Account',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'ATTENZIONE: Questa azione è IRREVERSIBILE!',
-              style: TextStyle(
-                color: Colors.red,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Eliminando l\'account perderai definitivamente:',
-              style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: 8),
-            _buildWarningItem(
-                '• Tutti i tuoi contenuti salvati', subtitleColor),
-            _buildWarningItem('• Tutte le cartelle create', subtitleColor),
-            _buildWarningItem(
-                '• Cronologia ricerche e statistiche', subtitleColor),
-            _buildWarningItem('• Preferenze e impostazioni', subtitleColor),
-            _buildWarningItem(
-                '• Non potrai recuperare questi dati', Colors.red),
-            SizedBox(height: 16),
-            Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info, color: Colors.red, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Potrebbe essere richiesta la riautenticazione per motivi di sicurezza.',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ATTENZIONE: Questa azione è IRREVERSIBILE!',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'Eliminando l\'account perderai definitivamente:',
+                  style:
+                      TextStyle(color: textColor, fontWeight: FontWeight.w600),
+                ),
+                SizedBox(height: 8),
+                _buildWarningItem(
+                    '• Tutti i tuoi contenuti salvati', subtitleColor),
+                _buildWarningItem('• Tutte le cartelle create', subtitleColor),
+                _buildWarningItem(
+                    '• Cronologia ricerche e statistiche', subtitleColor),
+                _buildWarningItem(
+                    '• Preferenze e impostazioni', subtitleColor),
+                _buildWarningItem(
+                    '• Non potrai recuperare questi dati', Colors.red),
+                SizedBox(height: 16),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info, color: Colors.red, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          needsPassword
+                              ? 'Per motivi di sicurezza inserisci la tua password attuale per confermare.'
+                              : 'Potrebbe esserti richiesto di accedere di nuovo con Google/Apple per confermare la tua identità.',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (needsPassword) ...[
+                  SizedBox(height: 16),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: obscurePassword,
+                    style: TextStyle(color: textColor),
+                    decoration: InputDecoration(
+                      labelText: 'Password attuale',
+                      errorText: passwordError,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          obscurePassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          color: hintColor,
+                        ),
+                        onPressed: () => setDialogState(
+                            () => obscurePassword = !obscurePassword),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                   ),
                 ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Annulla', style: TextStyle(color: hintColor)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (needsPassword && passwordController.text.isEmpty) {
+                  setDialogState(() {
+                    passwordError = 'Inserisci la password per continuare';
+                  });
+                  return;
+                }
+                final password =
+                    needsPassword ? passwordController.text : null;
+                Navigator.pop(context);
+                _proceedWithAccountDeletion(context, currentPassword: password);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                'Elimina Definitivamente',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Annulla', style: TextStyle(color: hintColor)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _proceedWithAccountDeletion(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: Text(
-              'Elimina Definitivamente',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -990,7 +1047,10 @@ class AccountPage extends StatelessWidget {
   }
 
   // ELIMINAZIONE ACCOUNT CORRETTA - USA LA PAGINA REATTIVA
-  Future<void> _proceedWithAccountDeletion(BuildContext context) async {
+  Future<void> _proceedWithAccountDeletion(
+    BuildContext context, {
+    String? currentPassword,
+  }) async {
     print('DEBUG: Iniziando eliminazione account REATTIVA');
 
     // Naviga alla pagina di loading reattiva
@@ -999,6 +1059,7 @@ class AccountPage extends StatelessWidget {
         builder: (context) => _AccountDeletionLoadingPageReactive(
           isDarkTheme: isDarkTheme,
           onThemeChanged: onThemeChanged,
+          currentPassword: currentPassword,
         ),
       ),
     );

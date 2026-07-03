@@ -14,10 +14,30 @@ import 'access_control_service.dart';
 
 import 'folder_service_models.dart';
 import 'folder_service_base.dart';
+import 'auth_service.dart';
 
 /// Mixin per operazioni CRUD con supporto parentId
 mixin FolderServiceCRUD on FolderServiceBase {
   final AppAccessService _accessService = AppAccessService();
+
+  /// FIX 03/07/2026: allinea isAuthenticated/currentUserId con AuthService se
+  /// risultano non ancora sincronizzati. Stesso pattern già usato in
+  /// [executeAuthenticatedOperation] (folder_service_base.dart), applicato
+  /// anche qui perché createPersistentFolder/createSubfolderInFolder
+  /// controllano questi campi direttamente senza passare da quel metodo.
+  /// Corregge i falsi "User not authenticated" osservati su alcuni
+  /// dispositivi subito dopo login/registrazione (lo stream di stato di
+  /// FolderService non ha ancora ricevuto l'evento di AuthService).
+  void _resyncAuthStateIfNeeded() {
+    if (isAuthenticated && currentUserId != null) return;
+    final user = AuthService().currentUser;
+    if (user != null) {
+      isAuthenticated = true;
+      currentUserId = user.id;
+      print(
+          'DEBUG: Auth sincronizzata in FolderServiceCRUD (userId: ${user.id})');
+    }
+  }
 
   // ============================================================================
   // VALIDAZIONE
@@ -426,6 +446,7 @@ mixin FolderServiceCRUD on FolderServiceBase {
       print('DEBUG: ========== CREAZIONE CARTELLA ROOT ==========');
       print('DEBUG: Nome: $name');
 
+      _resyncAuthStateIfNeeded();
       if (!isAuthenticated || currentUserId == null) {
         throw Exception('User not authenticated');
       }
@@ -528,6 +549,7 @@ mixin FolderServiceCRUD on FolderServiceBase {
       print('DEBUG: Parent: ${parentFolder.name}');
       print('DEBUG: Child: $name');
 
+      _resyncAuthStateIfNeeded();
       if (!isAuthenticated || currentUserId == null) {
         throw Exception('User not authenticated');
       }

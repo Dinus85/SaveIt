@@ -145,6 +145,30 @@ class DataService {
     return _authService.isLoggedIn && currentUserId != null;
   }
 
+  /// FIX 03/07/2026: su alcuni dispositivi reali (osservato su Samsung dopo
+  /// una registrazione Google appena fatta) puo' esserci una finestra breve
+  /// in cui Firebase Auth ha gia' una sessione valida ma AuthService non ha
+  /// ancora finito di sincronizzare il proprio stato interno (_currentUser).
+  /// In quella finestra, operazioni come "crea cartella" fallivano subito con
+  /// un errore di autenticazione anche se l'utente era, di fatto, loggato.
+  /// Invece di fallire all'istante, aspettiamo un attimo (max ~1.5s) che
+  /// AuthService si allinei, cosa che non ha alcun impatto quando l'utente e'
+  /// davvero disconnesso (in quel caso FirebaseAuth.currentUser e' gia' null
+  /// e usciamo subito).
+  Future<void> _ensureAuthReadyForOperation() async {
+    if (isUserAuthenticated) return;
+    if (FirebaseAuth.instance.currentUser == null) return;
+
+    for (int attempt = 0; attempt < 10 && !isUserAuthenticated; attempt++) {
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+
+    if (kDebugMode && isUserAuthenticated) {
+      print('DEBUG: AuthService si è allineato dopo una breve attesa '
+          '(sessione Firebase già valida)');
+    }
+  }
+
   /// Verifica autenticazione con context utente E DEBUG FIREBASE SEMPLIFICATO
   void _requireAuthentication() {
     final isAuth = _authService.isLoggedIn;
@@ -361,6 +385,11 @@ class DataService {
     String operationName, {
     bool allowCache = true,
   }) async {
+    // Concedi un breve margine se la sessione Firebase è valida ma
+    // AuthService non si è ancora sincronizzato del tutto (vedi commento su
+    // _ensureAuthReadyForOperation).
+    await _ensureAuthReadyForOperation();
+
     // Verifica autenticazione prima di qualsiasi operazione
     _requireAuthentication();
 
