@@ -191,10 +191,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           child: _showWelcomeBack
               ? Column(
                   key: ValueKey('welcome_back'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Text(
                       'Bentornato!',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: themeColors.titleColor,
                         fontSize: 28,
@@ -204,6 +205,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                     SizedBox(height: 8),
                     Text(
                       'I tuoi contenuti ti aspettano',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: themeColors.subtitleColor,
                         fontSize: 16,
@@ -214,10 +216,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                 )
               : Column(
                   key: ValueKey('sign_in'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Text(
                       'Accedi al tuo account',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: themeColors.titleColor,
                         fontSize: 28,
@@ -227,6 +230,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                     SizedBox(height: 8),
                     Text(
                       'Accedi per gestire i tuoi contenuti salvati',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: themeColors.subtitleColor,
                         fontSize: 16,

@@ -1362,3 +1362,52 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
   - `lib/services/folder_service_crud.dart`: aggiunto `_resyncAuthStateIfNeeded()` (stesso pattern gia' usato altrove: se `isAuthenticated`/`currentUserId` non sono allineati, li risincronizza da `AuthService().currentUser` prima di controllare), applicato sia in `createPersistentFolder()` sia nella creazione sottocartelle.
   - `lib/data_service.dart`: aggiunto `_ensureAuthReadyForOperation()`, richiamato all'inizio di `_executeWithOptimizedCache` (usato da `createFolder`, `getFolders`, ecc.): se Firebase Auth ha gia' una sessione valida ma `AuthService` non e' ancora sincronizzato, attende fino a ~1.5s (poll ogni 150ms) prima di considerare l'operazione non autenticata, invece di fallire all'istante. Non ha alcun impatto quando l'utente e' davvero disconnesso (`FirebaseAuth.instance.currentUser == null` → nessuna attesa).
 - **Nota**: non e' stato possibile catturare il messaggio di errore esatto dal dispositivo (l'app non ha Crashlytics configurato), quindi questo e' un fix preventivo basato sull'evidenza Firestore (i dati arrivano sempre, solo con un breve ritardo) e su un gap di codice concreto e gia' pattern-matchato altrove nel progetto. Se il problema si ripresentasse, andrebbe considerato aggiungere Crashlytics per avere log precisi da dispositivi reali.
+
+### 2026-07-03 (continua) - Il fix sopra NON ha risolto: "Tutti" ancora invisibile, creazione cartella "non fa nulla"
+
+- **Retest dell'utente sulla build 31**: l'eliminazione account (fix precedente) ora funziona, ma su Samsung S22 "Tutti" continua a non apparire e creare una cartella "non accade nulla" — quindi il fix di resync auth (`_resyncAuthStateIfNeeded`/`_ensureAuthReadyForOperation`) non era la causa reale, o non e' l'unica.
+- **Causa individuata analizzando `_buildFoldersGrid()` in `lib/main.dart`**: quando `_getSortedFolders()` ritorna una lista vuota (cioe' `_folderService.folders` e' vuoto — la sincronizzazione cartelle non e' mai riuscita, non solo "in ritardo"), la Home mostrava **solo** il testo "Trascina verso il basso per aggiornare le cartelle", **senza nessuna cartella "Tutti" ne' alcun messaggio d'errore reale**. Un fallimento persistente di `initializeHybridData()`/`syncStartupWithDataService()` (es. errore di rete/permessi specifico del dispositivo) restava quindi completamente invisibile: l'utente vedeva solo un generico invito a fare pull-to-refresh, senza sapere che qualcosa era effettivamente fallito ne' perche'.
+- **Perche' "creare una cartella" sembrava non fare nulla**: non abbiamo evidenza diretta (l'utente non ha notato un dialog di errore), ma se la sincronizzazione cartelle fallisce in modo persistente per lo stesso motivo di fondo (es. problema di rete/permessi ricorrente su quel dispositivo), e' plausibile che anche la scrittura Firestore in `createPersistentFolder` fallisca allo stesso modo — il codice ha gia' un `try/catch` che dovrebbe mostrare un dialog con l'errore (`_showRetryDialog`), ma non avendo il messaggio esatto non possiamo confermare al 100% dove si perde.
+- **Fix implementato** (per rendere visibile l'errore reale al prossimo test, invece di continuare a indovinare "alla cieca"):
+  - `lib/main.dart`: nuovo `_buildEmptyFoldersState()` che legge `FolderService().currentHealth` (gia' popolato con `status`/`errorMessage` dai punti di sync esistenti in `folder_service_sync.dart`, es. `'Startup sync failed: $e'`). Se lo stato e' `error`/`degraded`/`offline`, mostra l'errore reale + un pulsante **"Riprova"** esplicito (richiama `_initializeFolderService()`); altrimenti resta il messaggio generico "Trascina per aggiornare".
+  - `_onPullToRefresh()`: un fallimento ora mostra uno `SnackBar` rosso con il testo dell'eccezione, invece di solo un `print` in debug.
+- **Prossimo passo**: al prossimo test su un dispositivo che riproduce il problema, il messaggio d'errore mostrato in Home (o nello SnackBar del pull-to-refresh) dara' finalmente l'informazione mancante per identificare la causa esatta (es. `PERMISSION_DENIED`, timeout di rete, errore specifico Firestore, ecc.). Se il problema si ripresenta ancora, sarebbe il momento di aggiungere Crashlytics per avere log strutturati da dispositivi reali invece di doversi basare sul testo mostrato a schermo.
+- **UI aggiuntiva**: su richiesta, centrati titolo e sottotitolo della pagina di Login ("Accedi al tuo account" / "Accedi per gestire i tuoi contenuti salvati", e la variante "Bentornato!" per coerenza) in `lib/pages/login_page.dart`.
+- Versione bumpata a **1.0.0+32**.
+
+### 2026-07-03 (continua) - Verifica Firestore: le cartelle vengono create, ma la Home non le renderizza
+
+- **Retest utente dopo il fix `+32`**: nessun errore mostrato, "Tutti" ancora invisibile e nuova cartella apparentemente non creata.
+- **Verifica server-side effettuata su Firebase Auth + Firestore**:
+  - L'account `riccardogregori84@gmail.com` ha cambiato UID dopo la nuova registrazione: vecchio UID `LUpx0NJdebQbX3lmu57hNG9RuUY2`, nuovo UID `bkKGRI6pVWZbM21CZ62ku6P9Yq42`.
+  - Nel nuovo UID Firestore, sotto `users/bkKGRI6pVWZbM21CZ62ku6P9Yq42/folders`, esistono gia':
+    - cartella default **"Tutti"** (`isDefault=true`, creata subito dopo registrazione);
+    - cartella utente **"Cibo"** (`isDefault=false`, creata dopo il tap su "Crea").
+  - Conclusione: **la scrittura funziona e Firestore contiene i dati corretti**. Il problema e' la Home Flutter che resta su lista locale/cache vuota e non renderizza i dati server-side.
+- **Stato del fix**:
+  - Il tentativo di listener diretto Firestore sulla Home e' stato rimosso: peggiorava il flusso login su alcuni dispositivi e non va mantenuto.
+  - `lib/services/folder_service_sync.dart`: corretto `updateTuttiCount()`. Prima aggiungeva "Tutti" solo se `folders.isEmpty`; se la lista locale conteneva una cartella utente ma mancava la speciale "Tutti", usava per errore `folders.first` come fallback. Ora, se non trova nessuna `isSpecial`, inserisce "Tutti" in testa anche quando ci sono gia' altre cartelle.
+  - `lib/main.dart`: resta disponibile un reload one-shot da Firestore (`_reloadHomeFoldersFromFirestoreOnce`) per evitare listener invasivi e poter forzare caricamenti mirati se necessario.
+- Versione bumpata a **1.0.0+33**.
+
+### 2026-07-04 - Promo benvenuto: errore `already-exists` e chiarimento Google/iOS
+
+- **Sintomo**: attivando la promo benvenuto dall'app, veniva mostrato un riquadro rosso con stack tecnico Flutter e errore `[firebase_functions/already-exists] Hai gia utilizzato questa promo.`
+- **Causa**: il backend funzionava correttamente: la promo benvenuto e' **una tantum per email** e viene tracciata in `new_signup_premium_promo_claims/{normalizedEmail}`. Se la stessa email ha gia usato la promo e la scadenza e' passata, `activateNewSignupPremiumPromo` blocca il riutilizzo con `already-exists`. Esempio verificato: `pasidino@gmail.com` aveva una vecchia claim del 24/06/2026 gia scaduta.
+- **Chiarimento Google Play / iOS**: questa promo **non passa dagli acquisti in-app** e non richiede configurazioni specifiche su Google Play o App Store. E' un grant server-side: Cloud Function scrive `role=premium`, `premiumUntil`, `premiumSource=new_signup_promo` su Firestore. Gli store servono solo per gli abbonamenti pagati (`savein_premium_monthly`), non per il mese gratuito di benvenuto gestito da backend.
+- **Configurazione server verificata**: `app_config/new_signup_premium_promo` e' attiva, `durationDays=30`, `priceAfterTrial=1.99`, `app=savein`.
+- **Fix client**:
+  - `AuthService.activateNewSignupPremiumPromo()` ora chiama prima `getNewSignupPremiumPromoEligibility()` e, se `canClaim=false`, blocca localmente con un messaggio pulito invece di chiamare comunque la funzione di attivazione.
+  - Gestione esplicita di `FirebaseFunctionsException` (`already-exists`, `failed-precondition`, `unauthenticated`) con messaggi utente leggibili.
+  - `AccountPage._buildNewSignupPromoAccountNotice()` ora usa l'eligibility reale: il riquadro promo non appare piu se la promo non e' riscattabile.
+  - Popup automatico Home e pagina Account puliscono il messaggio di errore, evitando stack trace tecnici in UI.
+- **Fix anti-abuso account deletion**:
+  - `AuthService._deleteCurrentUserData()` non cancella piu `new_signup_premium_promo_claims` quando l'utente elimina l'account.
+  - Anche i cleanup backend (`functions/index.js`, `functions/cleanup_orphan_users.js`) preservano `new_signup_premium_promo_claims`.
+  - Motivo: la claim e' storico permanente per email; deve sopravvivere alla cancellazione account per impedire "uso promo → cancello account → mi registro di nuovo → riuso promo".
+- **Nota test**: per ritestare la promo con la stessa email serve cancellare manualmente la claim in `new_signup_premium_promo_claims` (solo per test controllati) oppure usare un'email nuova mai premiata.
+- **Cleanup utenti cancellati**:
+  - La funzione `cleanupUserDataOnDelete` e' stata ridistribuita il 04/07/2026 su `saveit-app-1784d`.
+  - Quando un utente viene eliminato da Firebase Auth, il backend pulisce ricorsivamente i dati Firestore collegati all'utente, evitando documenti utente vuoti/orfani nella console.
+  - Le claim in `new_signup_premium_promo_claims` restano escluse dalla pulizia per mantenere lo storico permanente anti-abuso della promo benvenuto.
+- Versione locale corrente: **1.0.0+36**.

@@ -977,14 +977,9 @@ const cleanupUserOwnedData = async ({uid, email, dryRun = false}) => {
         db.collection(PROMOTION_REDEMPTIONS_COLLECTION).where("userId", "==", uid),
         {label: "promotion_redemptions.userId", dryRun}
     );
-    stats.newSignupClaims += await deleteQuerySnapshotDocs(
-        db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).where("firstUserId", "==", uid),
-        {label: "new_signup_premium_promo_claims.firstUserId", dryRun}
-    );
-    stats.newSignupClaims += await deleteQuerySnapshotDocs(
-        db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).where("lastUserId", "==", uid),
-        {label: "new_signup_premium_promo_claims.lastUserId", dryRun}
-    );
+    // Non cancellare new_signup_premium_promo_claims: sono storico anti-abuso
+    // per email e devono sopravvivere a cancellazione account/cleanup per
+    // impedire ri-registrazioni ripetute con la stessa email.
     stats.crossAppPromos += await deleteQuerySnapshotDocs(
         db.collection("cross_app_promos").where("sourceUid", "==", uid),
         {label: "cross_app_promos.sourceUid", dryRun}
@@ -1019,10 +1014,6 @@ const cleanupUserOwnedData = async ({uid, email, dryRun = false}) => {
     );
     stats.promotionRedemptions += await deleteDocumentTree(
         db.collection(PROMOTION_REDEMPTIONS_COLLECTION).doc(promoRedemptionId(normalizedEmail, SAVEIN_SMARTCHEF_PROMO_ID)),
-        {dryRun}
-    );
-    stats.newSignupClaims += await deleteDocumentTree(
-        db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).doc(emailDocId(normalizedEmail)),
         {dryRun}
     );
     stats.crossAppPromos += await deleteDocumentTree(

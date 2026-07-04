@@ -576,8 +576,9 @@ mixin FolderServiceSync on FolderServiceBase {
   }
 
   void updateTuttiCount() {
-    if (folders.isEmpty) {
-      folders.add(MockFolder(
+    final specialIndex = folders.indexWhere((f) => f.isSpecial);
+    if (specialIndex < 0) {
+      folders.insert(0, MockFolder(
         name: 'Tutti',
         count: '0 Post',
         color: Colors.purple.shade200,

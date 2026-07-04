@@ -2276,11 +2276,14 @@ class AccountPage extends StatelessWidget {
   }
 
   Widget _buildNewSignupPromoAccountNotice(BuildContext context) {
-    return FutureBuilder<NewSignupPremiumPromoConfig?>(
-      future: AuthService().getNewSignupPremiumPromoConfig(),
+    return FutureBuilder<NewSignupPremiumPromoEligibility>(
+      future: AuthService().getNewSignupPremiumPromoEligibility(),
       builder: (context, snapshot) {
-        final config = snapshot.data;
-        if (config == null) return const SizedBox.shrink();
+        final eligibility = snapshot.data;
+        if (eligibility == null || !eligibility.canClaim) {
+          return const SizedBox.shrink();
+        }
+        final config = eligibility.config;
 
         return InkWell(
           borderRadius: BorderRadius.circular(14),
@@ -2343,10 +2346,27 @@ class AccountPage extends StatelessWidget {
   }
 
   Future<void> _openNewSignupPremiumPromo(BuildContext context) async {
-    final config = await AuthService().getNewSignupPremiumPromoConfig();
-    if (!context.mounted || config == null) {
+    final eligibility = await AuthService().getNewSignupPremiumPromoEligibility();
+    if (!context.mounted) {
       return;
     }
+    if (!eligibility.canClaim) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Promo non disponibile'),
+          content: Text(eligibility.unavailableMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final config = eligibility.config;
 
     final accepted = await showDialog<bool>(
           context: context,
@@ -2383,11 +2403,24 @@ class AccountPage extends StatelessWidget {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(_cleanPromoError(error)),
           backgroundColor: Colors.red,
         ),
       );
     }
+  }
+
+  String _cleanPromoError(Object error) {
+    final message = error.toString().replaceFirst('Exception: ', '').trim();
+    if (message.contains('[firebase_functions/already-exists]')) {
+      return 'Hai già utilizzato questa promozione.';
+    }
+    if (message.contains('already-exists')) {
+      return 'Hai già utilizzato questa promozione.';
+    }
+    return message.isEmpty
+        ? 'Non è stato possibile attivare la promozione. Riprova più tardi.'
+        : message;
   }
 }
 

@@ -13,7 +13,7 @@ import 'package:savein/firebase_options.dart';
 import 'package:savein/advanced_analytics_service.dart';
 
 import 'package:savein/models/folder.dart';
-import 'package:savein/models.dart' show MockPost, Reminder;
+import 'package:savein/models.dart' show Folder, MockPost, Reminder;
 import 'package:savein/widgets/folder_card.dart';
 import 'package:savein/widgets/search_results_widget.dart';
 import 'package:savein/pages/folder_detail_page.dart';
@@ -1251,6 +1251,39 @@ class _WebHomePageState extends State<WebHomePage>
     }
   }
 
+  Future<void> _reloadHomeFoldersFromFirestoreOnce() async {
+    final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (firebaseUser == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .collection('folders')
+          .orderBy('createdAt')
+          .get(const GetOptions(source: Source.serverAndCache));
+
+      final realFolders =
+          snapshot.docs.map((doc) => Folder.fromFirestore(doc)).toList();
+      await _folderService.syncFoldersFromDataServiceWithParentId(realFolders);
+      _folderService.updateTuttiCount();
+      _folderService.updateHealthStatus(
+        ServiceHealthStatus.healthy,
+        userContext: firebaseUser.uid,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        DebugLogger.logError('Reload cartelle Home da Firestore fallito', e);
+      }
+      _folderService.updateHealthStatus(
+        ServiceHealthStatus.error,
+        errorMessage: 'Reload cartelle Home fallito: $e',
+        userContext: firebaseUser.uid,
+      );
+      rethrow;
+    }
+  }
+
   @override
   void dispose() {
     // 🔥 FIX: Rimuovi observer per lifecycle PRIMA di tutto
@@ -1549,7 +1582,7 @@ class _WebHomePageState extends State<WebHomePage>
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Promo non disponibile'),
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
+          content: Text(_cleanNewSignupPromoError(error)),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -1578,6 +1611,17 @@ class _WebHomePageState extends State<WebHomePage>
         ],
       ),
     );
+  }
+
+  String _cleanNewSignupPromoError(Object error) {
+    final message = error.toString().replaceFirst('Exception: ', '').trim();
+    if (message.contains('[firebase_functions/already-exists]') ||
+        message.contains('already-exists')) {
+      return 'Hai già utilizzato questa promozione.';
+    }
+    return message.isEmpty
+        ? 'Non è stato possibile attivare la promozione. Riprova più tardi.'
+        : message;
   }
 
   void _showRemindersBanner(List<Reminder> reminders) {
@@ -1674,6 +1718,20 @@ class _WebHomePageState extends State<WebHomePage>
       if (kDebugMode) DebugLogger.logSuccess('Pull-to-refresh completato');
     } catch (e) {
       if (kDebugMode) DebugLogger.logError('Pull-to-refresh fallito', e);
+      // FIX 03/07/2026: prima un fallimento qui era invisibile all'utente
+      // (solo un print in debug). Ora mostriamo un feedback esplicito.
+      if (mounted) {
+        setState(() {
+          _forceRefresh();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Aggiornamento cartelle non riuscito: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
@@ -2412,20 +2470,7 @@ class _WebHomePageState extends State<WebHomePage>
         children: [
           _buildPromotionBanner(themeColors),
           if (_activeBanner != null) const SizedBox(height: 12),
-          if (sortedFolders.isEmpty)
-            SizedBox(
-              height: 260,
-              child: Center(
-                child: Text(
-                  'Trascina verso il basso per aggiornare le cartelle',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: themeColors.subtitleColor,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
+          if (sortedFolders.isEmpty) _buildEmptyFoldersState(themeColors),
           for (int i = 0; i < rows.length; i++) ...[
             rows[i],
             if (i < rows.length - 1 &&
@@ -2434,6 +2479,81 @@ class _WebHomePageState extends State<WebHomePage>
               const SizedBox(height: 12),
           ],
         ],
+      ),
+    );
+  }
+
+  // FIX 03/07/2026: prima, quando la sincronizzazione cartelle falliva in
+  // modo persistente (es. su un dispositivo reale subito dopo login), la UI
+  // mostrava solo un generico "Trascina per aggiornare" senza nessun
+  // dettaglio sull'errore reale, ne' un modo esplicito di ritentare oltre al
+  // gesto di pull-to-refresh (facile da non notare). Ora mostriamo l'errore
+  // vero (da FolderService.currentHealth, gia' popolato dai punti di sync
+  // esistenti) e un pulsante "Riprova" esplicito.
+  Widget _buildEmptyFoldersState(ThemeColors themeColors) {
+    final health = _folderService.currentHealth;
+    final hasError = health.status == ServiceHealthStatus.error ||
+        health.status == ServiceHealthStatus.degraded ||
+        health.status == ServiceHealthStatus.offline;
+    final errorMessage = health.errorMessage;
+
+    return SizedBox(
+      height: 260,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasError) ...[
+                Icon(Icons.cloud_off, color: Colors.orange, size: 36),
+                SizedBox(height: 12),
+                Text(
+                  'Non è stato possibile caricare le tue cartelle.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: themeColors.titleColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (errorMessage != null && errorMessage.isNotEmpty) ...[
+                  SizedBox(height: 6),
+                  Text(
+                    errorMessage,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: themeColors.subtitleColor,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+                SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    _folderServiceInitStarted = false;
+                    _initializeFolderService();
+                  },
+                  icon: Icon(Icons.refresh),
+                  label: Text('Riprova'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ] else ...[
+                Text(
+                  'Trascina verso il basso per aggiornare le cartelle',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: themeColors.subtitleColor,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

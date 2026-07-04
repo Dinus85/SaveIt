@@ -112,14 +112,10 @@ const cleanupUser = async (uid, userData) => {
       db.collection(PROMOTION_REDEMPTIONS_COLLECTION).where("userId", "==", uid),
       "promotion_redemptions.userId"
     ),
-    newSignupClaimsFirst: await deleteQueryDocs(
-      db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).where("firstUserId", "==", uid),
-      "new_signup_premium_promo_claims.firstUserId"
-    ),
-    newSignupClaimsLast: await deleteQueryDocs(
-      db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).where("lastUserId", "==", uid),
-      "new_signup_premium_promo_claims.lastUserId"
-    ),
+    // Non cancellare new_signup_premium_promo_claims: e' uno storico
+    // anti-abuso per email. Deve sopravvivere alla cancellazione account per
+    // impedire ri-registrazioni ripetute con la stessa email per riottenere
+    // la promo benvenuto.
     crossAppPromosSource: await deleteQueryDocs(
       db.collection("cross_app_promos").where("sourceUid", "==", uid),
       "cross_app_promos.sourceUid"
@@ -143,9 +139,6 @@ const cleanupUser = async (uid, userData) => {
       db.collection(PROMOTION_REDEMPTIONS_COLLECTION).doc(
         promoRedemptionId(email, SAVEIN_SMARTCHEF_PROMO_ID)
       )
-    );
-    stats.newSignupClaimEmailDoc = await deleteDocumentTree(
-      db.collection(NEW_SIGNUP_PROMO_CLAIMS_COLLECTION).doc(emailDocId(email))
     );
     stats.crossAppPromoSaveInDoc = await deleteDocumentTree(
       db.collection("cross_app_promos").doc(`${email}|savein_to_smartchef`)

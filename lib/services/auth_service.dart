@@ -348,6 +348,18 @@ class NewSignupPremiumPromoEligibility {
         durationDays: durationDays,
         priceAfterTrial: priceAfterTrial,
       );
+
+  String get unavailableMessage {
+    if (!active) return 'Questa promozione non è più attiva.';
+    if (restored && premiumUntil != null) {
+      return 'La promozione era già attiva sul tuo account.';
+    }
+    if (alreadyClaimed && expired) {
+      return 'Hai già utilizzato questa promozione in passato.';
+    }
+    if (alreadyClaimed) return 'Hai già utilizzato questa promozione.';
+    return 'Questa promozione non è disponibile per il tuo account.';
+  }
 }
 
 class PromotionBanner {
@@ -666,7 +678,14 @@ class AuthService extends ChangeNotifier {
         if (kDebugMode) {
           print('DEBUG: ⏳ Stream auth in pausa durante bootstrap Google');
         }
-        yield null;
+        final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
+        final hasMatchingUser = _currentUser?.id == firebaseUser.uid &&
+            _normalizeEmail(_currentUser?.email ?? '') == firebaseEmail;
+        if (!hasMatchingUser) {
+          _currentUser = _userFromFirebase(firebaseUser);
+          notifyListeners();
+        }
+        yield _currentUser;
         continue;
       }
 
@@ -1640,22 +1659,11 @@ class AuthService extends ChangeNotifier {
             .where('userId', isEqualTo: userId),
       ),
     );
-    await _ignoreCleanupErrors(
-      'new_signup_premium_promo_claims.firstUserId',
-      () => _deleteQuery(
-        _firestore
-            .collection('new_signup_premium_promo_claims')
-            .where('firstUserId', isEqualTo: userId),
-      ),
-    );
-    await _ignoreCleanupErrors(
-      'new_signup_premium_promo_claims.lastUserId',
-      () => _deleteQuery(
-        _firestore
-            .collection('new_signup_premium_promo_claims')
-            .where('lastUserId', isEqualTo: userId),
-      ),
-    );
+    // NON cancellare new_signup_premium_promo_claims: e' uno storico
+    // anti-abuso per email, non un dato operativo dell'account corrente. Se
+    // venisse eliminato insieme all'utente, basterebbe cancellare l'account e
+    // registrarsi di nuovo con la stessa email per riottenere la promo
+    // benvenuto.
     await _ignoreCleanupErrors(
       'cross_app_promos.sourceUid',
       () => _deleteQuery(
@@ -2379,24 +2387,47 @@ class AuthService extends ChangeNotifier {
       throw Exception('Devi essere autenticato per attivare la promo.');
     }
 
-    final callable = FirebaseFunctions.instance.httpsCallable(
-      'activateNewSignupPremiumPromo',
-    );
-    final response = await callable.call(<String, dynamic>{});
-    final raw = response.data;
-    final data =
-        raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
-    final premiumUntil =
-        DateTime.parse(data['premiumUntil'].toString()).toLocal();
+    try {
+      final eligibility = await getNewSignupPremiumPromoEligibility();
+      if (!eligibility.canClaim) {
+        throw Exception(eligibility.unavailableMessage);
+      }
 
-    _currentUser = user.copyWith(
-      role: AppUserRole.premium,
-      premiumUntil: premiumUntil,
-      premiumSource: 'new_signup_promo',
-    );
-    await _saveUserLocally(_currentUser!);
-    notifyListeners();
-    return premiumUntil;
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'activateNewSignupPremiumPromo',
+      );
+      final response = await callable.call(<String, dynamic>{});
+      final raw = response.data;
+      final data =
+          raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+      final premiumUntil =
+          DateTime.parse(data['premiumUntil'].toString()).toLocal();
+
+      _currentUser = user.copyWith(
+        role: AppUserRole.premium,
+        premiumUntil: premiumUntil,
+        premiumSource: 'new_signup_promo',
+      );
+      await _saveUserLocally(_currentUser!);
+      notifyListeners();
+      return premiumUntil;
+    } on FirebaseFunctionsException catch (e) {
+      final message = (e.message ?? '').trim();
+      if (e.code == 'already-exists') {
+        throw Exception('Hai già utilizzato questa promozione.');
+      }
+      if (e.code == 'failed-precondition' && message.isNotEmpty) {
+        throw Exception(message);
+      }
+      if (e.code == 'unauthenticated') {
+        throw Exception('Devi effettuare il login per attivare la promo.');
+      }
+      throw Exception(
+        message.isNotEmpty
+            ? message
+            : 'Non è stato possibile attivare la promozione. Riprova più tardi.',
+      );
+    }
   }
 
   Future<void> dismissNewSignupPremiumPromo() async {
