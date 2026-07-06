@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:savein/models.dart';
+import '../services/access_control_service.dart';
 import '../services/reminder_service.dart';
 
 class ReminderDialog extends StatefulWidget {
@@ -200,6 +201,16 @@ class _ReminderDialogState extends State<ReminderDialog> {
     }
     setState(() => _saving = true);
     try {
+      final canCreate = await AppAccessService().tryConsumeFeature(
+        context,
+        'reminders',
+        'Reminder',
+      );
+      if (!canCreate) {
+        if (mounted) setState(() => _saving = false);
+        return;
+      }
+
       if (widget.isFolderMode) {
         await ReminderService.instance.createFolderReminder(
           folderId: widget.targetFolderId!,

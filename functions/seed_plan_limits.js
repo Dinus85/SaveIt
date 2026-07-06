@@ -33,6 +33,10 @@ const seed = async () => {
       "free": {enabled: true, limit: 5, period: "day", requiresAd: true},
       "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
     },
+    "reminders": {
+      "free": {enabled: true, limit: 0, period: "total", requiresAd: true},
+      "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
+    },
   };
 
   console.log("Seeding plan limits...");

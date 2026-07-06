@@ -1422,4 +1422,11 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
   - `ReminderService.initialize()` su iOS non richiede piu permessi automaticamente (`DarwinInitializationSettings` con `requestAlertPermission/requestBadgePermission/requestSoundPermission=false`).
   - La richiesta consenso notifiche viene attivata da `main.dart` solo dopo la creazione riuscita della prima cartella utente reale (nome diverso da `Tutti`) e solo se prima non esistevano gia cartelle reali.
   - La richiesta viene tracciata con chiave locale per utente (`notification_consent_requested_after_first_folder_{uid}`) per non riproporla a ogni nuova cartella.
-- Versione locale corrente: **1.0.0+36**.
+
+### 2026-07-06 - Reminder collegati ai limiti piani dashboard
+
+- Aggiunta la funzione `reminders` in **Configurazione Limiti Piani** (dashboard Flutter e pagina web `/dashboard/limits`).
+- Configurabile per Free/Premium come le altre funzioni: abilitato, limite, periodo reset, richiede pubblicità.
+- Default: Free abilitato con pubblicità richiesta; Premium abilitato senza pubblicità; limite 0 (illimitato) su entrambi.
+- L'app rispetta le regole su: apertura dialog reminder, salvataggio nuovo reminder, banner reminder del giorno e gate pubblicità configurabile da dashboard.
+- Versione locale corrente: **1.0.0+38**.

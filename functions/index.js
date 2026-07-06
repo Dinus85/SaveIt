@@ -42,6 +42,10 @@ const DEFAULT_STORAGE_BUCKET = "saveit-app-1784d.firebasestorage.app";
     "free": {enabled: true, limit: 5, period: "day", requiresAd: true},
     "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
   },
+  "reminders": {
+    "free": {enabled: true, limit: 0, period: "total", requiresAd: true},
+    "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
+  },
 });
 
 const _get_plan_limits = async () => {
@@ -3680,6 +3684,7 @@ const dashLimitsPage = (user, featureRules) => {
     {id: "share_folder", name: "Condivisione Cartella"},
     {id: "share_post", name: "Condivisione Post"},
     {id: "import_shared", name: "Importazione Contenuti"},
+    {id: "reminders", name: "Reminder"},
   ];
 
   const periods = [

@@ -10,7 +10,6 @@ import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/folder_management_unified.dart';
 import 'package:savein/services/access_control_service.dart';
 import 'package:savein/services/reminder_service.dart';
-import 'package:savein/services/interstitial_ad_service.dart';
 import 'package:savein/services/share_link_service.dart';
 import 'package:savein/utils/dialog_helpers.dart';
 import 'package:savein/widgets/custom_bottom_nav.dart';
@@ -560,7 +559,14 @@ class MockFolderCard extends StatelessWidget {
   }
 
   Future<void> _showFolderReminderDialog(BuildContext context) async {
-    await InterstitialAdService.instance.showReminderSetupGate(context);
+    final canUse = await AppAccessService().checkFeatureAvailable(
+      context,
+      'reminders',
+      'Reminder',
+    );
+    if (!canUse || !context.mounted) return;
+
+    await AppAccessService().showAdGateForFeature(context, 'reminders');
     if (!context.mounted) return;
 
     showDialog(

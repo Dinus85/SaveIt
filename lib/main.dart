@@ -1423,6 +1423,9 @@ class _WebHomePageState extends State<WebHomePage>
       final user = AuthService().currentUser;
       if (user == null) return;
 
+      final canUseReminders = await PlanLimitsService.canUseFeature('reminders');
+      if (!canUseReminders) return;
+
       final prefs = await SharedPreferences.getInstance();
       final today = _todayKey();
       final lastShownKey = 'last_reminders_shown_date_${user.id}';
@@ -3078,6 +3081,14 @@ class _RemindersBannerSheet extends StatelessWidget {
                             textColor: textColor,
                             subtitleColor: subtitleColor,
                             onTap: () async {
+                              final canOpen =
+                                  await AppAccessService().checkFeatureAvailable(
+                                context,
+                                'reminders',
+                                'Reminder',
+                              );
+                              if (!canOpen) return;
+
                               Navigator.pop(context);
                               await InterstitialAdService.instance
                                   .showReminderOpenGate(context);

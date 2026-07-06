@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'access_control_service.dart';
 import 'auth_service.dart';
+import 'plan_limits_service.dart';
 
 class InterstitialAdService {
   InterstitialAdService._internal();
@@ -23,7 +23,6 @@ class InterstitialAdService {
   static const String iosBannerAdUnitId =
       'ca-app-pub-1397392558961350/4315988838';
 
-  final AppAccessService _accessService = AppAccessService();
   final AuthService _authService = AuthService();
 
   bool _isInitialized = false;
@@ -79,10 +78,22 @@ class InterstitialAdService {
     await _showInterstitial();
   }
 
-  /// Mostra sempre un passaggio pubblicitario prima di aprire un reminder.
-  /// Usa AdMob se disponibile, altrimenti mostra un popup fallback.
+  /// Mostra un passaggio pubblicitario prima di aprire un reminder salvato.
   Future<void> showReminderOpenGate(BuildContext context) async {
-    if (!_shouldUseAds) return;
+    await showFeatureAdGate(context, 'reminders');
+  }
+
+  /// Richiede una interstitial prima di impostare un reminder per utenti Free.
+  /// Per Premium/web restituisce true senza mostrare pubblicità.
+  Future<bool> showReminderSetupAdIfRequired() async {
+    if (!_shouldUseAds) return true;
+    return _showInterstitial();
+  }
+
+  /// Mostra un passaggio pubblicitario prima di usare una funzione configurata
+  /// con `requiresAd` nella dashboard limiti piani.
+  Future<void> showFeatureAdGate(BuildContext context, String feature) async {
+    if (!await _featureRequiresAd(feature)) return;
 
     final shown = await _showInterstitial();
     if (shown || !context.mounted) return;
@@ -93,7 +104,7 @@ class InterstitialAdService {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Annuncio'),
         content: const Text(
-          'Per aprire il reminder con un account Free devi prima visualizzare una pubblicità.',
+          'Per usare questa funzione con un account Free devi prima visualizzare una pubblicità.',
         ),
         actions: [
           ElevatedButton(
@@ -103,40 +114,13 @@ class InterstitialAdService {
         ],
       ),
     );
-  }
-
-  /// Richiede una interstitial prima di impostare un reminder per utenti Free.
-  /// Per Premium/web restituisce true senza mostrare pubblicità.
-  Future<bool> showReminderSetupAdIfRequired() async {
-    if (!_shouldUseAds) return true;
-    return _showInterstitial();
   }
 
   /// Mostra sempre un passaggio pubblicitario prima di impostare un reminder.
   /// Usa AdMob se disponibile, altrimenti mostra un popup fallback così il tap
   /// non passa direttamente alla funzione per gli utenti Free.
   Future<void> showReminderSetupGate(BuildContext context) async {
-    if (!_shouldUseAds) return;
-
-    final shown = await showReminderSetupAdIfRequired();
-    if (shown || !context.mounted) return;
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Annuncio'),
-        content: const Text(
-          'I reminder sono gratis per gli utenti Free guardando una pubblicità.',
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Continua'),
-          ),
-        ],
-      ),
-    );
+    await showFeatureAdGate(context, 'reminders');
   }
 
   Future<void> recordSuccessfulImport() async {
@@ -153,7 +137,14 @@ class InterstitialAdService {
   bool get _shouldUseAds =>
       !kIsWeb &&
       defaultTargetPlatform != TargetPlatform.iOS &&
-      _accessService.hasAds;
+      _authService.currentUser?.effectiveRole == AppUserRole.free;
+
+  Future<bool> _featureRequiresAd(String feature) async {
+    if (!_shouldUseAds) return false;
+
+    final usage = await PlanLimitsService.getUsage(forceRefresh: true);
+    return usage[feature]?.requiresAd ?? false;
+  }
 
   String? get _currentUserId => _authService.currentUser?.id;
 

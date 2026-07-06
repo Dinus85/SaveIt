@@ -2915,6 +2915,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               'requiresAd': false
             },
           },
+          'reminders': {
+            'free': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': true
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
         };
 
         final snapshotKey = jsonEncode(rawFeatureRules);
@@ -2975,6 +2989,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             'name': 'Importazione Contenuti',
             'desc':
                 'Limite importazione contenuti condivisi da altri tramite link.'
+          },
+          {
+            'id': 'reminders',
+            'name': 'Reminder',
+            'desc':
+                'Impostazione e gestione reminder su post e cartelle, con eventuale pubblicità.'
           },
         ];
 

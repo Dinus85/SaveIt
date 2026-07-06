@@ -1482,7 +1482,14 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   }
 
   Future<void> _showReminderDialog(MockPost post) async {
-    await InterstitialAdService.instance.showReminderSetupGate(context);
+    final canUse = await _accessService.checkFeatureAvailable(
+      context,
+      'reminders',
+      'Reminder',
+    );
+    if (!canUse || !mounted) return;
+
+    await _accessService.showAdGateForFeature(context, 'reminders');
     if (!mounted) return;
 
     showDialog(

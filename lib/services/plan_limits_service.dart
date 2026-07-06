@@ -198,6 +198,20 @@ class PlanLimitsService {
         'requiresAd': false
       },
     },
+    'reminders': {
+      'free': {
+        'enabled': true,
+        'limit': 0,
+        'period': 'total',
+        'requiresAd': true
+      },
+      'premium': {
+        'enabled': true,
+        'limit': 0,
+        'period': 'total',
+        'requiresAd': false
+      },
+    },
   };
 
   static void startLiveSync() {

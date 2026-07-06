@@ -1,6 +1,7 @@
 import 'package:savein/models/folder.dart';
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
+import 'interstitial_ad_service.dart';
 import 'plan_limits_service.dart';
 import '../widgets/free_limit_dialog.dart';
 
@@ -124,6 +125,16 @@ class AppAccessService {
       return false;
     }
     return true;
+  }
+
+  Future<void> showAdGateForFeature(BuildContext context, String feature) async {
+    if (!context.mounted) return;
+
+    final usage = await PlanLimitsService.getUsage(forceRefresh: true);
+    final featUsage = usage[feature];
+    if (featUsage == null || !featUsage.requiresAd) return;
+
+    await InterstitialAdService.instance.showFeatureAdGate(context, feature);
   }
 
   Future<bool> tryConsumeFeature(
