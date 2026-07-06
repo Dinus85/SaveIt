@@ -1142,6 +1142,9 @@ class _WebHomePageState extends State<WebHomePage>
   String _newSignupPromoDismissedAtKey(String userId) =>
       'new_signup_premium_promo_dismissed_at_ms_$userId';
 
+  String _notificationConsentAfterFirstFolderKey(String userId) =>
+      'notification_consent_requested_after_first_folder_$userId';
+
   String _todayKey() {
     final now = DateTime.now();
     return '${now.year.toString().padLeft(4, '0')}-'
@@ -2692,6 +2695,9 @@ class _WebHomePageState extends State<WebHomePage>
             await forceRefreshAuthToken();
           }
 
+          final hadRealFolderBeforeCreate =
+              await _currentUserHasRealFolderBeforeCreate();
+
           // Salva la cartella: FolderService valida il conteggio reale delle
           // cartelle Home usando i limiti dinamici Free/Premium della dashboard.
           await _folderService.createPersistentFolder(name);
@@ -2704,6 +2710,11 @@ class _WebHomePageState extends State<WebHomePage>
           }
 
           if (kDebugMode) print('DEBUG: Creazione completata');
+
+          await _maybeRequestNotificationConsentAfterFirstFolder(
+            folderName: name,
+            hadRealFolderBeforeCreate: hadRealFolderBeforeCreate,
+          );
 
           if (kDebugMode) DebugLogger.logSuccess('Cartella creata: $name');
         } catch (e) {
@@ -2719,6 +2730,60 @@ class _WebHomePageState extends State<WebHomePage>
         }
       },
     );
+  }
+
+  bool _isRealUserFolderName(String name) {
+    return name.trim().toLowerCase() != 'tutti';
+  }
+
+  Future<bool> _currentUserHasRealFolderBeforeCreate() async {
+    try {
+      final folders = await DataService.instance
+          .getFolders(forceRefresh: true)
+          .timeout(const Duration(seconds: 6));
+      return folders.any((folder) =>
+          !folder.isDefault && _isRealUserFolderName(folder.name));
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: controllo prima cartella da backend fallito: $e');
+      }
+      return _folderService.folders.any((folder) =>
+          !folder.isSpecial && _isRealUserFolderName(folder.name));
+    }
+  }
+
+  Future<void> _maybeRequestNotificationConsentAfterFirstFolder({
+    required String folderName,
+    required bool hadRealFolderBeforeCreate,
+  }) async {
+    if (hadRealFolderBeforeCreate || !_isRealUserFolderName(folderName)) {
+      return;
+    }
+
+    final userId = firebase_auth.FirebaseAuth.instance.currentUser?.uid ??
+        AuthService().currentUser?.id;
+    if (userId == null || userId.trim().isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = _notificationConsentAfterFirstFolderKey(userId);
+    if (prefs.getBool(key) == true) return;
+    await prefs.setBool(key, true);
+
+    try {
+      await AppNotificationService.instance
+          .requestPermissionAndRegisterToken(userId)
+          .timeout(const Duration(seconds: 10));
+      await ReminderService.instance.requestPermissions().timeout(
+            const Duration(seconds: 5),
+          );
+      await ReminderService.instance.rescheduleAllReminders().timeout(
+            const Duration(seconds: 10),
+          );
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: richiesta consenso notifiche dopo prima cartella fallita: $e');
+      }
+    }
   }
 
   void _showRetryDialog(String folderName, String errorMessage) {

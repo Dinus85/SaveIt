@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data_service.dart';
 import '../services/auth_service.dart';
 
 class SaveInFirstLaunchTutorial {
@@ -47,6 +49,10 @@ class SaveInFirstLaunchTutorial {
     final prefs = await SharedPreferences.getInstance();
     final key = _seenKeyForCurrentUser();
     if (prefs.getBool(key) == true) return false;
+    if (await _currentUserAlreadyHasContent()) {
+      await prefs.setBool(key, true);
+      return false;
+    }
     await waitForActiveWelcome();
     if (prefs.getBool(key) == true) return false;
     final showingFuture = _showingFuture;
@@ -64,6 +70,26 @@ class SaveInFirstLaunchTutorial {
       return true;
     } finally {
       _showingFuture = null;
+    }
+  }
+
+  static Future<bool> _currentUserAlreadyHasContent() async {
+    try {
+      final dataService = DataService.instance;
+      final folders = await dataService.getFolders(forceRefresh: true);
+      final hasUserFolder = folders.any((folder) {
+        final normalizedName = folder.name.trim().toLowerCase();
+        return !folder.isDefault && normalizedName != 'tutti';
+      });
+      if (hasUserFolder) return true;
+
+      final posts = await dataService.getPosts(forceRefresh: true);
+      return posts.isNotEmpty;
+    } catch (e) {
+      if (kDebugMode) {
+        print('DEBUG: controllo contenuti per tutorial fallito: $e');
+      }
+      return false;
     }
   }
 

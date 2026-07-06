@@ -47,12 +47,17 @@ class AppNotificationService {
 
   Future<void> initializeForUser(String userId) async {
     _registerMessageOpenedHandlers();
-    await _requestPermissionIfNeeded();
     await _saveCurrentToken(userId);
     _tokenRefreshSubscription?.cancel();
     _tokenRefreshSubscription = _messaging.onTokenRefresh.listen((token) {
       _saveToken(userId, token);
     });
+  }
+
+  Future<void> requestPermissionAndRegisterToken(String userId) async {
+    _registerMessageOpenedHandlers();
+    await _requestPermissionIfNeeded();
+    await _saveCurrentToken(userId);
   }
 
   void _registerMessageOpenedHandlers() {
@@ -274,9 +279,6 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
 
   Future<void> _initializeReminderNotifications() async {
     try {
-      await ReminderService.instance.requestPermissions().timeout(
-            const Duration(seconds: 5),
-          );
       await ReminderService.instance.rescheduleAllReminders().timeout(
             const Duration(seconds: 10),
           );

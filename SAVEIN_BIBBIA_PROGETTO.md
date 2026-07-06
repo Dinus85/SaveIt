@@ -1410,4 +1410,16 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
   - La funzione `cleanupUserDataOnDelete` e' stata ridistribuita il 04/07/2026 su `saveit-app-1784d`.
   - Quando un utente viene eliminato da Firebase Auth, il backend pulisce ricorsivamente i dati Firestore collegati all'utente, evitando documenti utente vuoti/orfani nella console.
   - Le claim in `new_signup_premium_promo_claims` restano escluse dalla pulizia per mantenere lo storico permanente anti-abuso della promo benvenuto.
+
+### 2026-07-06 - Tutorial automatico e consenso notifiche
+
+- **Tutorial automatico dopo reinstall/login**:
+  - `SaveInFirstLaunchTutorial.showIfNeeded()` non si basa piu solo su `SharedPreferences`, perche' dopo disinstall/reinstall la preferenza locale sparisce.
+  - Prima di mostrare il tutorial automatico, controlla i dati reali dell'utente tramite `DataService`: se esiste almeno una cartella diversa da `Tutti` oppure almeno un post salvato, il tutorial viene marcato come gia visto e non compare.
+  - Il tutorial resta sempre apribile manualmente dalla pagina Account tramite `Rivedi tutorial`, che chiama `SaveInFirstLaunchTutorial.show()` e non passa da `showIfNeeded()`.
+- **Consenso notifiche**:
+  - `AppNotificationService.initializeForUser()` non chiede piu subito il permesso push all'avvio/login; inizializza listener e token senza mostrare il popup di sistema.
+  - `ReminderService.initialize()` su iOS non richiede piu permessi automaticamente (`DarwinInitializationSettings` con `requestAlertPermission/requestBadgePermission/requestSoundPermission=false`).
+  - La richiesta consenso notifiche viene attivata da `main.dart` solo dopo la creazione riuscita della prima cartella utente reale (nome diverso da `Tutti`) e solo se prima non esistevano gia cartelle reali.
+  - La richiesta viene tracciata con chiave locale per utente (`notification_consent_requested_after_first_folder_{uid}`) per non riproporla a ogni nuova cartella.
 - Versione locale corrente: **1.0.0+36**.
