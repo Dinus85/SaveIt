@@ -1619,6 +1619,18 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       ),
                       const SizedBox(width: 10),
                       _AdminNavButton(
+                        label: 'Versione app',
+                        selected: _activeSection ==
+                            _AdminDashboardSection.versionControl,
+                        onPressed: () {
+                          setState(() {
+                            _activeSection =
+                                _AdminDashboardSection.versionControl;
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 10),
+                      _AdminNavButton(
                         label: 'Statistiche globali',
                         selected: _activeSection ==
                             _AdminDashboardSection.globalStats,
@@ -1677,6 +1689,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         ),
         body: _activeSection == _AdminDashboardSection.planLimits
             ? _buildPlanLimitsPage()
+            : _activeSection == _AdminDashboardSection.versionControl
+                ? _buildVersionControlPage()
             : _activeSection == _AdminDashboardSection.globalStats
                 ? _buildGlobalStatsPage()
                 : _activeSection == _AdminDashboardSection.finance
@@ -3346,6 +3360,39 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         );
       }
     }
+  }
+
+  Widget _buildVersionControlPage() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _firestore.doc('app_config/version_control').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final data = snapshot.data?.data() ?? {};
+        return _VersionControlEditor(
+          key: ValueKey(jsonEncode(data)),
+          initialData: data,
+          onSave: (payload) async {
+            await _firestore.doc('app_config/version_control').set({
+              ...payload,
+              'updatedAt': FieldValue.serverTimestamp(),
+              'updatedBy': AuthService().currentUser?.email,
+            }, SetOptions(merge: true));
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Configurazione versione salvata!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          },
+        );
+      },
+    );
   }
 
   Widget _buildPlansInfoPage() {
@@ -8921,6 +8968,7 @@ enum _AdminDashboardSection {
   userPosts,
   userFolders,
   planLimits,
+  versionControl,
   globalStats,
   finance,
   notifications,
@@ -10256,5 +10304,203 @@ class _AdminLogRecord {
       return 'Target: $targetUserId • Motivo: $reason';
     }
     return 'Target: $targetUserId';
+  }
+}
+
+class _VersionControlEditor extends StatefulWidget {
+  final Map<String, dynamic> initialData;
+  final Future<void> Function(Map<String, dynamic> payload) onSave;
+
+  const _VersionControlEditor({
+    super.key,
+    required this.initialData,
+    required this.onSave,
+  });
+
+  @override
+  State<_VersionControlEditor> createState() => _VersionControlEditorState();
+}
+
+class _VersionControlEditorState extends State<_VersionControlEditor> {
+  late bool _maintenance;
+  late final TextEditingController _messageController;
+  late final TextEditingController _minAndroidController;
+  late final TextEditingController _minIosController;
+  late final TextEditingController _androidUrlController;
+  late final TextEditingController _iosUrlController;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final data = widget.initialData;
+    _maintenance = data['maintenance'] == true;
+    _messageController = TextEditingController(
+      text: (data['message'] ?? '').toString(),
+    );
+    _minAndroidController = TextEditingController(
+      text: (data['minBuildAndroid'] ?? data['minBuild'] ?? 0).toString(),
+    );
+    _minIosController = TextEditingController(
+      text: (data['minBuildIos'] ?? data['minBuild'] ?? 0).toString(),
+    );
+    _androidUrlController = TextEditingController(
+      text: (data['androidStoreUrl'] ??
+              'https://play.google.com/store/apps/details?id=eu.savein.app')
+          .toString(),
+    );
+    _iosUrlController = TextEditingController(
+      text: (data['iosStoreUrl'] ?? '').toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _minAndroidController.dispose();
+    _minIosController.dispose();
+    _androidUrlController.dispose();
+    _iosUrlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.onSave({
+        'maintenance': _maintenance,
+        'message': _messageController.text.trim(),
+        'minBuildAndroid':
+            int.tryParse(_minAndroidController.text.trim()) ?? 0,
+        'minBuildIos': int.tryParse(_minIosController.text.trim()) ?? 0,
+        'androidStoreUrl': _androidUrlController.text.trim(),
+        'iosStoreUrl': _iosUrlController.text.trim(),
+      });
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Controllo versione app',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'Blocca l’app finché l’utente non aggiorna. Build 0 = nessun blocco.',
+                        style: TextStyle(color: Color(0xFF718096)),
+                      ),
+                    ],
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save),
+                    label: const Text('Salva'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Manutenzione'),
+                        subtitle: const Text(
+                          'Blocca l’app con messaggio di manutenzione.',
+                        ),
+                        value: _maintenance,
+                        onChanged: (v) => setState(() => _maintenance = v),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _messageController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Messaggio personalizzato',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _minAndroidController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Build minima Android',
+                                helperText: 'Es. 38 (da pubspec +38)',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextField(
+                              controller: _minIosController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Build minima iOS',
+                                helperText: 'Es. 38',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _androidUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Link Play Store',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _iosUrlController,
+                        decoration: const InputDecoration(
+                          labelText: 'Link App Store (opzionale)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

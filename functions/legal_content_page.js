@@ -207,7 +207,7 @@ const register = ({onRequest}) => {
       {
         region: "us-central1",
         timeoutSeconds: 15,
-        memory: "128MiB",
+        memory: "256MiB",
         invoker: "public",
       },
       async (_req, res) => {
@@ -229,7 +229,7 @@ const register = ({onRequest}) => {
       {
         region: "us-central1",
         timeoutSeconds: 15,
-        memory: "128MiB",
+        memory: "256MiB",
         invoker: "public",
       },
       async (_req, res) => {

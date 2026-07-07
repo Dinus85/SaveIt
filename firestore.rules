@@ -172,6 +172,11 @@ service cloud.firestore {
       allow create, update, delete: if isDashboardAdmin();
     }
 
+    match /app_config/version_control {
+      allow read: if true;
+      allow write: if isDashboardAdmin();
+    }
+
     match /app_config/{configId} {
       allow read: if signedIn() || isDashboardViewer();
       allow create, update, delete: if isDashboardAdmin();

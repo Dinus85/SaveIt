@@ -39,6 +39,8 @@ import 'package:savein/services/reminder_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/widgets/first_launch_tutorial_dialog.dart';
 import 'package:savein/services/promo_popup_service.dart';
+import 'package:savein/services/app_config_service.dart';
+import 'package:savein/pages/force_update_page.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -308,6 +310,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
 
   bool _wasInBackground = false;
   DateTime? _lastBackgroundTime;
+  Widget? _forcedGate;
 
   @override
   void initState() {
@@ -316,6 +319,45 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     _initServices();
     _initAppLinks();
     _loadUserPreferences(); // âœ… AGGIUNGI QUESTA RIGA
+    if (!kIsWeb) {
+      _checkForcedGateInBackground();
+    }
+  }
+
+  Future<Widget?> _maybeBuildForcedGate() async {
+    final cfg = await AppConfigService.fetch();
+    final build = await AppConfigService.currentBuildNumber();
+    final minBuild = cfg.minBuildForCurrentPlatform();
+    final storeUrl = cfg.storeUrlForCurrentPlatform();
+
+    if (cfg.maintenance) {
+      return ForceUpdatePage(
+        title: 'Manutenzione in corso',
+        message: cfg.message.isNotEmpty
+            ? cfg.message
+            : 'Stiamo aggiornando SaveIn!. Riprova tra poco.',
+        storeUrl: storeUrl,
+        showExitHint: false,
+      );
+    }
+
+    if (minBuild > 0 && build > 0 && build < minBuild) {
+      return ForceUpdatePage(
+        title: 'Aggiornamento richiesto',
+        message: cfg.message.isNotEmpty
+            ? cfg.message
+            : 'Per continuare devi aggiornare SaveIn! alla versione più recente.',
+        storeUrl: storeUrl,
+      );
+    }
+
+    return null;
+  }
+
+  Future<void> _checkForcedGateInBackground() async {
+    final forced = await _maybeBuildForcedGate();
+    if (!mounted || forced == null) return;
+    setState(() => _forcedGate = forced);
   }
 
   Future<void> _initAppLinks() async {
@@ -611,15 +653,16 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
       scrollBehavior: const MaterialScrollBehavior().copyWith(
         scrollbars: false,
       ),
-      home: AuthWrapper(
-        isDarkTheme: _isDarkTheme,
-        marketingProfileEnabled: _marketingProfileEnabled,
-        marketingCommsEnabled: _marketingCommsEnabled,
-        onThemeChanged: _toggleTheme,
-        onMarketingProfileChanged: _toggleMarketingProfile,
-        onMarketingCommsChanged: _toggleMarketingComms,
-        onSharedContent: _handleSharedContent,
-      ),
+      home: _forcedGate ??
+          AuthWrapper(
+            isDarkTheme: _isDarkTheme,
+            marketingProfileEnabled: _marketingProfileEnabled,
+            marketingCommsEnabled: _marketingCommsEnabled,
+            onThemeChanged: _toggleTheme,
+            onMarketingProfileChanged: _toggleMarketingProfile,
+            onMarketingCommsChanged: _toggleMarketingComms,
+            onSharedContent: _handleSharedContent,
+          ),
       debugShowCheckedModeBanner: false,
     );
   }
@@ -1778,6 +1821,7 @@ class _WebHomePageState extends State<WebHomePage>
           await _folderService.syncWithDataService().timeout(
                 const Duration(seconds: 25),
               );
+          DataService.instance.repairMissingPreviewsInBackground();
           if (mounted) {
             setState(() {
               _forceRefresh();

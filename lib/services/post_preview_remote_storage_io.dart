@@ -3,12 +3,13 @@
 
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+
+import 'post_preview_url_utils.dart';
 
 class PostPreviewRemoteStorage {
   const PostPreviewRemoteStorage();
@@ -128,11 +129,12 @@ class PostPreviewRemoteStorage {
       // Il file globale non esiste ancora: lo carichiamo noi.
     }
 
-    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
-    final normalizedImageUrl = _normalizeImageUrl(imageUrl);
+    final normalizedSourceUrl =
+        PostPreviewUrlUtils.normalizePostUrlForHash(sourceUrl);
+    final normalizedImageUrl = PostPreviewUrlUtils.normalizeImageUrl(imageUrl);
     final metadata = SettableMetadata(
       contentType: contentType,
-      cacheControl: 'public,max-age=31536000',
+      cacheControl: 'public,max-age=31536000,immutable',
       customMetadata: {
         'postId': postId,
         if (normalizedSourceUrl.isNotEmpty)
@@ -151,13 +153,14 @@ class PostPreviewRemoteStorage {
     String? imageUrl,
   }) {
     final paths = <String>[];
-    final normalizedImageUrl = _normalizeImageUrl(imageUrl);
-    if (normalizedImageUrl.isNotEmpty) {
-      paths.add('post_previews/by_image/${_sha256Hex(normalizedImageUrl)}');
-    }
-    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
+    final normalizedSourceUrl =
+        PostPreviewUrlUtils.normalizePostUrlForHash(sourceUrl);
     if (normalizedSourceUrl.isNotEmpty) {
       paths.add('post_previews/by_url/${_sha256Hex(normalizedSourceUrl)}');
+    }
+    final normalizedImageUrl = PostPreviewUrlUtils.normalizeImageUrl(imageUrl);
+    if (normalizedImageUrl.isNotEmpty) {
+      paths.add('post_previews/by_image/${_sha256Hex(normalizedImageUrl)}');
     }
     return paths;
   }
@@ -169,33 +172,16 @@ class PostPreviewRemoteStorage {
     String? sourceUrl,
     String? imageUrl,
   }) {
-    final normalizedImageUrl = _normalizeImageUrl(imageUrl);
-    if (normalizedImageUrl.isNotEmpty) {
-      return 'post_previews/by_image/${_sha256Hex(normalizedImageUrl)}';
-    }
-    final normalizedSourceUrl = _normalizeSourceUrl(sourceUrl);
+    final normalizedSourceUrl =
+        PostPreviewUrlUtils.normalizePostUrlForHash(sourceUrl);
     if (normalizedSourceUrl.isNotEmpty) {
       return 'post_previews/by_url/${_sha256Hex(normalizedSourceUrl)}';
     }
+    final normalizedImageUrl = PostPreviewUrlUtils.normalizeImageUrl(imageUrl);
+    if (normalizedImageUrl.isNotEmpty) {
+      return 'post_previews/by_image/${_sha256Hex(normalizedImageUrl)}';
+    }
     return 'users/$userId/post_previews/$postId$ext';
-  }
-
-  String _normalizeSourceUrl(String? value) {
-    final raw = (value ?? '').trim();
-    if (raw.isEmpty) return '';
-    final uri = Uri.tryParse(raw);
-    if (uri == null || uri.host.isEmpty) return raw.toLowerCase();
-    final normalized = uri.replace(fragment: '');
-    return normalized.toString().trim().toLowerCase();
-  }
-
-  String _normalizeImageUrl(String? value) {
-    final raw = (value ?? '').trim();
-    if (raw.isEmpty) return '';
-    final uri = Uri.tryParse(raw);
-    if (uri == null || uri.host.isEmpty) return raw.toLowerCase();
-    final normalized = uri.replace(fragment: '');
-    return normalized.toString().trim().toLowerCase();
   }
 
   String _sha256Hex(String value) {

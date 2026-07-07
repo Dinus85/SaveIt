@@ -16,7 +16,9 @@ import 'package:savein/services/auth_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/services/post_preview_cache.dart';
 import 'package:savein/services/post_preview_remote_storage.dart';
+import 'package:savein/services/post_preview_url_utils.dart';
 import 'package:savein/services/screen_awake_service.dart';
+import 'package:savein/url_metadata_service.dart';
 
 /// Exception per errori di autenticazione
 class AuthenticationRequiredException implements Exception {
@@ -1131,30 +1133,29 @@ class DataService {
     if (post.id.isEmpty) return;
     final imageUrl = post.imageUrl?.trim();
     final remoteUrl = post.previewStorageUrl?.trim();
-    if ((imageUrl?.isNotEmpty != true) && (remoteUrl?.isNotEmpty != true))
-      return;
+    final stableRemote =
+        PostPreviewUrlUtils.isStablePreviewStorageUrl(remoteUrl)
+            ? remoteUrl
+            : null;
+    if ((imageUrl?.isNotEmpty != true) && stableRemote == null) return;
 
-    // Non bloccare mai salvataggio UI/DB
     unawaited(
-      Future.microtask(
-        () => const PostPreviewCache().ensureCachedPreview(
+      Future.microtask(() async {
+        final cache = const PostPreviewCache();
+        await cache.ensureCachedPreview(
           postId: post.id,
-          imageUrl: remoteUrl,
-          fallbackImageUrl: imageUrl,
-        ),
-      ),
-    );
-
-    // Backup remoto best-effort: mantiene le anteprime stabili anche se l'URL originale scade.
-    if (post.previewStorageUrl?.trim().isNotEmpty != true) {
-      final userId = currentUserId;
-      if (userId != null && userId.isNotEmpty) {
-        unawaited(
-          Future.microtask(
-              () => _ensureRemotePreviewForPost(post, userId: userId)),
+          imageUrl: stableRemote,
+          fallbackImageUrl: stableRemote == null ? imageUrl : null,
         );
-      }
-    }
+
+        if (!PostPreviewUrlUtils.isStablePreviewStorageUrl(remoteUrl)) {
+          final userId = currentUserId;
+          if (userId != null && userId.isNotEmpty) {
+            await _ensureRemotePreviewForPost(post, userId: userId);
+          }
+        }
+      }),
+    );
   }
 
   void _warmSharedPostPreviewInBackground(SavedPost post) {
@@ -1163,26 +1164,30 @@ class DataService {
     unawaited(
       Future(() async {
         try {
-          final resolved = await resolveSharedPostPreview(
+          final stable = await resolveStablePreviewStorageUrl(
             previewStorageUrl: post.previewStorageUrl,
             postUrl: post.url,
             imageUrl: post.imageUrl,
           );
-          final remoteUrl = resolved ?? post.imageUrl;
-          if (remoteUrl == null || remoteUrl.trim().isEmpty) return;
+          final displayUrl =
+              stable ?? await resolveDisplayPreviewUrl(
+                    previewStorageUrl: post.previewStorageUrl,
+                    postUrl: post.url,
+                    imageUrl: post.imageUrl,
+                  );
+          if (displayUrl == null || displayUrl.trim().isEmpty) return;
 
           await const PostPreviewCache().ensureCachedPreview(
             postId: post.id,
-            imageUrl: remoteUrl,
-            fallbackImageUrl: post.imageUrl,
+            imageUrl: stable ?? displayUrl,
+            fallbackImageUrl: stable == null ? post.imageUrl : null,
           );
 
-          final resolvedTrimmed = resolved?.trim();
-          if (resolvedTrimmed != null &&
-              resolvedTrimmed.isNotEmpty &&
-              resolvedTrimmed != post.previewStorageUrl?.trim()) {
+          if (stable != null &&
+              stable.trim().isNotEmpty &&
+              stable.trim() != post.previewStorageUrl?.trim()) {
             final updatedPost = post.copyWith(
-              previewStorageUrl: resolvedTrimmed,
+              previewStorageUrl: stable.trim(),
               updatedAt: DateTime.now(),
             );
             await _firebaseService.updatePost(updatedPost);
@@ -1193,17 +1198,6 @@ class DataService {
     );
   }
 
-  Future<String?> _resolvePreviewStorageUrl({
-    String? previewStorageUrl,
-    String? postUrl,
-    String? imageUrl,
-  }) {
-    return resolveSharedPostPreview(
-      previewStorageUrl: previewStorageUrl,
-      postUrl: postUrl,
-      imageUrl: imageUrl,
-    );
-  }
 
   Future<String?> _ensureRemotePreviewForPost(
     SavedPost post, {
@@ -1211,7 +1205,7 @@ class DataService {
   }) async {
     if (post.id.isEmpty) return post.previewStorageUrl;
 
-    final existing = await _resolvePreviewStorageUrl(
+    final existing = await resolveStablePreviewStorageUrl(
       previewStorageUrl: post.previewStorageUrl,
       postUrl: post.url,
       imageUrl: post.imageUrl,
@@ -1229,8 +1223,11 @@ class DataService {
     }
 
     final imageUrl = post.imageUrl?.trim();
-    final remoteUrl = post.previewStorageUrl?.trim();
-    if ((imageUrl?.isNotEmpty != true) && (remoteUrl?.isNotEmpty != true)) {
+    final stableRemote =
+        PostPreviewUrlUtils.isStablePreviewStorageUrl(post.previewStorageUrl)
+            ? post.previewStorageUrl!.trim()
+            : null;
+    if ((imageUrl?.isNotEmpty != true) && stableRemote == null) {
       return post.previewStorageUrl;
     }
 
@@ -1238,10 +1235,26 @@ class DataService {
       final cache = const PostPreviewCache();
       await cache.ensureCachedPreview(
         postId: post.id,
-        imageUrl: remoteUrl,
-        fallbackImageUrl: imageUrl,
+        imageUrl: stableRemote,
+        fallbackImageUrl: stableRemote == null ? imageUrl : null,
       );
-      final localPath = await cache.getCachedPreviewPath(post.id);
+      var localPath = await cache.getCachedPreviewPath(post.id);
+
+      if (localPath == null && post.url.trim().isNotEmpty) {
+        try {
+          final metadata =
+              await UrlMetadataService.extractMetadata(post.url.trim());
+          final freshImage = metadata.imageUrl?.trim();
+          if (freshImage != null && freshImage.isNotEmpty) {
+            await cache.ensureCachedPreview(
+              postId: post.id,
+              imageUrl: freshImage,
+            );
+            localPath = await cache.getCachedPreviewPath(post.id);
+          }
+        } catch (_) {}
+      }
+
       if (localPath == null) return post.previewStorageUrl;
 
       final uploadedRemoteUrl =
@@ -1252,12 +1265,12 @@ class DataService {
         sourceUrl: post.url,
         imageUrl: post.imageUrl,
       );
-      if (uploadedRemoteUrl == null || uploadedRemoteUrl.trim().isEmpty) {
+      if (!PostPreviewUrlUtils.isStablePreviewStorageUrl(uploadedRemoteUrl)) {
         return post.previewStorageUrl;
       }
 
       final updatedPost = post.copyWith(
-        previewStorageUrl: uploadedRemoteUrl.trim(),
+        previewStorageUrl: uploadedRemoteUrl!.trim(),
         updatedAt: DateTime.now(),
       );
       await _firebaseService.updatePost(updatedPost);
@@ -1267,6 +1280,39 @@ class DataService {
       print('DEBUG: Upload preview remoto fallito per ${post.id}: $e');
       return post.previewStorageUrl;
     }
+  }
+
+  /// Ripara in background i post senza backup remoto stabile (batch limitato).
+  void repairMissingPreviewsInBackground({int maxItems = 30}) {
+    final userId = currentUserId;
+    if (userId == null || userId.isEmpty) return;
+
+    unawaited(
+      Future(() async {
+        try {
+          final posts = await getPosts();
+          var processed = 0;
+          for (final post in posts) {
+            if (processed >= maxItems) break;
+            if (PostPreviewUrlUtils.isStablePreviewStorageUrl(
+              post.previewStorageUrl,
+            )) {
+              continue;
+            }
+            if ((post.imageUrl?.trim().isEmpty ?? true) &&
+                (post.previewStorageUrl?.trim().isEmpty ?? true)) {
+              continue;
+            }
+            processed++;
+            await _ensureRemotePreviewForPost(post, userId: userId);
+          }
+        } catch (e) {
+          if (kDebugMode) {
+            print('DEBUG: repairMissingPreviewsInBackground error: $e');
+          }
+        }
+      }),
+    );
   }
 
   Future<SavedPost> _ensureStableRemotePreviewForSharing(SavedPost post) async {
@@ -1318,7 +1364,9 @@ class DataService {
       scanned++;
 
       if (onlyMissingRemote &&
-          (post.previewStorageUrl?.trim().isNotEmpty == true)) {
+          PostPreviewUrlUtils.isStablePreviewStorageUrl(
+            post.previewStorageUrl,
+          )) {
         skipped++;
         continue;
       }
@@ -1327,16 +1375,21 @@ class DataService {
         // 1) prova cache già presente
         String? localPath = await cache.getCachedPreviewPath(post.id);
 
-        // 2) se manca, prova a crearla da imageUrl (best-effort)
+        // 2) se manca, prova a crearla da backup stabile o imageUrl
         if (localPath == null) {
           final imageUrl = post.imageUrl?.trim();
-          final remoteUrl = post.previewStorageUrl?.trim();
+          final stableRemote =
+              PostPreviewUrlUtils.isStablePreviewStorageUrl(
+                post.previewStorageUrl,
+              )
+                  ? post.previewStorageUrl!.trim()
+                  : null;
           if (imageUrl != null && imageUrl.isNotEmpty ||
-              remoteUrl != null && remoteUrl.isNotEmpty) {
+              stableRemote != null) {
             await cache.ensureCachedPreview(
               postId: post.id,
-              imageUrl: remoteUrl,
-              fallbackImageUrl: imageUrl,
+              imageUrl: stableRemote,
+              fallbackImageUrl: stableRemote == null ? imageUrl : null,
             );
             localPath = await cache.getCachedPreviewPath(post.id);
           }
@@ -1355,7 +1408,8 @@ class DataService {
           imageUrl: post.imageUrl,
         );
 
-        if (downloadUrl == null || downloadUrl.trim().isEmpty) {
+        if (downloadUrl == null ||
+            !PostPreviewUrlUtils.isStablePreviewStorageUrl(downloadUrl)) {
           failed++;
           continue;
         }
@@ -1684,6 +1738,11 @@ class DataService {
   /// Ottiene gli elementi condivisi con l'utente corrente
   Future<List<Map<String, dynamic>>> getSharedItems() async {
     return await _firebaseService.getSharedItems();
+  }
+
+  /// Anteprima live di una condivisione utente-utente prima dell'import.
+  Future<Map<String, dynamic>> previewSharedResource(String shareId) async {
+    return _firebaseService.previewSharedResource(shareId: shareId);
   }
 
   String? _normalizeFolderParentId(dynamic parentId) {
@@ -2104,7 +2163,7 @@ class DataService {
       }
 
       try {
-        final resolvedPreview = await resolveSharedPostPreview(
+        final resolvedPreview = await resolveStablePreviewStorageUrl(
           previewStorageUrl: sourcePost['previewStorageUrl'] as String?,
           postUrl: sourcePost['url'] as String?,
           imageUrl: sourcePost['imageUrl'] as String?,
@@ -2132,52 +2191,94 @@ class DataService {
     }
   }
 
+  /// Risolve un URL anteprima permanente (Firebase Storage / cache globale).
+  Future<String?> resolveStablePreviewStorageUrl({
+    String? previewStorageUrl,
+    String? postUrl,
+    String? imageUrl,
+  }) async {
+    try {
+      final shared =
+          await const PostPreviewRemoteStorage().resolveExistingPreviewUrl(
+        sourceUrl: postUrl,
+        imageUrl: imageUrl,
+      );
+      if (PostPreviewUrlUtils.isStablePreviewStorageUrl(shared)) {
+        return shared!.trim();
+      }
+
+      final existingRemote = previewStorageUrl?.trim();
+      if (existingRemote != null && existingRemote.isNotEmpty) {
+        if (_isUserScopedPreviewUrl(existingRemote) &&
+            !_canUsePreviewStorageUrl(existingRemote)) {
+          if (kDebugMode) {
+            print(
+                'DEBUG: Preview URL privato di altro utente, salto previewStorageUrl.');
+          }
+        } else if (PostPreviewUrlUtils.isStablePreviewStorageUrl(
+          existingRemote,
+        )) {
+          return existingRemote;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('WARNING: Errore risoluzione anteprima stabile: $e');
+      }
+    }
+    return null;
+  }
+
+  /// URL per visualizzazione temporanea (include CDN esterni se manca backup).
+  Future<String?> resolveDisplayPreviewUrl({
+    String? previewStorageUrl,
+    String? postUrl,
+    String? imageUrl,
+  }) async {
+    final stable = await resolveStablePreviewStorageUrl(
+      previewStorageUrl: previewStorageUrl,
+      postUrl: postUrl,
+      imageUrl: imageUrl,
+    );
+    if (stable != null && stable.isNotEmpty) return stable;
+
+    final existingRemote = previewStorageUrl?.trim();
+    if (existingRemote != null &&
+        existingRemote.isNotEmpty &&
+        !PostPreviewUrlUtils.isTransientImageUrl(existingRemote)) {
+      return existingRemote;
+    }
+
+    final fallback = imageUrl?.trim();
+    return fallback != null && fallback.isNotEmpty ? fallback : null;
+  }
+
   /// Risolve l'anteprima di un post condiviso usando storage globale o URL pubblico.
   Future<String?> resolveSharedPostPreview({
     String? previewStorageUrl,
     String? postUrl,
     String? imageUrl,
   }) async {
-    try {
-      // 1. Tenta di risolvere tramite PostPreviewRemoteStorage (che gestisce la cache remota globale)
-      final shared =
-          await const PostPreviewRemoteStorage().resolveExistingPreviewUrl(
-        sourceUrl: postUrl,
-        imageUrl: imageUrl,
-      );
-      if (shared != null && shared.trim().isNotEmpty) {
-        return shared.trim();
-      }
-
-      // 2. Se abbiamo un previewStorageUrl, verifichiamo se è accessibile
-      final existingRemote = previewStorageUrl?.trim();
-      if (existingRemote != null && existingRemote.isNotEmpty) {
-        // Se è un URL privato di un altro utente (/users/UID/...), non potremo accedervi
-        if (_isUserScopedPreviewUrl(existingRemote)) {
-          if (kDebugMode) {
-            print(
-                'DEBUG: Preview URL è privato di un altro utente, uso fallback.');
-          }
-          final fallback = imageUrl?.trim();
-          return fallback != null && fallback.isNotEmpty ? fallback : null;
-        }
-        return existingRemote;
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('WARNING: Errore durante risoluzione anteprima condivisa: $e');
-      }
-    }
-
-    // 3. Fallback finale all'URL originale dell'immagine
-    final fallback = imageUrl?.trim();
-    return fallback != null && fallback.isNotEmpty ? fallback : null;
+    return resolveDisplayPreviewUrl(
+      previewStorageUrl: previewStorageUrl,
+      postUrl: postUrl,
+      imageUrl: imageUrl,
+    );
   }
 
   bool _isUserScopedPreviewUrl(String url) {
     final normalized = url.toLowerCase();
     return normalized.contains('/users/') &&
         normalized.contains('/post_previews/');
+  }
+
+  bool _canUsePreviewStorageUrl(String url) {
+    if (!_isUserScopedPreviewUrl(url)) return true;
+    final userId = currentUserId?.trim();
+    if (userId == null || userId.isEmpty) return false;
+    final normalized = url.toLowerCase();
+    return normalized.contains('/users/$userId/'.toLowerCase()) ||
+        normalized.contains('users%2f${userId.toLowerCase()}%2f');
   }
 
   /// Importa cartella condivisa (sottocartelle + post). Usato da acceptSharedItem e share link.

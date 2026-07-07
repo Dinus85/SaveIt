@@ -2986,6 +2986,141 @@ const copySharedPostFromSource = async ({
   };
 };
 
+const resolveSharedPostPreviewFields = async (source, ownerId) => {
+  const safeSource = source || {};
+  let previewStorageUrl = sharedPreviewStorageUrl(safeSource.previewStorageUrl);
+  let imageUrl = safeSource.imageUrl || null;
+  if (!previewStorageUrl || !imageUrl) {
+    const globalPost = await maybeEnsureGlobalPost({source: safeSource, ownerId});
+    if (globalPost?.canonical) {
+      previewStorageUrl = previewStorageUrl ||
+        globalPost.canonical.previewStorageUrl ||
+        null;
+      imageUrl = imageUrl || globalPost.canonical.imageUrl || null;
+    }
+  }
+  return {
+    title: (safeSource.title || "Post condiviso").toString(),
+    description: (safeSource.description || "").toString(),
+    imageUrl,
+    previewStorageUrl,
+  };
+};
+
+const collectSharedFolderBundle = async ({ownerId, resourceId}) => {
+  const rootId = normalizeShareId(resourceId);
+  const sourceRootDoc = await userFoldersRef(ownerId).doc(rootId).get();
+  const foldersSnapshot = await userFoldersRef(ownerId).get();
+  const sourceFolders = foldersSnapshot.docs.map((doc) => ({
+    id: doc.id,
+    data: doc.data() || {},
+  }));
+  const postsSnapshot = await userPostsRef(ownerId).get();
+  const sourcePosts = postsSnapshot.docs.map((doc) => doc.data() || {});
+  const folderById = new Map(sourceFolders.map((folder) => [folder.id, folder]));
+
+  if (!sourceRootDoc.exists) {
+    throw new HttpsError("not-found", "Cartella condivisa non trovata");
+  }
+
+  if (!folderById.has(rootId)) {
+    folderById.set(rootId, {id: rootId, data: sourceRootDoc.data() || {}});
+  }
+
+  const includedIds = new Set([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of sourceFolders) {
+      const parentId = normalizeShareId(folder.data.parentId);
+      if (parentId && includedIds.has(parentId) && !includedIds.has(folder.id)) {
+        includedIds.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+
+  const depthOf = (folder) => {
+    let depth = 0;
+    let parentId = normalizeShareId(folder.data.parentId);
+    const seen = new Set();
+    while (parentId && includedIds.has(parentId) && !seen.has(parentId)) {
+      seen.add(parentId);
+      depth++;
+      parentId = normalizeShareId(folderById.get(parentId)?.data?.parentId);
+    }
+    return depth;
+  };
+
+  const foldersToCopy = sourceFolders
+      .filter((folder) => includedIds.has(folder.id))
+      .sort((a, b) => {
+        if (a.id === rootId) return -1;
+        if (b.id === rootId) return 1;
+        return depthOf(a) - depthOf(b);
+      });
+
+  const includedPosts = sourcePosts.filter((post) => {
+    const sourceFolderId = normalizeShareId(post.folderId);
+    return includedIds.has(sourceFolderId);
+  });
+
+  return {
+    rootId,
+    rootData: sourceRootDoc.data() || {},
+    foldersToCopy,
+    includedPosts,
+  };
+};
+
+const loadSharedResourcePreview = async ({ownerId, resourceId, type}) => {
+  if (type === "post") {
+    const sourceDoc = await userPostsRef(ownerId).doc(resourceId).get();
+    if (!sourceDoc.exists) {
+      throw new HttpsError("not-found", "Post condiviso non trovato");
+    }
+    const previewPost = await resolveSharedPostPreviewFields(
+        sourceDoc.data() || {},
+        ownerId,
+    );
+    return {
+      type: "post",
+      ...previewPost,
+      folderCount: 0,
+      postCount: 1,
+      folders: [],
+      posts: [previewPost],
+    };
+  }
+
+  const bundle = await collectSharedFolderBundle({ownerId, resourceId});
+  const posts = [];
+  for (const post of bundle.includedPosts) {
+    posts.push(await resolveSharedPostPreviewFields(post, ownerId));
+  }
+
+  const subfolderCount = bundle.foldersToCopy
+      .filter((folder) => folder.id !== bundle.rootId)
+      .length;
+
+  return {
+    type: "folder",
+    name: bundle.rootData.name || "Cartella condivisa",
+    color: bundle.rootData.color || "#BB86FC",
+    folderCount: subfolderCount,
+    postCount: posts.length,
+    folders: bundle.foldersToCopy
+        .filter((folder) => folder.id !== bundle.rootId)
+        .map((folder) => ({
+          id: folder.id,
+          name: folder.data.name || "Cartella",
+          color: folder.data.color || "#BB86FC",
+          parentId: normalizeShareId(folder.data.parentId) || null,
+        })),
+    posts,
+  };
+};
+
 const copySharedFolderFromSource = async ({
   ownerId,
   resourceId,
@@ -3363,6 +3498,53 @@ exports.trackShareLinkImport = onCall(
         lastImportedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
       return {ok: true};
+    }
+);
+
+exports.previewSharedResource = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+
+      const shareId = normalizeShareId(request.data?.shareId);
+      if (!shareId) {
+        throw new HttpsError("invalid-argument", "Condivisione mancante");
+      }
+
+      const sharedItemRef = db.collection("users")
+          .doc(request.auth.uid)
+          .collection("shared_items")
+          .doc(shareId);
+      const sharedItemDoc = await sharedItemRef.get();
+      if (!sharedItemDoc.exists) {
+        throw new HttpsError("not-found", "Condivisione non trovata");
+      }
+
+      const sharedItem = sharedItemDoc.data() || {};
+      const ownerId = normalizeShareId(sharedItem.ownerId);
+      const type = normalizeShareId(sharedItem.type);
+      const resourceId = normalizeShareId(
+          sharedItem.resourceId ||
+          resolveShareResourceId(type, sharedItem.originalData),
+      );
+
+      if (!ownerId || !resourceId || !["post", "folder"].includes(type)) {
+        throw new HttpsError("invalid-argument", "Condivisione non valida");
+      }
+
+      const preview = await loadSharedResourcePreview({
+        ownerId,
+        resourceId,
+        type,
+      });
+
+      return {ok: true, preview};
     }
 );
 
@@ -3955,7 +4137,8 @@ exports.assetLinks = onRequest(
     {
       region: "us-central1",
       timeoutSeconds: 10,
-      memory: "128MiB",
+      memory: "256MiB",
+      invoker: "public",
     },
     (req, res) => {
       res.set("Content-Type", "application/json");

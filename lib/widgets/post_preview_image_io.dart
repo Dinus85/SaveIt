@@ -1,5 +1,5 @@
 // lib/widgets/post_preview_image_io.dart
-// Implementazione mobile/desktop: prova file locale (cache persistente), fallback network.
+// Implementazione mobile/desktop: cache locale persistente + cache remota globale.
 
 import 'dart:io';
 
@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../services/post_preview_cache.dart';
 import '../services/post_preview_remote_storage.dart';
+import '../services/post_preview_url_utils.dart';
 
 class PostPreviewImage extends StatefulWidget {
   final String postId;
@@ -33,7 +34,9 @@ class PostPreviewImage extends StatefulWidget {
 
 class _PostPreviewImageState extends State<PostPreviewImage> {
   final _cache = const PostPreviewCache();
+  final _remote = const PostPreviewRemoteStorage();
   late Future<String?> _localPathFuture;
+  String? _networkDisplayUrl;
   bool _remoteBackupStarted = false;
 
   @override
@@ -42,20 +45,35 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
     _localPathFuture = _initAndGetPath();
   }
 
+  String? _stableRemoteFromField() {
+    final remote = widget.remoteImageUrl?.trim();
+    if (PostPreviewUrlUtils.isStablePreviewStorageUrl(remote)) {
+      return remote;
+    }
+    return null;
+  }
+
   Future<String?> _initAndGetPath() async {
     try {
       final existing = await _cache.getCachedPreviewPath(widget.postId);
-      if (existing != null) return existing;
+      if (existing != null) {
+        _networkDisplayUrl = _stableRemoteFromField();
+        return existing;
+      }
 
-      final remoteUrl = widget.remoteImageUrl?.trim();
+      var stableUrl = _stableRemoteFromField();
+      stableUrl ??= await _remote.resolveExistingPreviewUrl(
+        sourceUrl: widget.postUrl,
+        imageUrl: widget.imageUrl,
+      );
+
       final originalUrl = widget.imageUrl?.trim();
+      _networkDisplayUrl = stableUrl ?? originalUrl;
 
       await _cache.ensureCachedPreview(
         postId: widget.postId,
-        // Se esiste il backup remoto, la cache locale viene ricostruita SOLO da li.
-        // L'URL originale serve solo per creare la prima cache prima del backup remoto.
-        imageUrl: remoteUrl?.isNotEmpty == true ? remoteUrl : originalUrl,
-        fallbackImageUrl: remoteUrl?.isNotEmpty == true ? null : originalUrl,
+        imageUrl: stableUrl,
+        fallbackImageUrl: stableUrl == null ? originalUrl : null,
       );
     } catch (_) {}
 
@@ -71,8 +89,10 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.postId != widget.postId ||
         oldWidget.imageUrl != widget.imageUrl ||
-        oldWidget.remoteImageUrl != widget.remoteImageUrl) {
+        oldWidget.remoteImageUrl != widget.remoteImageUrl ||
+        oldWidget.postUrl != widget.postUrl) {
       _remoteBackupStarted = false;
+      _networkDisplayUrl = null;
       _localPathFuture = _initAndGetPath();
     }
   }
@@ -94,26 +114,25 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
   }
 
   void _backupLocalPreviewToRemoteIfNeeded(String localPath) {
-    if (_remoteBackupStarted ||
-        widget.postId.isEmpty ||
-        widget.remoteImageUrl?.trim().isNotEmpty == true) {
+    if (_remoteBackupStarted || widget.postId.isEmpty) return;
+    if (PostPreviewUrlUtils.isStablePreviewStorageUrl(widget.remoteImageUrl)) {
       return;
     }
+
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null || userId.isEmpty) return;
 
     _remoteBackupStarted = true;
     Future.microtask(() async {
       try {
-        final downloadUrl =
-            await const PostPreviewRemoteStorage().uploadCachedPreview(
+        final downloadUrl = await _remote.uploadCachedPreview(
           userId: userId,
           postId: widget.postId,
           localPath: localPath,
           sourceUrl: widget.postUrl,
           imageUrl: widget.imageUrl,
         );
-        if (downloadUrl == null || downloadUrl.trim().isEmpty) return;
+        if (!PostPreviewUrlUtils.isStablePreviewStorageUrl(downloadUrl)) return;
 
         await FirebaseFirestore.instance
             .collection('users')
@@ -121,7 +140,7 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
             .collection('posts')
             .doc(widget.postId)
             .set({
-          'previewStorageUrl': downloadUrl.trim(),
+          'previewStorageUrl': downloadUrl!.trim(),
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       } catch (_) {
@@ -166,9 +185,10 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
           return _buildPlaceholder();
         }
 
-        final networkUrl = widget.remoteImageUrl?.trim().isNotEmpty == true
-            ? widget.remoteImageUrl!.trim()
-            : widget.imageUrl?.trim();
+        final stableField = _stableRemoteFromField();
+        final networkUrl = _networkDisplayUrl?.trim().isNotEmpty == true
+            ? _networkDisplayUrl!.trim()
+            : (stableField ?? widget.imageUrl?.trim());
         if (networkUrl != null && networkUrl.isNotEmpty) {
           return CachedNetworkImage(
             imageUrl: networkUrl,

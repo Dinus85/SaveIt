@@ -244,6 +244,70 @@ Map<String, dynamic> _originalData(Map<String, dynamic> item) {
   return <String, dynamic>{};
 }
 
+Map<String, dynamic> _mergeSharedPreviewData(
+  Map<String, dynamic> item,
+  Map<String, dynamic>? preview,
+) {
+  final base = Map<String, dynamic>.from(_originalData(item));
+  if (preview == null || preview.isEmpty) return base;
+
+  final folders = preview['folders'];
+  final posts = preview['posts'];
+  if (folders is List) {
+    base['folders'] = folders
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+  if (posts is List) {
+    base['posts'] = posts
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+  if (preview['folderCount'] != null) {
+    base['folderCount'] = preview['folderCount'];
+  }
+  if (preview['postCount'] != null) {
+    base['postCount'] = preview['postCount'];
+  }
+  if (preview['name'] != null) base['name'] = preview['name'];
+  if (preview['title'] != null) base['title'] = preview['title'];
+  if (preview['description'] != null) {
+    base['description'] = preview['description'];
+  }
+  if (preview['imageUrl'] != null) base['imageUrl'] = preview['imageUrl'];
+  if (preview['previewStorageUrl'] != null) {
+    base['previewStorageUrl'] = preview['previewStorageUrl'];
+  }
+  if (preview['color'] != null) base['color'] = preview['color'];
+  return base;
+}
+
+int _sharedPreviewFolderCount(Map<String, dynamic> originalData) {
+  final explicit = originalData['folderCount'];
+  if (explicit is int) return explicit;
+  if (explicit != null) {
+    return int.tryParse(explicit.toString()) ?? 0;
+  }
+  final folders = originalData['folders'] is List
+      ? List<Map<String, dynamic>>.from(originalData['folders'])
+      : <Map<String, dynamic>>[];
+  return folders.length;
+}
+
+int _sharedPreviewPostCount(Map<String, dynamic> originalData) {
+  final explicit = originalData['postCount'];
+  if (explicit is int) return explicit;
+  if (explicit != null) {
+    return int.tryParse(explicit.toString()) ?? 0;
+  }
+  final posts = originalData['posts'] is List
+      ? List<Map<String, dynamic>>.from(originalData['posts'])
+      : <Map<String, dynamic>>[];
+  return posts.length;
+}
+
 String _sharedItemTitle(Map<String, dynamic> item) {
   final type = item['type']?.toString() ?? 'post';
   final originalData = _originalData(item);
@@ -338,6 +402,8 @@ Widget _buildSharedItemPreview(
   final posts = originalData['posts'] is List
       ? List<Map<String, dynamic>>.from(originalData['posts'])
       : <Map<String, dynamic>>[];
+  final folderCount = _sharedPreviewFolderCount(originalData);
+  final postCount = _sharedPreviewPostCount(originalData);
 
   return AspectRatio(
     aspectRatio: 1.45,
@@ -401,7 +467,7 @@ Widget _buildSharedItemPreview(
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        '${folders.length} cartell${folders.length == 1 ? 'a' : 'e'} incluse • ${posts.length} post',
+                        '$folderCount cartell${folderCount == 1 ? 'a' : 'e'} incluse • $postCount post',
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.86),
                           fontSize: 12,
@@ -588,186 +654,263 @@ Future<bool?> _showImportPrompt(
   required Map<String, dynamic> item,
   required bool isDarkTheme,
 }) {
-  final type = item['type']?.toString() ?? 'post';
-  final ownerName = item['ownerName']?.toString() ?? 'un utente';
-  final originalData = _originalData(item);
-  final title = _sharedItemTitle(item);
-  final isFolder = type == 'folder';
-  final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
-  final textColor = isDarkTheme ? Colors.white : Colors.black87;
-  final subtitleColor = isDarkTheme ? Colors.white70 : Colors.black54;
-  final pageContext = context;
-
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (dialogContext) {
-      var isImporting = false;
+    builder: (dialogContext) => _SharedImportPromptDialog(
+      item: item,
+      isDarkTheme: isDarkTheme,
+      pageContext: context,
+    ),
+  );
+}
 
-      return StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: backgroundColor,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          title: Row(
-            children: [
-              Icon(
-                isFolder ? Icons.folder_shared : Icons.article,
-                color: isFolder ? Colors.amber.shade700 : Colors.blue,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Contenuto condiviso',
-                  style:
-                      TextStyle(color: textColor, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
+class _SharedImportPromptDialog extends StatefulWidget {
+  final Map<String, dynamic> item;
+  final bool isDarkTheme;
+  final BuildContext pageContext;
+
+  const _SharedImportPromptDialog({
+    required this.item,
+    required this.isDarkTheme,
+    required this.pageContext,
+  });
+
+  @override
+  State<_SharedImportPromptDialog> createState() =>
+      _SharedImportPromptDialogState();
+}
+
+class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
+  Map<String, dynamic>? _previewData;
+  bool _loadingPreview = true;
+  bool _isImporting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreview();
+  }
+
+  Future<void> _loadPreview() async {
+    final shareId = widget.item['id']?.toString().trim() ?? '';
+    if (shareId.isEmpty) {
+      if (mounted) setState(() => _loadingPreview = false);
+      return;
+    }
+
+    try {
+      final preview =
+          await DataService.instance.previewSharedResource(shareId);
+      if (!mounted) return;
+      setState(() {
+        _previewData = _mergeSharedPreviewData(widget.item, preview);
+        _loadingPreview = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _previewData = _originalData(widget.item);
+          _loadingPreview = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final type = widget.item['type']?.toString() ?? 'post';
+    final ownerName = widget.item['ownerName']?.toString() ?? 'un utente';
+    final originalData =
+        _previewData ?? _mergeSharedPreviewData(widget.item, null);
+    final title = _sharedItemTitle({
+      ...widget.item,
+      'originalData': originalData,
+    });
+    final isFolder = type == 'folder';
+    final backgroundColor =
+        widget.isDarkTheme ? Colors.grey.shade900 : Colors.white;
+    final textColor = widget.isDarkTheme ? Colors.white : Colors.black87;
+    final subtitleColor = widget.isDarkTheme ? Colors.white70 : Colors.black54;
+
+    return AlertDialog(
+      backgroundColor: backgroundColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Row(
+        children: [
+          Icon(
+            isFolder ? Icons.folder_shared : Icons.article,
+            color: isFolder ? Colors.amber.shade700 : Colors.blue,
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$ownerName ti ha condiviso ${isFolder ? 'la cartella' : 'il post'}:',
-                  style: TextStyle(color: subtitleColor, height: 1.35),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Contenuto condiviso',
+              style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$ownerName ti ha condiviso ${isFolder ? 'la cartella' : 'il post'}:',
+              style: TextStyle(color: subtitleColor, height: 1.35),
+            ),
+            const SizedBox(height: 12),
+            if (_loadingPreview)
+              AspectRatio(
+                aspectRatio: isFolder ? 1.45 : 2.4,
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: widget.isDarkTheme
+                        ? Colors.grey.shade800
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  ),
                 ),
-                const SizedBox(height: 12),
-                _buildSharedItemPreview(
-                  originalData,
-                  title: title,
-                  isFolder: isFolder,
-                  isDarkTheme: isDarkTheme,
-                ),
-                const SizedBox(height: 14),
-                if (isImporting)
-                  Row(
-                    children: [
-                      const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              _buildSharedItemPreview(
+                originalData,
+                title: title,
+                isFolder: isFolder,
+                isDarkTheme: widget.isDarkTheme,
+              ),
+            const SizedBox(height: 14),
+            if (_isImporting)
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Importazione in corso...',
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w600,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Importazione in corso...',
-                          style: TextStyle(
-                            color: textColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  Text(
-                    'Vuoi importarlo nel tuo account?',
-                    style: TextStyle(
-                      color: textColor,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isImporting
-                  ? null
-                  : () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Più tardi'),
-            ),
-            TextButton(
-              onPressed: isImporting
-                  ? null
-                  : () async {
-                      final rejected =
-                          await _rejectSharedItem(dialogContext, item);
-                      if (rejected && dialogContext.mounted) {
-                        Navigator.of(dialogContext).pop(true);
-                      }
-                    },
-              child: const Text('Rifiuta', style: TextStyle(color: Colors.red)),
-            ),
-            ElevatedButton(
-              onPressed: isImporting
-                  ? null
-                  : () async {
-                      final destination = await _chooseImportDestination(
-                        dialogContext,
-                        isFolder: isFolder,
-                        isDarkTheme: isDarkTheme,
-                      );
-                      if (destination == null || !dialogContext.mounted) return;
-
-                      final itemId = item['id']?.toString() ?? '';
-                      if (itemId.isNotEmpty) {
-                        SharedItemsPage._importsInProgress.add(itemId);
-                      }
-                      setDialogState(() => isImporting = true);
-
-                      try {
-                        String? importedFolderId;
-                        if (isFolder) {
-                          importedFolderId =
-                              await DataService.instance.acceptSharedItem(
-                            item,
-                            targetParentFolderId:
-                                destination.folderId == _homeDestination
-                                    ? null
-                                    : destination.folderId,
-                          );
-                        } else {
-                          importedFolderId =
-                              await DataService.instance.acceptSharedItem(
-                            item,
-                            targetFolderId: destination.folderId,
-                          );
-                        }
-                        if (itemId.isNotEmpty) {
-                          SharedItemsPage._importsInProgress.remove(itemId);
-                        }
-                        if (!dialogContext.mounted) return;
-                        Navigator.of(dialogContext).pop(true);
-                        ScaffoldMessenger.of(pageContext).showSnackBar(
-                          const SnackBar(
-                            content: Text('Contenuto importato correttamente!'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (pageContext.mounted) {
-                            _openImportedFolder(
-                              pageContext,
-                              importedFolderId,
-                              isDarkTheme: isDarkTheme,
-                            );
-                          }
-                        });
-                      } catch (e) {
-                        if (itemId.isNotEmpty) {
-                          SharedItemsPage._importsInProgress.remove(itemId);
-                        }
-                        if (!dialogContext.mounted) return;
-                        setDialogState(() => isImporting = false);
-                        ScaffoldMessenger.of(dialogContext).showSnackBar(
-                          SnackBar(
-                            content: Text(_readableError(e)),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                      }
-                    },
-              child: const Text('Importa'),
-            ),
+                ],
+              )
+            else
+              Text(
+                'Vuoi importarlo nel tuo account?',
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
           ],
         ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isImporting ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Più tardi'),
+        ),
+        TextButton(
+          onPressed: _isImporting
+              ? null
+              : () async {
+                  final rejected =
+                      await _rejectSharedItem(context, widget.item);
+                  if (rejected && context.mounted) {
+                    Navigator.of(context).pop(true);
+                  }
+                },
+          child: const Text('Rifiuta', style: TextStyle(color: Colors.red)),
+        ),
+        ElevatedButton(
+          onPressed: _isImporting || _loadingPreview
+              ? null
+              : () => _handleImport(context, isFolder: isFolder),
+          child: const Text('Importa'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleImport(
+    BuildContext dialogContext, {
+    required bool isFolder,
+  }) async {
+    final destination = await _chooseImportDestination(
+      dialogContext,
+      isFolder: isFolder,
+      isDarkTheme: widget.isDarkTheme,
+    );
+    if (destination == null || !dialogContext.mounted) return;
+
+    final itemId = widget.item['id']?.toString() ?? '';
+    if (itemId.isNotEmpty) {
+      SharedItemsPage._importsInProgress.add(itemId);
+    }
+    setState(() => _isImporting = true);
+
+    try {
+      String? importedFolderId;
+      if (isFolder) {
+        importedFolderId = await DataService.instance.acceptSharedItem(
+          widget.item,
+          targetParentFolderId: destination.folderId == _homeDestination
+              ? null
+              : destination.folderId,
+        );
+      } else {
+        importedFolderId = await DataService.instance.acceptSharedItem(
+          widget.item,
+          targetFolderId: destination.folderId,
+        );
+      }
+      if (itemId.isNotEmpty) {
+        SharedItemsPage._importsInProgress.remove(itemId);
+      }
+      if (!dialogContext.mounted) return;
+      Navigator.of(dialogContext).pop(true);
+      ScaffoldMessenger.of(widget.pageContext).showSnackBar(
+        const SnackBar(
+          content: Text('Contenuto importato correttamente!'),
+          backgroundColor: Colors.green,
+        ),
       );
-    },
-  );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (widget.pageContext.mounted) {
+          _openImportedFolder(
+            widget.pageContext,
+            importedFolderId,
+            isDarkTheme: widget.isDarkTheme,
+          );
+        }
+      });
+    } catch (e) {
+      if (itemId.isNotEmpty) {
+        SharedItemsPage._importsInProgress.remove(itemId);
+      }
+      if (!dialogContext.mounted) return;
+      setState(() => _isImporting = false);
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        SnackBar(
+          content: Text(_readableError(e)),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 }
 
 Future<void> _openImportedFolder(

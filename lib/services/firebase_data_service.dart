@@ -1121,6 +1121,38 @@ class FirebaseDataService {
     }
   }
 
+  /// Carica anteprima live di una condivisione diretta utente-utente.
+  Future<Map<String, dynamic>> previewSharedResource({
+    required String shareId,
+  }) async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) throw Exception('Utente non autenticato');
+
+      final callable = _functions.httpsCallable('previewSharedResource');
+      final response = await callable.call(<String, dynamic>{
+        'shareId': shareId,
+      });
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final preview = data['preview'];
+      if (preview is Map) {
+        return Map<String, dynamic>.from(preview);
+      }
+      return <String, dynamic>{};
+    } on FirebaseFunctionsException catch (e) {
+      final message = e.message ?? 'Errore durante il caricamento anteprima';
+      if (kDebugMode) {
+        print('ERRORE previewSharedResource callable: ${e.code} - $message');
+      }
+      throw FirebaseDataException(message, code: e.code, originalError: e);
+    } catch (e) {
+      if (kDebugMode) print('ERRORE previewSharedResource: $e');
+      throw FirebaseDataException(
+        'Errore durante il caricamento anteprima: $e',
+      );
+    }
+  }
+
   /// Importa un elemento condiviso copiandolo direttamente dal Firestore
   /// dell'utente mittente tramite Cloud Function.
   Future<Map<String, dynamic>> importSharedResource({
