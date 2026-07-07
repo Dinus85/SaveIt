@@ -16,6 +16,7 @@ import 'package:savein/services/auth_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/services/post_preview_cache.dart';
 import 'package:savein/services/post_preview_remote_storage.dart';
+import 'package:savein/services/post_preview_repair_tracker.dart';
 import 'package:savein/services/post_preview_url_utils.dart';
 import 'package:savein/services/screen_awake_service.dart';
 import 'package:savein/url_metadata_service.dart';
@@ -234,8 +235,8 @@ class DataService {
     }
   }
 
-  /// ðŸ†• NUOVO: Aggiorna cache aggiungendo un post specifico (per aggiornamento ottimistico)
-  void addPostToCache(SavedPost post) {
+  /// Aggiorna cache aggiungendo/sostituendo un post.
+  void addPostToCache(SavedPost post, {bool notifyChange = true}) {
     final userId = currentUserId;
     if (userId == null) return;
 
@@ -243,14 +244,9 @@ class DataService {
       print('DEBUG: DataService - Aggiungendo post alla cache: ${post.title}');
     }
 
-    // Aggiorna cache posts se esiste
     if (_userPostsCache.containsKey(userId)) {
       final currentPosts = List<SavedPost>.from(_userPostsCache[userId]!);
-
-      // Rimuovi post esistente con stesso ID (se presente)
       currentPosts.removeWhere((p) => p.id == post.id);
-
-      // Aggiungi nuovo post in cima (piÃ¹ recente)
       currentPosts.insert(0, post);
 
       _userPostsCache[userId] = currentPosts;
@@ -261,14 +257,15 @@ class DataService {
             'DEBUG: DataService - Post aggiunto alla cache. Totale: ${currentPosts.length}');
       }
 
-      // ðŸ†• Notifica il cambiamento
-      _notifyDataChange('post_added', {
-        'postId': post.id,
-        'postTitle': post.title,
-        'folderId': post.folderId,
-        'userId': userId,
-        'cacheSize': currentPosts.length,
-      });
+      if (notifyChange) {
+        _notifyDataChange('post_added', {
+          'postId': post.id,
+          'postTitle': post.title,
+          'folderId': post.folderId,
+          'userId': userId,
+          'cacheSize': currentPosts.length,
+        });
+      }
     }
   }
 
@@ -1151,7 +1148,11 @@ class DataService {
         if (!PostPreviewUrlUtils.isStablePreviewStorageUrl(remoteUrl)) {
           final userId = currentUserId;
           if (userId != null && userId.isNotEmpty) {
-            await _ensureRemotePreviewForPost(post, userId: userId);
+            await _ensureRemotePreviewForPost(
+              post,
+              userId: userId,
+              forceRetry: true,
+            );
           }
         }
       }),
@@ -1202,8 +1203,17 @@ class DataService {
   Future<String?> _ensureRemotePreviewForPost(
     SavedPost post, {
     required String userId,
+    bool notifyCacheChange = true,
+    bool forceRetry = false,
   }) async {
     if (post.id.isEmpty) return post.previewStorageUrl;
+
+    if (!forceRetry &&
+        PostPreviewRepairTracker.instance.wasAttempted(post.id)) {
+      return post.previewStorageUrl;
+    }
+
+    PostPreviewRepairTracker.instance.markAttempted(post.id);
 
     final existing = await resolveStablePreviewStorageUrl(
       previewStorageUrl: post.previewStorageUrl,
@@ -1217,7 +1227,7 @@ class DataService {
           updatedAt: DateTime.now(),
         );
         await _firebaseService.updatePost(updatedPost);
-        addPostToCache(updatedPost);
+        addPostToCache(updatedPost, notifyChange: notifyCacheChange);
       }
       return existing.trim();
     }
@@ -1274,7 +1284,7 @@ class DataService {
         updatedAt: DateTime.now(),
       );
       await _firebaseService.updatePost(updatedPost);
-      addPostToCache(updatedPost);
+      addPostToCache(updatedPost, notifyChange: notifyCacheChange);
       return uploadedRemoteUrl.trim();
     } catch (e) {
       print('DEBUG: Upload preview remoto fallito per ${post.id}: $e');
@@ -1282,10 +1292,11 @@ class DataService {
     }
   }
 
-  /// Ripara in background i post senza backup remoto stabile (batch limitato).
+  /// Ripara in background i post senza backup remoto stabile (una volta per apertura app).
   void repairMissingPreviewsInBackground({int maxItems = 30}) {
     final userId = currentUserId;
     if (userId == null || userId.isEmpty) return;
+    if (!PostPreviewRepairTracker.instance.tryBeginStartupRepair()) return;
 
     unawaited(
       Future(() async {
@@ -1299,12 +1310,20 @@ class DataService {
             )) {
               continue;
             }
+            if (PostPreviewRepairTracker.instance.wasAttempted(post.id)) {
+              continue;
+            }
             if ((post.imageUrl?.trim().isEmpty ?? true) &&
                 (post.previewStorageUrl?.trim().isEmpty ?? true)) {
+              PostPreviewRepairTracker.instance.markAttempted(post.id);
               continue;
             }
             processed++;
-            await _ensureRemotePreviewForPost(post, userId: userId);
+            await _ensureRemotePreviewForPost(
+              post,
+              userId: userId,
+              notifyCacheChange: false,
+            );
           }
         } catch (e) {
           if (kDebugMode) {
@@ -1324,6 +1343,7 @@ class DataService {
     final resolvedUrl = await _ensureRemotePreviewForPost(
       post,
       userId: userId,
+      forceRetry: true,
     );
     if (resolvedUrl == null || resolvedUrl.trim().isEmpty) {
       return post;
@@ -1605,6 +1625,7 @@ class DataService {
   /// AuthService().currentUser è già null, quindi 'currentUserId' qui
   /// non identifica più l'utente che si sta disconnettendo.
   void handleUserLogout({String? previousUserId}) {
+    PostPreviewRepairTracker.instance.resetForLogout();
     final userId = previousUserId ?? currentUserId;
     print('DEBUG: DataService (FASE 8) - Gestendo logout utente: $userId');
 

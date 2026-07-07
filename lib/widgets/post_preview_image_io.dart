@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../services/post_preview_cache.dart';
 import '../services/post_preview_remote_storage.dart';
+import '../services/post_preview_repair_tracker.dart';
 import '../services/post_preview_url_utils.dart';
 
 class PostPreviewImage extends StatefulWidget {
@@ -38,6 +39,7 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
   late Future<String?> _localPathFuture;
   String? _networkDisplayUrl;
   bool _remoteBackupStarted = false;
+  bool _previewUnavailable = false;
 
   @override
   void initState() {
@@ -61,8 +63,25 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
         return existing;
       }
 
-      var stableUrl = _stableRemoteFromField();
-      stableUrl ??= await _remote.resolveExistingPreviewUrl(
+      final stableField = _stableRemoteFromField();
+      if (stableField != null) {
+        _networkDisplayUrl = stableField;
+        await _cache.ensureCachedPreview(
+          postId: widget.postId,
+          imageUrl: stableField,
+        );
+        final cached = await _cache.getCachedPreviewPath(widget.postId);
+        if (cached != null) return cached;
+      }
+
+      if (PostPreviewRepairTracker.instance.wasAttempted(widget.postId)) {
+        _previewUnavailable = true;
+        return null;
+      }
+
+      PostPreviewRepairTracker.instance.markAttempted(widget.postId);
+
+      var stableUrl = await _remote.resolveExistingPreviewUrl(
         sourceUrl: widget.postUrl,
         imageUrl: widget.imageUrl,
       );
@@ -80,8 +99,11 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
     final localPath = await _cache.getCachedPreviewPath(widget.postId);
     if (localPath != null) {
       _backupLocalPreviewToRemoteIfNeeded(localPath);
+      return localPath;
     }
-    return localPath;
+
+    _previewUnavailable = true;
+    return null;
   }
 
   @override
@@ -93,6 +115,7 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
         oldWidget.postUrl != widget.postUrl) {
       _remoteBackupStarted = false;
       _networkDisplayUrl = null;
+      _previewUnavailable = false;
       _localPathFuture = _initAndGetPath();
     }
   }
@@ -164,6 +187,10 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_previewUnavailable) {
+      return _buildBrokenImage();
+    }
+
     return FutureBuilder<String?>(
       future: _localPathFuture,
       builder: (context, snap) {
@@ -188,7 +215,7 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
         final stableField = _stableRemoteFromField();
         final networkUrl = _networkDisplayUrl?.trim().isNotEmpty == true
             ? _networkDisplayUrl!.trim()
-            : (stableField ?? widget.imageUrl?.trim());
+            : stableField;
         if (networkUrl != null && networkUrl.isNotEmpty) {
           return CachedNetworkImage(
             imageUrl: networkUrl,
