@@ -1849,7 +1849,7 @@ class AuthService extends ChangeNotifier {
         }
       }
 
-      if (existingDoc == null || existingDoc.exists) {
+      if (existingDoc?.exists == true) {
         await _saveUserProfileMetadataToFirestore(user);
         return;
       }
@@ -2128,6 +2128,36 @@ class AuthService extends ChangeNotifier {
 
       if (!firestoreDoc.exists || firestoreData == null) {
         // Il documento non esiste secondo il server → account cancellato
+        // oppure profilo appena creato non ancora visibile (race post-registrazione).
+        if (_currentUser != null &&
+            _currentUser!.id == firebaseUser.uid &&
+            fromServer) {
+          for (var attempt = 0; attempt < 3; attempt++) {
+            await Future.delayed(Duration(milliseconds: 400 * (attempt + 1)));
+            final retry = await _firestore
+                .collection('users')
+                .doc(firebaseUser.uid)
+                .get(const GetOptions(source: Source.server));
+            if (retry.exists && retry.data() != null) {
+              _currentUser = _userFromFirestoreData(
+                firebaseUser,
+                retry.data()!,
+                retry.id,
+                fallback: _currentUser,
+              );
+              await _saveUserLocally(_currentUser!);
+              _startUserProfileSync(firebaseUser.uid);
+              print(
+                  'DEBUG: ✅ Profilo utente recuperato al retry ${attempt + 1}');
+              await _loadMarketingConsentFromFirestore();
+              await _syncDashboardAccessRoleFromFirestore();
+              await _claimPendingSmartChefLaunchPromoIfAvailable();
+              await syncNewSignupPremiumPromoFromServer();
+              return;
+            }
+          }
+        }
+
         // Disconnetti solo se il dato è dal server (non da cache stale)
         if (!fromServer) {
           print(

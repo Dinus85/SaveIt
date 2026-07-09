@@ -149,8 +149,8 @@ const fetchTermsConditions = async () => {
   return data;
 };
 
-const renderPrivacyHtml = (data) => {
-  const title = data.title || "Privacy Policy";
+const pageShellHtml = (data, {description, defaultTitle}) => {
+  const title = data.title || defaultTitle;
   const version = data.version || "N/A";
   const updated = formatDisplayDate(data.lastUpdated);
   const bodyHtml = markdownToHtml(data.content);
@@ -161,7 +161,7 @@ const renderPrivacyHtml = (data) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)} – SaveIn!</title>
-  <meta name="description" content="Informativa sulla privacy di SaveIn!">
+  <meta name="description" content="${escapeHtml(description)}">
   <style>
     body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 24px 16px; color: #333; line-height: 1.7; }
     h1 { color: #1a1a2e; font-size: 28px; margin-bottom: 4px; }
@@ -182,6 +182,18 @@ const renderPrivacyHtml = (data) => {
 </body>
 </html>`;
 };
+
+const renderPrivacyHtml = (data) =>
+  pageShellHtml(data, {
+    defaultTitle: "Privacy Policy",
+    description: "Informativa sulla privacy di SaveIn!",
+  });
+
+const renderTermsHtml = (data) =>
+  pageShellHtml(data, {
+    defaultTitle: "Termini di utilizzo (EULA)",
+    description: "Termini e condizioni d'uso (EULA) di SaveIn!, inclusi abbonamenti Premium.",
+  });
 
 const renderErrorHtml = (message, sourceUrl = PRIVACY_POLICY_URL) => `<!DOCTYPE html>
 <html lang="it">
@@ -237,7 +249,7 @@ const register = ({onRequest}) => {
           const data = await fetchTermsConditions();
           res.set("Content-Type", "text/html; charset=utf-8");
           res.set("Cache-Control", "public, max-age=300, s-maxage=300");
-          res.status(200).send(renderPrivacyHtml(data));
+          res.status(200).send(renderTermsHtml(data));
         } catch (error) {
           console.error("renderTermsPage", error);
           res.set("Content-Type", "text/html; charset=utf-8");
