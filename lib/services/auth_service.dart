@@ -432,7 +432,8 @@ class AuthService extends ChangeNotifier {
   String? _lastConsentSyncUserId;
   bool _isProcessingAuthStateChange = false;
   bool _isDeletingAccount = false;
-  bool _isCompletingGoogleSignIn = false;
+  bool _isCompletingAuthBootstrap = false;
+  String? _pendingSignupWelcomeName;
   static const Duration _consentSyncCooldown = Duration(seconds: 10);
   VoidCallback? onUserProfileChanged;
 
@@ -448,6 +449,36 @@ class AuthService extends ChangeNotifier {
   }
 
   String _normalizeEmail(String email) => email.toLowerCase().trim();
+
+  void scheduleSignupWelcome(String firstName) {
+    final trimmed = firstName.trim();
+    if (trimmed.isEmpty) return;
+    _pendingSignupWelcomeName = trimmed;
+  }
+
+  String? consumePendingSignupWelcomeName() {
+    final name = _pendingSignupWelcomeName;
+    _pendingSignupWelcomeName = null;
+    return name;
+  }
+
+  bool _isRecentlyCreatedFirebaseUser(firebase_auth.User firebaseUser) {
+    final createdAt = firebaseUser.metadata.creationTime;
+    if (createdAt == null) return false;
+    return DateTime.now().difference(createdAt) <
+        const Duration(seconds: 90);
+  }
+
+  bool _emailsMatchForAuth(
+    firebase_auth.User firebaseUser,
+    User? localUser,
+  ) {
+    final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
+    final localEmail = _normalizeEmail(localUser?.email ?? '');
+    if (firebaseEmail.isEmpty && localEmail.isNotEmpty) return true;
+    if (localEmail.isEmpty && firebaseEmail.isNotEmpty) return true;
+    return firebaseEmail == localEmail;
+  }
 
   DateTime? _dateFromFirestoreValue(dynamic value) {
     if (value == null) return null;
@@ -674,9 +705,9 @@ class AuthService extends ChangeNotifier {
         continue;
       }
 
-      if (_isCompletingGoogleSignIn) {
+      if (_isCompletingAuthBootstrap) {
         if (kDebugMode) {
-          print('DEBUG: ⏳ Stream auth in pausa durante bootstrap Google');
+          print('DEBUG: ⏳ Stream auth in pausa durante bootstrap auth');
         }
         final firebaseEmail = _normalizeEmail(firebaseUser.email ?? '');
         final hasMatchingUser = _currentUser?.id == firebaseUser.uid &&
@@ -795,9 +826,9 @@ class AuthService extends ChangeNotifier {
   }
 
   void _onFirebaseAuthStateChanged(firebase_auth.User? firebaseUser) async {
-    if (_isCompletingGoogleSignIn) {
+    if (_isCompletingAuthBootstrap) {
       if (kDebugMode) {
-        print('DEBUG: ⏳ Google Sign-In in completamento, salto listener auth');
+        print('DEBUG: ⏳ Bootstrap auth in corso, salto listener auth');
       }
       return;
     }
@@ -823,7 +854,7 @@ class AuthService extends ChangeNotifier {
       } else if (firebaseUser != null) {
         // Evita ricaricamento se l'utente è lo stesso e abbiamo già i dati
         if (_currentUser?.id == firebaseUser.uid &&
-            _currentUser?.email == firebaseUser.email) {
+            _emailsMatchForAuth(firebaseUser, _currentUser)) {
           if (kDebugMode) {
             print(
                 'DEBUG: ℹ️ Utente già caricato, verifico listener profilo Firestore');
@@ -1006,69 +1037,71 @@ class AuthService extends ChangeNotifier {
         idToken: googleAuth.idToken,
       );
 
-      _isCompletingGoogleSignIn = true;
-      final userCredential =
-          await _firebaseAuth.signInWithCredential(credential);
+      _isCompletingAuthBootstrap = true;
+      try {
+        final userCredential =
+            await _firebaseAuth.signInWithCredential(credential);
 
-      if (userCredential.user != null) {
-        final firebaseUser = userCredential.user!;
-        final googleEmail = firebaseUser.email ?? googleUser.email;
-        final userDoc = await _firestore
-            .collection('users')
-            .doc(firebaseUser.uid)
-            .get(const GetOptions(source: Source.serverAndCache));
-        if (!userDoc.exists) {
-          final displayName = firebaseUser.displayName?.trim();
-          final name = displayName?.isNotEmpty == true
-              ? displayName!
-              : (googleUser.displayName?.trim().isNotEmpty == true
-                  ? googleUser.displayName!.trim()
-                  : 'Utente');
-          final user = User(
-            id: firebaseUser.uid,
-            name: name,
-            email: googleEmail,
-            username: '@${name.toLowerCase().replaceAll(' ', '.')}',
-            role: AppUserRole.free,
-            isBlocked: false,
-            acceptedTerms: true,
-            acceptedPrivacy: true,
-            acceptedMarketing: true,
-            createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
-          );
-          _currentUser = user;
-          await _saveUserLocally(user);
-          await _saveUserToFirestore(user);
+        if (userCredential.user != null) {
+          final firebaseUser = userCredential.user!;
+          final googleEmail = firebaseUser.email ?? googleUser.email;
+          final userDoc = await _firestore
+              .collection('users')
+              .doc(firebaseUser.uid)
+              .get(const GetOptions(source: Source.serverAndCache));
+          if (!userDoc.exists) {
+            final displayName = firebaseUser.displayName?.trim();
+            final name = displayName?.isNotEmpty == true
+                ? displayName!
+                : (googleUser.displayName?.trim().isNotEmpty == true
+                    ? googleUser.displayName!.trim()
+                    : 'Utente');
+            final user = User(
+              id: firebaseUser.uid,
+              name: name,
+              email: googleEmail,
+              username: '@${name.toLowerCase().replaceAll(' ', '.')}',
+              role: AppUserRole.free,
+              isBlocked: false,
+              acceptedTerms: true,
+              acceptedPrivacy: true,
+              acceptedMarketing: true,
+              createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
+            );
+            _currentUser = user;
+            await _saveUserLocally(user);
+            await _saveUserToFirestore(user);
+            scheduleSignupWelcome(name.split(' ').first);
+            notifyListeners();
+          }
+          await _loadUserData(firebaseUser);
           notifyListeners();
-        }
-        await _loadUserData(firebaseUser);
-        _isCompletingGoogleSignIn = false;
-        notifyListeners();
 
-        if (kDebugMode) {
-          print(
-              'DEBUG: ✔ Google Sign-In Firebase completato - Aspettando sincronizzazione...');
-        }
-        await _waitForUserSync(firebaseUser.email!);
+          if (kDebugMode) {
+            print(
+                'DEBUG: ✔ Google Sign-In Firebase completato - Aspettando sincronizzazione...');
+          }
+          await _waitForUserSync(firebaseUser.email!);
 
-        if (_currentUser?.isBlocked == true) {
-          final blockedReason = _currentUser?.blockedReason;
-          await logout();
-          return AuthResult(
-            success: false,
-            message: blockedReason?.isNotEmpty == true
-                ? 'Account bloccato: $blockedReason'
-                : 'Account bloccato. Contatta l\'amministratore.',
-          );
+          if (_currentUser?.isBlocked == true) {
+            final blockedReason = _currentUser?.blockedReason;
+            await logout();
+            return AuthResult(
+              success: false,
+              message: blockedReason?.isNotEmpty == true
+                  ? 'Account bloccato: $blockedReason'
+                  : 'Account bloccato. Contatta l\'amministratore.',
+            );
+          }
+
+          return AuthResult(success: true, user: _currentUser);
         }
 
-        return AuthResult(success: true, user: _currentUser);
+        return AuthResult(success: false, message: 'Errore Google Sign-In');
+      } finally {
+        _isCompletingAuthBootstrap = false;
       }
-
-      _isCompletingGoogleSignIn = false;
-      return AuthResult(success: false, message: 'Errore Google Sign-In');
     } on firebase_auth.FirebaseAuthException catch (e) {
-      _isCompletingGoogleSignIn = false;
       if (kDebugMode) print('ERRORE Google Sign-In Firebase: ${e.code} - $e');
       if (e.code == 'account-exists-with-different-credential') {
         _pendingGoogleCredential = e.credential;
@@ -1088,12 +1121,11 @@ class AuthService extends ChangeNotifier {
         message: _getFirebaseErrorMessage(e),
       );
     } catch (e) {
-      _isCompletingGoogleSignIn = false;
       if (kDebugMode) print('ERRORE Google Sign-In: $e');
       return AuthResult(
         success: false,
         message:
-            'Errore durante l\'autenticazione con Google. Verifica la connessione.',
+            'Errore durante l\'autenticazione con Google. Riprova.',
       );
     }
   }
@@ -1151,69 +1183,91 @@ class AuthService extends ChangeNotifier {
         accessToken: appleCredential.authorizationCode,
       );
 
-      final userCredential =
-          await _firebaseAuth.signInWithCredential(credential);
+      _isCompletingAuthBootstrap = true;
+      try {
+        final userCredential =
+            await _firebaseAuth.signInWithCredential(credential);
 
-      if (userCredential.user != null) {
-        final firebaseUser = userCredential.user!;
-        final userDoc = await _firestore
-            .collection('users')
-            .doc(firebaseUser.uid)
-            .get(const GetOptions(source: Source.serverAndCache));
+        if (userCredential.user != null) {
+          final firebaseUser = userCredential.user!;
+          final userDoc = await _firestore
+              .collection('users')
+              .doc(firebaseUser.uid)
+              .get(const GetOptions(source: Source.serverAndCache));
 
-        if (!userDoc.exists) {
-          final givenName = appleCredential.givenName?.trim() ?? '';
-          final familyName = appleCredential.familyName?.trim() ?? '';
-          final appleName = '$givenName $familyName'.trim();
-          final displayName = firebaseUser.displayName?.trim();
-          final email = firebaseUser.email?.trim().isNotEmpty == true
-              ? firebaseUser.email!.trim()
-              : (appleCredential.email?.trim() ?? '');
-          final name = appleName.isNotEmpty
-              ? appleName
-              : (displayName?.isNotEmpty == true ? displayName! : 'Utente');
+          if (!userDoc.exists) {
+            final givenName = appleCredential.givenName?.trim() ?? '';
+            final familyName = appleCredential.familyName?.trim() ?? '';
+            final appleName = '$givenName $familyName'.trim();
+            final displayName = firebaseUser.displayName?.trim();
+            final email = firebaseUser.email?.trim().isNotEmpty == true
+                ? firebaseUser.email!.trim()
+                : (appleCredential.email?.trim() ?? '');
+            final name = appleName.isNotEmpty
+                ? appleName
+                : (displayName?.isNotEmpty == true ? displayName! : 'Utente');
 
-          final user = User(
-            id: firebaseUser.uid,
-            name: name,
-            email: email,
-            username: '@${name.toLowerCase().replaceAll(' ', '.')}',
-            role: AppUserRole.free,
-            isBlocked: false,
-            acceptedTerms: true,
-            acceptedPrivacy: true,
-            acceptedMarketing: true,
-            createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
-          );
-          _currentUser = user;
-          await _saveUserLocally(user);
-          await _saveUserToFirestore(user);
+            final user = User(
+              id: firebaseUser.uid,
+              name: name,
+              email: email,
+              username: '@${name.toLowerCase().replaceAll(' ', '.')}',
+              role: AppUserRole.free,
+              isBlocked: false,
+              acceptedTerms: true,
+              acceptedPrivacy: true,
+              acceptedMarketing: true,
+              createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
+            );
+            _currentUser = user;
+            await _saveUserLocally(user);
+            await _saveUserToFirestore(user);
+            scheduleSignupWelcome(name.split(' ').first);
+            notifyListeners();
+          }
+
+          await _loadUserData(firebaseUser);
           notifyListeners();
+
+          final syncEmail =
+              (_currentUser?.email ?? firebaseUser.email ?? '').trim();
+          if (syncEmail.isNotEmpty) {
+            await _waitForUserSync(syncEmail);
+          } else if (_currentUser == null ||
+              _currentUser!.id != firebaseUser.uid) {
+            return AuthResult(
+              success: false,
+              message:
+                  'Accesso con Apple non completato. Riprova tra qualche secondo.',
+            );
+          }
+
+          if (_currentUser?.isBlocked == true) {
+            final blockedReason = _currentUser?.blockedReason;
+            await logout();
+            return AuthResult(
+              success: false,
+              message: blockedReason?.isNotEmpty == true
+                  ? 'Account bloccato: $blockedReason'
+                  : 'Account bloccato. Contatta l\'amministratore.',
+            );
+          }
+
+          if (_currentUser == null || _firebaseAuth.currentUser == null) {
+            return AuthResult(
+              success: false,
+              message:
+                  'Accesso con Apple non completato. Riprova tra qualche secondo.',
+            );
+          }
+
+          return AuthResult(success: true, user: _currentUser);
         }
 
-        await _loadUserData(firebaseUser);
-        notifyListeners();
-
-        final email = firebaseUser.email ?? _currentUser?.email;
-        if (email != null && email.trim().isNotEmpty) {
-          await _waitForUserSync(email);
-        }
-
-        if (_currentUser?.isBlocked == true) {
-          final blockedReason = _currentUser?.blockedReason;
-          await logout();
-          return AuthResult(
-            success: false,
-            message: blockedReason?.isNotEmpty == true
-                ? 'Account bloccato: $blockedReason'
-                : 'Account bloccato. Contatta l\'amministratore.',
-          );
-        }
-
-        return AuthResult(success: true, user: _currentUser);
+        return AuthResult(success: false, message: 'Errore Accedi con Apple');
+      } finally {
+        _isCompletingAuthBootstrap = false;
       }
-
-      return AuthResult(success: false, message: 'Errore Accedi con Apple');
     } on SignInWithAppleAuthorizationException catch (e) {
       if (e.code == AuthorizationErrorCode.canceled) {
         return AuthResult(success: false, message: 'Login annullato');
@@ -1233,8 +1287,7 @@ class AuthService extends ChangeNotifier {
       if (kDebugMode) print('ERRORE Apple Sign-In: $e');
       return AuthResult(
         success: false,
-        message:
-            'Errore durante l\'autenticazione con Apple. Verifica la connessione.',
+        message: 'Errore durante l\'autenticazione con Apple. Riprova.',
       );
     }
   }
@@ -1252,45 +1305,57 @@ class AuthService extends ChangeNotifier {
     try {
       if (kDebugMode) print('DEBUG: 🔥 Registrazione nuovo utente: $email');
 
-      final credential = await _firebaseAuth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      if (credential.user != null) {
-        await credential.user!.updateDisplayName(name);
-
-        final user = User(
-          id: credential.user!.uid,
-          name: name,
+      _isCompletingAuthBootstrap = true;
+      try {
+        final credential = await _firebaseAuth.createUserWithEmailAndPassword(
           email: email,
-          username: '@${name.toLowerCase().replaceAll(' ', '.')}',
-          role: AppUserRole.free,
-          acceptedTerms: acceptedTerms,
-          acceptedPrivacy: acceptedPrivacy,
-          acceptedMarketing: acceptedMarketing,
-          createdAt: DateTime.now(),
-          birthDate: birthDate,
-          gender: gender,
+          password: password,
         );
 
-        _currentUser = user;
-        await _saveUserLocally(user);
+        if (credential.user != null) {
+          await credential.user!.updateDisplayName(name);
 
-        // ✅ NUOVO: Salva su Firestore alla registrazione
-        await _saveUserToFirestore(user);
+          final user = User(
+            id: credential.user!.uid,
+            name: name,
+            email: email,
+            username: '@${name.toLowerCase().replaceAll(' ', '.')}',
+            role: AppUserRole.free,
+            acceptedTerms: acceptedTerms,
+            acceptedPrivacy: acceptedPrivacy,
+            acceptedMarketing: acceptedMarketing,
+            createdAt: DateTime.now(),
+            birthDate: birthDate,
+            gender: gender,
+          );
 
-        if (kDebugMode) {
-          print(
-              'DEBUG: ✔ Registrazione completata - Aspettando sincronizzazione...');
+          _currentUser = user;
+          await _saveUserLocally(user);
+          await _saveUserToFirestore(user);
+          scheduleSignupWelcome(name.split(' ').first);
+
+          if (kDebugMode) {
+            print(
+                'DEBUG: ✔ Registrazione completata - Aspettando sincronizzazione...');
+          }
+          await _waitForUserSync(email);
+
+          if (_currentUser == null || _firebaseAuth.currentUser == null) {
+            return AuthResult(
+              success: false,
+              message:
+                  'Registrazione interrotta durante la sincronizzazione. Riprova.',
+            );
+          }
+
+          return AuthResult(success: true, user: _currentUser);
         }
-        await _waitForUserSync(email);
 
-        return AuthResult(success: true, user: _currentUser);
+        return AuthResult(
+            success: false, message: 'Errore durante la registrazione');
+      } finally {
+        _isCompletingAuthBootstrap = false;
       }
-
-      return AuthResult(
-          success: false, message: 'Errore durante la registrazione');
     } on firebase_auth.FirebaseAuthException catch (e) {
       String message = _getFirebaseErrorMessage(e);
       if (kDebugMode)
@@ -1300,7 +1365,7 @@ class AuthService extends ChangeNotifier {
       if (kDebugMode) print('ERRORE registrazione: $e');
       return AuthResult(
         success: false,
-        message: 'Errore durante la registrazione. Verifica la connessione.',
+        message: 'Errore durante la registrazione. Riprova.',
       );
     }
   }
@@ -2129,10 +2194,15 @@ class AuthService extends ChangeNotifier {
       if (!firestoreDoc.exists || firestoreData == null) {
         // Il documento non esiste secondo il server → account cancellato
         // oppure profilo appena creato non ancora visibile (race post-registrazione).
+        final maxRetries = (_isCompletingAuthBootstrap ||
+                _isRecentlyCreatedFirebaseUser(firebaseUser))
+            ? 8
+            : 3;
+
         if (_currentUser != null &&
             _currentUser!.id == firebaseUser.uid &&
             fromServer) {
-          for (var attempt = 0; attempt < 3; attempt++) {
+          for (var attempt = 0; attempt < maxRetries; attempt++) {
             await Future.delayed(Duration(milliseconds: 400 * (attempt + 1)));
             final retry = await _firestore
                 .collection('users')
@@ -2167,6 +2237,25 @@ class AuthService extends ChangeNotifier {
             return;
           }
         }
+
+        if (_isCompletingAuthBootstrap ||
+            _isRecentlyCreatedFirebaseUser(firebaseUser) ||
+            (_currentUser != null && _currentUser!.id == firebaseUser.uid)) {
+          if (_currentUser == null || _currentUser!.id != firebaseUser.uid) {
+            _currentUser = _userFromFirebase(firebaseUser);
+            await _saveUserLocally(_currentUser!);
+          } else {
+            unawaited(_saveUserToFirestore(_currentUser!));
+          }
+          _ensureUserProfileSync(firebaseUser.uid);
+          notifyListeners();
+          if (kDebugMode) {
+            print(
+                'DEBUG: ⏳ Profilo Firestore non ancora visibile, mantengo sessione attiva');
+          }
+          return;
+        }
+
         print(
             'DEBUG: ⚠️ Documento utente mancante su Firestore: sessione locale eliminata');
         _currentUser = null;
@@ -2209,7 +2298,17 @@ class AuthService extends ChangeNotifier {
           'DEBUG: ✅ Dati utente caricati/sincronizzati da Firestore (fromServer=$fromServer)');
 
       if (_currentUser?.id != firebaseUser.uid ||
-          _normalizeEmail(_currentUser?.email ?? '') != firebaseEmail) {
+          !_emailsMatchForAuth(firebaseUser, _currentUser)) {
+        if (kDebugMode) {
+          print(
+              'DEBUG: ⚠️ Email auth incoerente ignorata (uid=${firebaseUser.uid}, '
+              'firebase=${firebaseUser.email}, local=${_currentUser?.email})');
+        }
+        if (_normalizeEmail(firebaseUser.email ?? '').isEmpty &&
+            _normalizeEmail(_currentUser?.email ?? '').isNotEmpty) {
+          _ensureUserProfileSync(firebaseUser.uid);
+          return;
+        }
         await _firebaseAuth.signOut();
         try {
           await _googleSignIn.signOut();

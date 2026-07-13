@@ -731,7 +731,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         // AuthWrapper mostrerà automaticamente la Home (vedi commento sopra).
       } else {
         _showErrorDialog(
-            'Errore durante l\'autenticazione con Apple. Verifica la connessione.');
+            'Errore durante l\'autenticazione con Apple. Riprova.');
       }
     } finally {
       if (mounted) {

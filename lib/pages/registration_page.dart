@@ -6,8 +6,6 @@ import '../pages/privacy_policy_page.dart';
 import '../pages/terms_conditions_page.dart';
 import '../pages/marketing_communications_page.dart';
 import '../services/auth_service.dart';
-import '../widgets/first_launch_tutorial_dialog.dart';
-import '../main.dart'; // Aggiunto import per WebHomePage
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -1105,7 +1103,14 @@ class _RegistrationPageState extends State<RegistrationPage> {
     );
   }
 
-  // GOOGLE SIGN-UP FORZATO - NAVIGAZIONE DOPO SINCRONIZZAZIONE COMPLETA
+  void _completeSignupSuccess(String userName) {
+    AuthService().scheduleSignupWelcome(userName);
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  // GOOGLE SIGN-UP — AuthWrapper mostra la Home dopo il pop
   Future<void> _signUpWithGoogle() async {
     setState(() => _isLoading = true);
 
@@ -1114,37 +1119,13 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
       if (result.success && result.user != null) {
         final userName = result.user!.name.split(' ').first;
-
-        // NAVIGAZIONE FORZATA IMMEDIATA - LA SINCRONIZZAZIONE È GIÀ COMPLETA
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-                builder: (context) => WebHomePage(
-                      isDarkTheme: widget.isDarkTheme,
-                      marketingProfileEnabled: false,
-                      marketingCommsEnabled: false,
-                      onThemeChanged: widget.onThemeChanged,
-                      onMarketingProfileChanged: (value) {},
-                      onMarketingCommsChanged: (value) {},
-                      onSharedContent: (content) {},
-                    )),
-            (route) => false,
-          );
-
-          // Mostra popup di benvenuto dopo la navigazione
-          Future.delayed(Duration(milliseconds: 300), () {
-            if (mounted) {
-              _showWelcomeDialog(userName, isNewUser: true);
-            }
-          });
-        }
+        _completeSignupSuccess(userName);
       } else {
         _showErrorDialog(
             result.message ?? 'Errore durante la registrazione con Google');
       }
     } catch (e) {
-      _showErrorDialog(
-          'Errore durante la registrazione con Google. Verifica la connessione.');
+      _showErrorDialog('Errore durante la registrazione con Google. Riprova.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -1160,35 +1141,13 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
       if (result.success && result.user != null) {
         final userName = result.user!.name.split(' ').first;
-
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-                builder: (context) => WebHomePage(
-                      isDarkTheme: widget.isDarkTheme,
-                      marketingProfileEnabled: false,
-                      marketingCommsEnabled: false,
-                      onThemeChanged: widget.onThemeChanged,
-                      onMarketingProfileChanged: (value) {},
-                      onMarketingCommsChanged: (value) {},
-                      onSharedContent: (content) {},
-                    )),
-            (route) => false,
-          );
-
-          Future.delayed(Duration(milliseconds: 300), () {
-            if (mounted) {
-              _showWelcomeDialog(userName, isNewUser: true);
-            }
-          });
-        }
+        _completeSignupSuccess(userName);
       } else {
         _showErrorDialog(
             result.message ?? 'Errore durante la registrazione con Apple');
       }
     } catch (e) {
-      _showErrorDialog(
-          'Errore durante la registrazione con Apple. Verifica la connessione.');
+      _showErrorDialog('Errore durante la registrazione con Apple. Riprova.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -1196,7 +1155,6 @@ class _RegistrationPageState extends State<RegistrationPage> {
     }
   }
 
-  // REGISTRAZIONE EMAIL FORZATA - NAVIGAZIONE DOPO SINCRONIZZAZIONE COMPLETA
   Future<void> _signUpWithEmail() async {
     if (!_formKey.currentState!.validate()) return;
     if (!_acceptedPrivacy || !_acceptedTerms) {
@@ -1221,70 +1179,17 @@ class _RegistrationPageState extends State<RegistrationPage> {
 
       if (result.success && result.user != null) {
         final userName = result.user!.name.split(' ').first;
-
-        // NAVIGAZIONE FORZATA IMMEDIATA - LA SINCRONIZZAZIONE È GIÀ COMPLETA
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(
-                builder: (context) => WebHomePage(
-                      isDarkTheme: widget.isDarkTheme,
-                      marketingProfileEnabled: !_optOutMarketing,
-                      marketingCommsEnabled: !_optOutMarketing,
-                      onThemeChanged: widget.onThemeChanged,
-                      onMarketingProfileChanged: (value) {},
-                      onMarketingCommsChanged: (value) {},
-                      onSharedContent: (content) {},
-                    )),
-            (route) => false,
-          );
-
-          // Mostra popup di benvenuto dopo la navigazione
-          Future.delayed(Duration(milliseconds: 300), () {
-            if (mounted) {
-              _showWelcomeDialog(userName, isNewUser: true);
-            }
-          });
-        }
+        _completeSignupSuccess(userName);
       } else {
         _showErrorDialog(result.message ?? 'Errore durante la registrazione');
       }
     } catch (e) {
-      _showErrorDialog(
-          'Errore durante la registrazione. Verifica la connessione.');
+      _showErrorDialog('Errore durante la registrazione. Riprova.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
-  }
-
-  // POPUP DI BENVENUTO PER NUOVI UTENTI
-  void _showWelcomeDialog(String userName, {bool isNewUser = false}) {
-    final welcomeFuture = SaveInFirstLaunchTutorial.show(
-      context,
-      markSeenOnClose: true,
-      welcomeUserName: isNewUser ? userName : null,
-    );
-    SaveInFirstLaunchTutorial.trackExternalWelcome(welcomeFuture);
-  }
-
-  // 🔥 CORRETTO: Solo SnackBar, no navigazione
-  void _showSuccessSnackBar(String message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.white, size: 20),
-            SizedBox(width: 8),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 3),
-      ),
-    );
   }
 
   void _showErrorDialog(String message) {

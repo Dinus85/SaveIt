@@ -1574,6 +1574,18 @@ class _WebHomePageState extends State<WebHomePage>
     await Future<void>.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
 
+    final pendingWelcomeName = AuthService().consumePendingSignupWelcomeName();
+    if (pendingWelcomeName != null) {
+      final welcomeFuture = SaveInFirstLaunchTutorial.show(
+        context,
+        markSeenOnClose: true,
+        welcomeUserName: pendingWelcomeName,
+      );
+      SaveInFirstLaunchTutorial.trackExternalWelcome(welcomeFuture);
+      await welcomeFuture;
+      if (!mounted) return;
+    }
+
     final showedWelcomeTutorial =
         await SaveInFirstLaunchTutorial.showIfNeeded(context);
     if (!mounted) return;
