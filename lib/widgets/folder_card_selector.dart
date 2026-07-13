@@ -12,6 +12,9 @@ class FolderCardSelector extends StatefulWidget {
   final Function(String, String?)? onTemporaryFolderCreated;
   final bool isDarkTheme;
   final String? initialSelection;
+  /// Mostra banner/testi con conteggio limiti cartelle (livelli Free/Premium).
+  /// Disattivato durante l'import post: l'utente sceglie solo la destinazione.
+  final bool showFolderLimitInfo;
 
   const FolderCardSelector({
     Key? key,
@@ -20,6 +23,7 @@ class FolderCardSelector extends StatefulWidget {
     this.onTemporaryFolderCreated,
     required this.isDarkTheme,
     this.initialSelection,
+    this.showFolderLimitInfo = true,
   }) : super(key: key);
 
   @override
@@ -208,7 +212,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         }
       }
 
-      final newSelectedPath = newPath.join(' › ');
+      final newSelectedPath = _buildFolderPath(folder);
 
       setState(() {
         _currentPath = newPath;
@@ -223,13 +227,12 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
       if (!newPath.contains(folder.name)) {
         newPath.add(folder.name);
       }
-      final newSelectedPath = newPath.join(' › ');
 
       setState(() {
         _currentPath = newPath;
         _currentFolders =
             _combineChildrenWithTemporary(folder.children, newPath);
-        _selectedFolderPath = newSelectedPath;
+        _selectedFolderPath = _buildFolderPath(folder);
         _searchController.clear();
         _isSearching = false;
       });
@@ -786,7 +789,10 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
           setState(() {
             _selectedFolderPath = '';
           });
-        } else if (isLockedForFree) {
+          return;
+        }
+
+        if (isLockedForFree) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -797,9 +803,18 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
               duration: Duration(seconds: 3),
             ),
           );
-        } else {
-          await _navigateToFolder(folder);
+          return;
         }
+
+        if (hasChildren) {
+          await _navigateToFolder(folder);
+          return;
+        }
+
+        final folderPath = _buildFolderPath(folder);
+        setState(() {
+          _selectedFolderPath = folderPath;
+        });
       },
       onLongPress: () {
         if (folder.isSpecial) {
@@ -1257,11 +1272,12 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
                 color: isAtMaxLevel ? Colors.grey.shade600 : Colors.white,
               ),
               label: Text(
-                isAtMaxLevel
+                isAtMaxLevel && widget.showFolderLimitInfo
                     ? 'Limite 5 livelli raggiunto'
                     : 'Crea Nuova Cartella',
                 style: TextStyle(
-                  fontSize: isAtMaxLevel ? 14 : 16,
+                  fontSize:
+                      isAtMaxLevel && widget.showFolderLimitInfo ? 14 : 16,
                   fontWeight: FontWeight.w600,
                   color: isAtMaxLevel ? Colors.grey.shade600 : Colors.white,
                 ),
@@ -1281,7 +1297,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
               ),
             ),
           ),
-          if (isAtMaxLevel) ...[
+          if (isAtMaxLevel && widget.showFolderLimitInfo) ...[
             SizedBox(height: 8),
             Container(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),

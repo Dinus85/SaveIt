@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="SaveIn! — salva, organizza e ritrova link da social e web con cartelle, tag e condivisione.">
+  <title>SaveIn! — Salva e organizza i tuoi contenuti</title>
+  <style>
+    :root {
+      --brand: #1a1a2e;
+      --brand-light: #e0f2fe;
+      --accent: #67bae6;
+      --text: #333333;
+      --muted: #555555;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background: linear-gradient(180deg, #eef0f5 0%, #ffffff 280px);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 28px rgba(26, 26, 46, 0.1);
+      border: 1px solid rgba(26, 26, 46, 0.08);
+      overflow: hidden;
+    }
+
+    .header {
+      background: var(--brand);
+      color: #fff;
+      padding: 32px 28px 28px;
+      border-bottom: 4px solid var(--accent);
+    }
+
+    .header h1 {
+      margin: 0 0 10px;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .header .tagline {
+      margin: 0;
+      font-size: 1.1rem;
+      opacity: 0.95;
+    }
+
+    .content {
+      padding: 28px;
+    }
+
+    .intro {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 1.02rem;
+    }
+
+    .features {
+      display: grid;
+      gap: 14px;
+      margin: 0 0 28px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .features li {
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: var(--brand-light);
+      border: 1px solid rgba(103, 186, 230, 0.25);
+    }
+
+    .features strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--brand);
+      font-size: 1rem;
+    }
+
+    .features span {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 14px 22px;
+      border-radius: 12px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(26, 26, 46, 0.12);
+    }
+
+    .btn-primary {
+      background: var(--brand);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: #fff;
+      color: var(--brand);
+      border: 2px solid rgba(26, 26, 46, 0.18);
+    }
+
+    .note {
+      margin: 0;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: #f0f8ff;
+      border: 1px solid rgba(103, 186, 230, 0.35);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .footer {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .footer a {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <h1>SaveIn!</h1>
+        <p class="tagline">Salva, organizza e ritrova tutto ciò che ti interessa.</p>
+      </div>
+
+      <div class="content">
+        <p class="intro">
+          SaveIn! ti aiuta a conservare link da social e web, organizzarli in cartelle,
+          trovarli con tag e ricerca, condividerli con chi vuoi e non perdere mai più
+          un contenuto importante.
+        </p>
+
+        <ul class="features">
+          <li>
+            <strong>Salva da ovunque</strong>
+            <span>Importa link condividendoli direttamente da browser, Instagram, TikTok, YouTube e altri social.</span>
+          </li>
+          <li>
+            <strong>Cartelle intelligenti</strong>
+            <span>Organizza post e contenuti in cartelle e sottocartelle, fino a 5 livelli di profondità.</span>
+          </li>
+          <li>
+            <strong>Tag e ricerca</strong>
+            <span>Aggiungi hashtag ai post e ritrova tutto in pochi secondi con la ricerca integrata.</span>
+          </li>
+          <li>
+            <strong>Condividi facilmente</strong>
+            <span>Condividi singoli post o intere cartelle con link pubblici su savein.eu.</span>
+          </li>
+          <li>
+            <strong>Reminder</strong>
+            <span>Imposta promemoria su post e cartelle per non dimenticare ciò che conta.</span>
+          </li>
+        </ul>
+
+        <div class="cta-row">
+          <a
+            class="btn btn-primary"
+            href="https://play.google.com/store/apps/details?id=eu.savein.app"
+            rel="noopener noreferrer"
+          >
+            Scarica su Google Play
+          </a>
+          <a class="btn btn-secondary" href="/support.html">
+            Assistenza
+          </a>
+        </div>
+
+        <p class="note">
+          SaveIn! è disponibile su Android. La versione iOS è in fase di pubblicazione su App Store.
+        </p>
+      </div>
+    </div>
+
+    <p class="footer">
+      © SaveIn! · <a href="/">Torna al sito</a> · <a href="/support.html">Contatti</a> · <a href="/privacy">Privacy</a>
+    </p>
+  </div>
+</body>
+</html>

@@ -525,9 +525,9 @@ class SharingService {
       });
     }
 
-    // STEP 2: Carica metadata in background (non blocking) - ORA INCLUDE HASHTAG
+    // STEP 2: Metadati — riusa global_posts se già importato da altro utente
     Future<UrlMetadata> metadataFuture =
-        UrlMetadataService.extractMetadata(sharedContent.url);
+        UrlMetadataService.resolveImportMetadata(sharedContent.url);
 
     // STEP 3: Mostra dialog IMMEDIATAMENTE con dati di base
     return showDialog<Map<String, String>?>(
@@ -904,7 +904,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
 
       final fullPath = (parentPath?.isEmpty ?? true)
           ? folderName
-          : '$parentPath Ã¢â‚¬Âº $folderName';
+          : '$parentPath › $folderName';
 
       if (!_foldersToCreate.contains(fullPath)) {
         _foldersToCreate.add(fullPath);
@@ -923,7 +923,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
       }
 
       final newPath = parentPath != null && parentPath.isNotEmpty
-          ? '$parentPath Ã¢â‚¬Âº $folderName'
+          ? '$parentPath › $folderName'
           : folderName;
 
       final temporaryFolder = {
@@ -1122,12 +1122,12 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (widget.metadata.imageUrl != null &&
+                    if (widget.metadata.displayImageUrl != null &&
                         !widget.isLoadingMetadata) ...[
                       ClipRRect(
                         borderRadius: BorderRadius.circular(6),
                         child: Image.network(
-                          widget.metadata.imageUrl!,
+                          widget.metadata.displayImageUrl!,
                           height: 120,
                           width: double.infinity,
                           fit: BoxFit.cover,
@@ -1607,6 +1607,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
       builder: (context) => FolderCardSelector(
         isDarkTheme: widget.isDarkTheme,
         initialSelection: _selectedFolderPath,
+        showFolderLimitInfo: false,
         onFolderSelected: (String selectedPath) {
           setState(() {
             _selectedFolderPath = selectedPath;
@@ -1840,12 +1841,13 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
 
       print('DEBUG: URL finale che verrà salvato: $finalUrl');
 
-      final savedToFolder =
+      final saveResult =
           await folderService.saveSharedPostWithOptionalFolder(
         url: finalUrl,
         title: _titleController.text.trim(),
         description: widget.metadata.description ?? '',
         imageUrl: widget.metadata.imageUrl,
+        previewStorageUrl: widget.metadata.previewStorageUrl,
         creatorName: widget.metadata.creatorName,
         creatorUsername: widget.metadata.creatorUsername,
         tags: tags,
@@ -1854,6 +1856,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
             _selectedFolderPath!.isEmpty ? null : _selectedFolderPath,
       );
 
+      final savedToFolder = saveResult.folderDisplayName;
       print('DEBUG: Post salvato con successo in: $savedToFolder');
       print('DEBUG: Con ${tags.length} tag: ${tags.join(", ")}');
       await _adService.recordSuccessfulImport();
@@ -1865,7 +1868,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
         } catch (_) {}
       }
 
-      final postId = 'post_${DateTime.now().millisecondsSinceEpoch}';
+      final postId = saveResult.savedPost.id;
 
       final Map<String, String> result = {
         'folderPath':

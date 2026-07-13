@@ -2678,7 +2678,12 @@ class _PlanComparisonSlidesDialogState
                     itemCount: _slides.length,
                     onPageChanged: (value) => setState(() => _index = value),
                     itemBuilder: (context, index) {
-                      return _PlanComparisonSlide(slide: _slides[index]);
+                      return _PlanComparisonSlide(
+                        slide: _slides[index],
+                        footer: index == _slides.length - 1
+                            ? _buildPlanComparisonPurchaseSection()
+                            : null,
+                      );
                     },
                   ),
                 ),
@@ -2686,67 +2691,6 @@ class _PlanComparisonSlidesDialogState
                   padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                   child: Column(
                     children: [
-                      if (_index == _slides.length - 1 &&
-                          BillingService.isSupportedPlatform) ...[
-                        if (_loadingProduct)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 8),
-                            child: SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        else if (_product != null) ...[
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              onPressed: (_purchasing || _restoring)
-                                  ? null
-                                  : _purchasePremium,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF2563EB),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                              child: Text(
-                                _purchasing
-                                    ? 'Acquisto in corso...'
-                                    : 'Passa a Premium (${_product!.price}/mese)',
-                                style: const TextStyle(fontWeight: FontWeight.w900),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          _SubscriptionDisclosure(
-                            price: _product!.price,
-                            onOpenPrivacy: () =>
-                                _openLegalUrl(_privacyPolicyUri),
-                            onOpenTerms: () => _openLegalUrl(_termsUri),
-                          ),
-                          const SizedBox(height: 6),
-                          TextButton(
-                            onPressed: (_purchasing || _restoring)
-                                ? null
-                                : _restorePremium,
-                            child: Text(
-                              _restoring
-                                  ? 'Ripristino...'
-                                  : 'Ripristina acquisti',
-                            ),
-                          ),
-                        ] else
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Text(
-                              'Abbonamento non ancora disponibile su questo store.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.grey.shade700,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                      ],
                       Row(
                         children: [
                           IconButton(
@@ -2795,6 +2739,73 @@ class _PlanComparisonSlidesDialogState
           ),
         ),
       ),
+    );
+  }
+
+  Widget? _buildPlanComparisonPurchaseSection() {
+    if (!BillingService.isSupportedPlatform) return null;
+
+    if (_loadingProduct) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 8, bottom: 8),
+        child: SizedBox(
+          height: 24,
+          width: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
+    if (_product == null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 8),
+        child: Text(
+          'Abbonamento non ancora disponibile su questo store.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.grey.shade700,
+            fontSize: 13,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed:
+                (_purchasing || _restoring) ? null : _purchasePremium,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: Text(
+              _purchasing
+                  ? 'Acquisto in corso...'
+                  : 'Passa a Premium (${_product!.price}/mese)',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _SubscriptionDisclosure(
+          price: _product!.price,
+          onOpenPrivacy: () => _openLegalUrl(_privacyPolicyUri),
+          onOpenTerms: () => _openLegalUrl(_termsUri),
+        ),
+        const SizedBox(height: 6),
+        TextButton(
+          onPressed:
+              (_purchasing || _restoring) ? null : _restorePremium,
+          child: Text(
+            _restoring ? 'Ripristino...' : 'Ripristina acquisti',
+          ),
+        ),
+      ],
     );
   }
 
@@ -3100,8 +3111,12 @@ class _SubscriptionDisclosure extends StatelessWidget {
 
 class _PlanComparisonSlide extends StatelessWidget {
   final _PlanSlideData slide;
+  final Widget? footer;
 
-  const _PlanComparisonSlide({required this.slide});
+  const _PlanComparisonSlide({
+    required this.slide,
+    this.footer,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3169,6 +3184,7 @@ class _PlanComparisonSlide extends StatelessWidget {
             text: slide.premiumText,
             color: slide.color,
           ),
+          if (footer != null) footer!,
         ],
       ),
     );

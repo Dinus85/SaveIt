@@ -109,11 +109,20 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
     _folderService.trackFolderOpened(_currentFolder);
 
-    // 🔥 FIX FINALE: Disabilito il callback automatico per evitare aggiornamenti non richiesti
-    // L'aggiornamento avviene SOLO con pull-to-refresh manuale
-    _folderService.setOnDataChangedCallback(null);
+    // Dopo import: aggiorna la lista quando arrivano anteprima/metadati in background.
+    if (widget.highlightPostId != null) {
+      _folderService.setOnDataChangedCallback(_updateUISafely);
+      _firstRefreshTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted) _loadPosts();
+      });
+      _secondRefreshTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted) _loadPosts();
+      });
+    } else {
+      // L'aggiornamento avviene SOLO con pull-to-refresh manuale
+      _folderService.setOnDataChangedCallback(null);
+    }
 
-    // 🔥 FIX: Carica i post DOPO aver impostato il callback, assicurando la sync
     _loadPostsEnsuringSync();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -205,6 +214,9 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       if (oldList[i].id != newList[i].id) return false;
       if (oldList[i].title != newList[i].title) return false;
       if (oldList[i].imageUrl != newList[i].imageUrl) return false;
+      if (oldList[i].previewStorageUrl != newList[i].previewStorageUrl) {
+        return false;
+      }
     }
     return true;
   }

@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart';
 import 'package:savein/models.dart';
+import 'package:savein/services/global_post_lookup_service.dart';
 
 class UrlMetadataService {
   static const int _timeoutSeconds = 10;
@@ -114,6 +115,25 @@ class UrlMetadataService {
 
       return _fallbackMetadata(url);
     }
+  }
+
+  /// Metadati per import: prima controlla `global_posts`, poi fetch social/web.
+  static Future<UrlMetadata> resolveImportMetadata(String url) async {
+    var normalizedUrl = url.trim();
+    if (!normalizedUrl.startsWith('http://') &&
+        !normalizedUrl.startsWith('https://')) {
+      normalizedUrl = 'https://$normalizedUrl';
+    }
+
+    final lookup =
+        await GlobalPostLookupService.instance.lookupByUrl(normalizedUrl);
+    if (lookup.found && lookup.isUsableForImport) {
+      print(
+          'DEBUG: Metadati da DB comune global_posts (riuso, saveCount: ${lookup.saveCount})');
+      return lookup.toUrlMetadata(fallbackUrl: normalizedUrl);
+    }
+
+    return extractMetadata(normalizedUrl);
   }
 
   static UrlMetadata _parseHtmlDocument(Document document, String url) {

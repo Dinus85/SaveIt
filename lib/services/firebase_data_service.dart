@@ -64,12 +64,14 @@ class _GlobalPostResult {
   final String? urlHash;
   final String? normalizedUrl;
   final _GlobalPostCanonicalData canonical;
+  final bool reused;
 
   const _GlobalPostResult({
     required this.globalPostId,
     required this.urlHash,
     required this.normalizedUrl,
     required this.canonical,
+    this.reused = false,
   });
 }
 
@@ -707,6 +709,7 @@ class FirebaseDataService {
       urlHash: data['urlHash']?.toString(),
       normalizedUrl: data['normalizedUrl']?.toString(),
       canonical: _GlobalPostCanonicalData.fromMap(canonical),
+      reused: data['reused'] == true,
     );
   }
 

@@ -2819,6 +2819,7 @@ const globalPostPayload = (source, ownerId, normalizedUrl, urlHash) => ({
   previewStorageUrl: sharedPreviewStorageUrl(source.previewStorageUrl),
   creatorName: source.creatorName || null,
   creatorUsername: source.creatorUsername || null,
+  metadataProvider: (source.metadataProvider || "client_scrape").toString(),
   firstOwnerId: ownerId || null,
   createdAt: admin.firestore.FieldValue.serverTimestamp(),
   updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2892,6 +2893,44 @@ const maybeEnsureGlobalPost = async ({source, ownerId}) => {
   const safeSource = source || {};
   if (!normalizePostUrlForHash(safeSource.url)) return null;
   return ensureGlobalPost({source, ownerId});
+};
+
+const canonicalFromGlobalDoc = (existing, fallbackUrl) => ({
+  url: existing.url || fallbackUrl || "",
+  title: existing.title || "Post salvato",
+  description: existing.description || "",
+  imageUrl: existing.imageUrl || null,
+  previewStorageUrl: existing.previewStorageUrl || null,
+  creatorName: existing.creatorName || null,
+  creatorUsername: existing.creatorUsername || null,
+});
+
+const lookupGlobalPostByUrl = async (rawUrl) => {
+  const normalizedUrl = normalizePostUrlForHash(rawUrl);
+  if (!normalizedUrl) {
+    return {found: false, reused: false};
+  }
+  const urlHash = postUrlHash(normalizedUrl);
+  const ref = db.collection("global_posts").doc(urlHash);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return {
+      found: false,
+      reused: false,
+      urlHash,
+      normalizedUrl,
+    };
+  }
+  const existing = snap.data() || {};
+  return {
+    found: true,
+    reused: true,
+    globalPostId: ref.id,
+    urlHash,
+    normalizedUrl,
+    saveCount: existing.saveCount || 1,
+    canonical: canonicalFromGlobalDoc(existing, normalizedUrl),
+  };
 };
 
 const createBatchWriter = () => {
@@ -3334,6 +3373,31 @@ exports.ensureGlobalPost = onCall(
         ownerId: request.auth.uid,
       });
 
+      return {
+        ok: true,
+        ...result,
+      };
+    }
+);
+
+exports.getGlobalPostByUrl = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 15,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+
+      const data = request.data || {};
+      const url = (data.url || "").toString().trim();
+      if (!url) {
+        throw new HttpsError("invalid-argument", "URL mancante");
+      }
+
+      const result = await lookupGlobalPostByUrl(url);
       return {
         ok: true,
         ...result,

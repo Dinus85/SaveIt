@@ -343,6 +343,19 @@ mixin FolderServiceSync on FolderServiceBase {
       List<SavedPost> realPosts, List<Folder> realFolders) async {
     if (kDebugMode) print('DEBUG: Convertendo ${realPosts.length} post...');
 
+    final existingPreviewFields = <String, ({String? imageUrl, String? previewStorageUrl})>{};
+    for (final post in allPosts) {
+      final imageUrl = post.imageUrl?.trim();
+      final previewStorageUrl = post.previewStorageUrl?.trim();
+      if (imageUrl?.isNotEmpty == true ||
+          previewStorageUrl?.isNotEmpty == true) {
+        existingPreviewFields[post.id] = (
+          imageUrl: imageUrl,
+          previewStorageUrl: previewStorageUrl,
+        );
+      }
+    }
+
     allPosts.clear();
 
     // Map per trovare velocemente MockFolder da Folder.id
@@ -397,6 +410,15 @@ mixin FolderServiceSync on FolderServiceBase {
         }
       }
 
+      final preservedPreview = existingPreviewFields[realPost.id];
+      final resolvedImageUrl = realPost.imageUrl?.trim().isNotEmpty == true
+          ? realPost.imageUrl
+          : preservedPreview?.imageUrl;
+      final resolvedPreviewStorageUrl =
+          realPost.previewStorageUrl?.trim().isNotEmpty == true
+              ? realPost.previewStorageUrl
+              : preservedPreview?.previewStorageUrl;
+
       final mockPost = MockPost(
         id: realPost.id,
         title: realPost.title,
@@ -405,10 +427,10 @@ mixin FolderServiceSync on FolderServiceBase {
         savedDate: realPost.createdAt,
         sourceFolder: sourceFolder,
         tags: List.from(realPost.tags),
-        imageUrl: realPost.imageUrl,
+        imageUrl: resolvedImageUrl,
         creatorName: realPost.creatorName,
         creatorUsername: realPost.creatorUsername,
-        previewStorageUrl: realPost.previewStorageUrl,
+        previewStorageUrl: resolvedPreviewStorageUrl,
         isShared: realPost.isShared, // 🆕 NUOVO
       );
 
@@ -419,7 +441,68 @@ mixin FolderServiceSync on FolderServiceBase {
       print('DEBUG: Conversione post completata - ${allPosts.length} post');
   }
 
-  /// Helper per trovare l'ID reale di un MockFolder
+  /// Inserisce o aggiorna un post in memoria subito dopo il salvataggio.
+  void upsertMockPostFromSavedPost(
+    SavedPost savedPost, {
+    MockFolder? sourceFolder,
+  }) {
+    MockFolder? resolvedFolder = sourceFolder;
+
+    if (resolvedFolder == null && savedPost.folderId.isNotEmpty) {
+      for (final folder in folders) {
+        if (folder.isSpecial) continue;
+        void walk(MockFolder current) {
+          if (current.id == savedPost.folderId) {
+            resolvedFolder = current;
+            return;
+          }
+          for (final child in current.children) {
+            walk(child);
+            if (resolvedFolder != null) return;
+          }
+        }
+
+        walk(folder);
+        if (resolvedFolder != null) break;
+      }
+
+      if (resolvedFolder == null) {
+        try {
+          resolvedFolder = folders.firstWhere((f) => f.isSpecial);
+        } catch (_) {}
+      }
+    }
+
+    final mockPost = MockPost(
+      id: savedPost.id,
+      title: savedPost.title,
+      url: savedPost.url,
+      description: savedPost.description,
+      savedDate: savedPost.createdAt,
+      sourceFolder: resolvedFolder,
+      tags: List.from(savedPost.tags),
+      imageUrl: savedPost.imageUrl,
+      creatorName: savedPost.creatorName,
+      creatorUsername: savedPost.creatorUsername,
+      previewStorageUrl: savedPost.previewStorageUrl,
+      isShared: savedPost.isShared,
+    );
+
+    final existingIndex = allPosts.indexWhere((p) => p.id == savedPost.id);
+    if (existingIndex >= 0) {
+      allPosts[existingIndex] = mockPost;
+    } else {
+      allPosts.insert(0, mockPost);
+    }
+
+    updateTuttiCount();
+    notifyDataChanged();
+  }
+
+  // ============================================================================
+  // METODI LEGACY (deprecati ma mantenuti per compatibilità)
+  // ============================================================================
+
   String? findRealFolderId(List<Folder> realFolders, MockFolder mockFolder) {
     if (mockFolder.isSpecial) return null;
 

@@ -759,6 +759,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
               folder: targetFolder!,
               isDarkTheme: _isDarkTheme,
               allFolders: folderService.folders,
+              highlightPostId: postId,
               onFolderUpdated: () {
                 if (mounted) setState(() {});
               },

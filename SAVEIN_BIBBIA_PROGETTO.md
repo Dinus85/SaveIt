@@ -50,6 +50,10 @@ Dominio:
 - Hosting: Firebase Hosting con dominio acquistato/gestito su Aruba
 - Admin panel: `https://savein.eu/admin`
 - Fallback admin: `https://savein.eu/?admin=1`
+- **Pagine statiche App Store Connect (lug 2026)**: pubblicate su Firebase Hosting in `web/` e incluse nel build Flutter web:
+  - **Assistenza**: https://savein.eu/support.html — email `support@savein.eu`, FAQ base
+  - **Marketing**: https://savein.eu/marketing.html — presentazione app + link Play Store (`eu.savein.app`)
+  - I file in `web/` vengono copiati in `build/web` e serviti prima del rewrite catch-all su `index.html`
 
 Firebase Auth:
 - Authorized domains da mantenere: `savein.eu`, `www.savein.eu`, piu domini Firebase standard.
@@ -112,6 +116,7 @@ Subcollezioni:
 Collezioni globali:
 - `admin_logs`
 - `dashboard_accesses`: accessi backend separati dagli utenti app, indicizzati per email normalizzata
+- `global_posts/{urlHash}`: **DB comune metadati post** per deduplicazione cross-utente (vedi sezione Import)
 
 Post salvato:
 - `url`
@@ -123,6 +128,10 @@ Post salvato:
 - `folderId`
 - `createdAt`
 - `updatedAt`
+- `isShared`: `true` per post importati da condivisione SaveIn o da share intent social
+- `globalPostId`: ID documento in `global_posts` (uguale a `urlHash`)
+- `urlHash`: SHA-256 dell'URL normalizzato
+- `normalizedUrl`: URL canonico usato per il dedup
 
 Cartella:
 - `name`
@@ -174,7 +183,13 @@ Tuttavia non puo' piu' eseguire operazioni che superino i limiti Free:
 - **Salvare/importare** un nuovo post in una cartella di livello > 1 → bloccato da `validateFolderDestination` in `sharing_service.dart`
 - **Spostare** un post esistente in una cartella di livello > 1 → bloccato da `validateFolderDestination` all'inizio di `movePost` in `folder_service_crud.dart`
 
-Nel `FolderCardSelector` (il picker cartella usato durante l'import) le cartelle oltre il limite Free vengono mostrate grigie (opacita' 45%) con badge **"Premium"** e non sono navigabili ne' selezionabili: il tap mostra uno SnackBar che invita l'upgrade. In questo modo l'utente capisce subito perche' quella destinazione non e' disponibile, senza ricevere un errore dopo aver scelto.
+Nel `FolderCardSelector` (picker cartella durante l'import da share intent):
+
+- Le cartelle oltre il limite Free sono grigie (opacita' 45%) con badge **"Premium"** e non selezionabili; tap → SnackBar upgrade.
+- **Durante l'import post** (`showFolderLimitInfo: false`): **non** mostrare in basso conteggio/limiti livelli cartelle (banner "Livello X/Y", testo "Limite 5 livelli raggiunto"). I limiti restano applicati in background.
+- **Tap su cartella con figli**: 1 tap → entra e seleziona quella cartella.
+- **Tap su cartella foglia (senza figli)**: 1 tap → seleziona, **dialog resta aperto** (l'utente puo' ancora usare "Crea Nuova Cartella" e poi "Conferma Selezione").
+- File: `lib/widgets/folder_card_selector.dart`, invocato da `SharingService._showCardFolderSelector()`.
 
 Le vecchie costanti Free in `lib/services/access_control_service.dart` sono solo fallback se Firestore non risponde. Non devono essere usate come regola primaria.
 
@@ -397,11 +412,11 @@ Regole anti-abuso promo benvenuto:
 
 Deploy:
 ```powershell
-flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY_TIMEOUT='60'; firebase deploy --only functions,hosting }
+flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY_TIMEOUT='120000'; firebase deploy --only functions,hosting }
 ```
 
 Build mobile:
-- Versione mobile corrente: `pubspec.yaml` **`1.0.0+20`**. Il release build mobile (`flutter build appbundle --release`) viene eseguito manualmente dal gestore.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.0.0+40`**. Prossima release prevista: **`1.0.0+41`** (fix import/cartelle/global_posts, lug 2026).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -424,6 +439,32 @@ SaveIn! supporta la condivisione di post singoli e cartelle (con tutto il conten
 | `openShareLink` | `onRequest` | Serve la landing page HTML con messaggio contestuale, link Play Store e redirect automatico allo store dopo 1,4 s |
 | `assetLinks` | `onRequest` | Serve `/.well-known/assetlinks.json` per la verifica Android App Links |
 | `sendDashboardNotification` | `onCall` | Invia notifiche dashboard a utenti selezionati: crea campagna, eventuali documenti in-app e push FCM con payload apribile dall'app |
+| `ensureGlobalPost` | `onCall` | Crea o aggiorna `global_posts/{urlHash}`; merge metadati canonici; incrementa `saveCount` |
+| `getGlobalPostByUrl` | `onCall` | Lookup **read-only** su `global_posts` per URL normalizzato; **non** incrementa `saveCount`; usato prima del fetch metadati |
+
+### Collezione Firestore: `global_posts`
+
+Documento indicizzato da `urlHash` (= SHA-256 di URL normalizzato, stesse regole di `normalizePostUrlForHash` in `functions/index.js` e `post_preview_url_utils.dart`):
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `urlHash` / ID doc | string | Chiave dedup |
+| `normalizedUrl` | string | URL canonico |
+| `url`, `title`, `description` | string | Metadati condivisi |
+| `imageUrl`, `previewStorageUrl` | string | Anteprima (Storage URL preferito se presente) |
+| `creatorName`, `creatorUsername` | string | Autore social se disponibile |
+| `metadataProvider` | string | Origine fetch, es. `client_scrape` (default); futuro `sociavault` |
+| `firstOwnerId` | string | UID primo utente che ha creato il record |
+| `saveCount` | number | Quanti utenti hanno salvato lo stesso URL |
+| `createdAt` / `updatedAt` | timestamp | |
+
+**Flusso dedup cross-utente (lug 2026)**:
+1. Utente condivide URL → app chiama `getGlobalPostByUrl` **prima** di scraping.
+2. Se `found=true` e metadati usabili → `UrlMetadataService.resolveImportMetadata()` salta HTTP/oEmbed; riusa canonical da `global_posts`.
+3. Al salvataggio → `ensureGlobalPost` aggiorna/crea record e collega `globalPostId`/`urlHash` al post utente.
+4. Ogni utente ha comunque il **proprio** documento in `users/{uid}/posts`; condivide solo i metadati/anteprima.
+
+**Nota SociaVault**: SaveIn **non** usa SociaVault (a differenza di SmartChef). L'import social usa scraping client-side (`UrlMetadataService`). SociaVault e' candidato per integrazione futura lato Cloud Function, con stesso pattern `global_posts` per non consumare crediti su URL gia' risolti.
 
 ### Collezione Firestore: `shared_links`
 
@@ -569,16 +610,40 @@ SaveIn! raccoglie informazioni di base per personalizzare l'esperienza e offrire
 
 ## Import post e metadati
 
-Servizio principale:
-- `lib/url_metadata_service.dart`
+### SaveIn vs SmartChef (SociaVault)
 
-Obiettivo:
-- estrarre titolo, descrizione, immagine e metadati da URL social/web
+| | SaveIn | SmartChef |
+|---|---|---|
+| Estrazione metadati social | **Client-side** (`UrlMetadataService` nell'app) | **Server-side** (SociaVault + yt-dlp + Whisper + Gemini) |
+| Costo API SociaVault | Nessuno (oggi) | ~0,01–0,02 €/chiamata |
+| Obiettivo | Segnalibro + anteprima + tag | Ricetta strutturata da video |
+
+SaveIn **non** integra SociaVault al 13/07/2026. L'estrazione avviene cosi:
+
+1. Share intent → `SharingService.showSaveDialog()`
+2. **`resolveImportMetadata(url)`** (`lib/url_metadata_service.dart`):
+   - prima: `getGlobalPostByUrl` (Cloud Function) → cache `global_posts`
+   - se miss: **`extractMetadata(url)`** — HTTP GET pagina + Open Graph + fallback embed/oEmbed
+3. Instagram: pagina embed se manca `og:image`
+4. TikTok: redirect `vm.tiktok.com` + oEmbed pubblico
+5. Hashtag: testo condiviso + parsing HTML
+6. Salvataggio → `ensureGlobalPost` + cache anteprima locale/remota
+
+Servizi principali:
+- `lib/url_metadata_service.dart` — `extractMetadata`, `resolveImportMetadata`
+- `lib/services/global_post_lookup_service.dart` — client lookup `global_posts`
+- `lib/services/sharing_service.dart` — dialog import, navigazione post-salvataggio
+- `lib/services/folder_service_sharing.dart` — `saveSharedPostWithOptionalFolder` (`isShared: true`, passa `previewStorageUrl`)
+- `functions/index.js` — `ensureGlobalPost`, `getGlobalPostByUrl`
+
+Modello `UrlMetadata` (`lib/models.dart`, lug 2026):
+- `previewStorageUrl`, `fromGlobalCache`, getter `displayImageUrl` (preferisce Storage condiviso)
 
 Note importanti:
-- Instagram puo non fornire `og:image`; sono stati aggiunti fallback su embed e filtri per evitare avatar profilo.
-- TikTok puo mostrare pagina login; usare oEmbed/fallback dedicati per evitare titolo "log in tiktok" e immagini generiche.
-- Le immagini esterne possono scadere, quindi quando possibile si crea una anteprima locale e un backup remoto.
+- Instagram puo non fornire `og:image`; fallback embed; spesso fragile vs API dedicate.
+- TikTok puo mostrare pagina login ai bot; oEmbed mitiga ma non sempre basta.
+- Le immagini CDN social scadono → cache locale + backup `post_previews/by_url/{hash}` su Firebase Storage.
+- **Anteprima dopo import (fix lug 2026)**: post salvato con ID reale; upsert immediato in `FolderService.allPosts`; refresh UI cartella con `highlightPostId`; preservazione anteprime durante sync.
 
 ## Cache anteprime immagini
 
@@ -714,7 +779,11 @@ Backend/admin:
 
 Import/contenuti:
 - `lib/url_metadata_service.dart`
+- `lib/services/global_post_lookup_service.dart`
 - `lib/services/sharing_service.dart`
+- `lib/services/folder_service_sharing.dart`
+- `lib/services/folder_service_sync.dart` — `upsertMockPostFromSavedPost`, merge anteprime in sync
+- `lib/widgets/folder_card_selector.dart`
 - `lib/services/remote_content_service.dart`
 
 Cartelle:
@@ -876,6 +945,7 @@ Struttura del template:
 - **Footer**: sfondo grigio chiaro con:
   - "Hai ricevuto questa email perché sei registrato su SaveIn!"
   - Link assistenza `support@savein.eu`
+  - Link pagina assistenza pubblica: `https://savein.eu/support.html`
   - Link "Gestisci le preferenze" → `APP_BASE_URL/account` (Account > Notifiche nell'app)
   - Link a savein.eu · Supporto · Privacy · Termini
   - Copyright © anno corrente SaveIn!
@@ -1076,7 +1146,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 | Modifica | Nuova `.aab` Android | Nuovo build iOS | Deploy Firebase | Deploy backend SaveIn |
 |---|---|---|---|---|
 | SHA-256 / `assetlinks.json` | **No** | **No** | **Sì** (`functions:assetLinks`, `hosting`) | No |
-| Fix Cloud Functions share link / email | No | No | **Sì** (`functions`, eventualmente `hosting`) | No |
+| Fix Cloud Functions share link / email / **global_posts** | No | No | **Sì** (`functions:getGlobalPostByUrl`, `functions:ensureGlobalPost`, eventualmente `hosting`) | No |
 | Fix Flutter/Android/iOS, version bump | Sì | Sì | No* | No |
 
 \*Dashboard web SaveIn: `flutter build web --release` + `firebase deploy --only hosting`.
@@ -1102,7 +1172,12 @@ Build iOS via **Codemagic** (workflow già funzionante; bundle `eu.savein.app`).
 3. ~~Configurare gli ID AdMob iOS reali e sostituire gli ID test in `ios/Runner/Info.plist` e nei servizi ads Flutter.~~ **FATTO 03/07/2026** (vedi sezione "Google AdMob" sotto) — serve pero' ancora una nuova build iOS per renderlo effettivo sui dispositivi.
 4. Build release Codemagic → TestFlight → test → submit review.
 5. Completare privacy, scheda App Store, screenshot, classificazione età, tracking/privacy nutrition labels.
-6. Deep link iOS: Associated Domains + `apple-app-site-association` su `savein.eu` (indipendenti da `assetlinks.json` Android).
+6. **App Store Connect — metadata URL (lug 2026)**:
+   - URL assistenza: `https://savein.eu/support.html`
+   - URL marketing: `https://savein.eu/marketing.html`
+   - Email assistenza ufficiale: `support@savein.eu` (casella Aruba, stessa di `SUPPORT_EMAIL` in `functions/.env`)
+7. **App Store Connect — revisione Apple**: fornire account demo **email/password** o Sign in with Apple (preferibile email/password per i revisori). Note consigliate: app in italiano, funzioni da testare (salva link, cartelle, tag, condivisione), connessione internet richiesta.
+8. Deep link iOS: Associated Domains + `apple-app-site-association` su `savein.eu` (indipendenti da `assetlinks.json` Android).
 
 Alternativa con Mac: aprire `ios/Runner.xcworkspace` con Xcode e caricare con Organizer/Transporter.
 
@@ -1429,4 +1504,79 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
 - Configurabile per Free/Premium come le altre funzioni: abilitato, limite, periodo reset, richiede pubblicità.
 - Default: Free abilitato con pubblicità richiesta; Premium abilitato senza pubblicità; limite 0 (illimitato) su entrambi.
 - L'app rispetta le regole su: apertura dialog reminder, salvataggio nuovo reminder, banner reminder del giorno e gate pubblicità configurabile da dashboard.
-- Versione locale corrente: **1.0.0+38**.
+- Versione locale corrente: **1.0.0+40**.
+
+## Aggiornamenti 08/07/2026
+
+- **Pagine web assistenza/marketing per App Store Connect**:
+  - Aggiunti `web/support.html` e `web/marketing.html` (stile SaveIn!, colori `#1a1a2e` / `#e0f2fe`).
+  - **Assistenza**: email `support@savein.eu`, FAQ (accesso, contenuti, salvataggio link, eliminazione account, Contattaci in app).
+  - **Marketing**: funzioni principali (salva da social, cartelle, tag, condivisione, reminder) + pulsante Google Play `eu.savein.app`.
+  - **Nota**: non usare `help@savein.app` nelle pagine pubbliche — e' un placeholder legacy in `remote_content_service.dart`; l'email operativa e' **`support@savein.eu`**.
+- **Deploy hosting (08/07/2026)**:
+  ```powershell
+  cd C:\Users\dinop\saveit
+  flutter build web --release --base-href /
+  firebase deploy --only hosting --project saveit-app-1784d
+  ```
+  - Pagine live: https://savein.eu/support.html e https://savein.eu/marketing.html
+  - **Non richiede** nuova `.aab` ne' build iOS: solo deploy Firebase Hosting.
+- **App Store Connect SaveIn!**: usare gli URL sopra nei campi **URL di assistenza** e **URL di marketing** della scheda iOS.
+- **SmartChef (stessa sessione)**: create anche `web/support.html` e `web/marketing.html` su `smartchef-app.com` + fix icona iOS + `AppSessionService` tutorial/promo — vedi `SMART_CHEF_BIBLE.md`.
+
+## Aggiornamenti 13/07/2026
+
+**Release target**: `1.0.0+41` — richiede **nuova `.aab` Android**, **nuovo build iOS** (Codemagic/TestFlight) **e** deploy Cloud Functions.
+
+### Fix UX import e cartelle
+
+| Area | File | Modifica |
+|---|---|---|
+| Dialog Premium scroll | `lib/pages/account_page.dart` | CTA acquisto + disclosure legali **dentro** lo scroll dell'ultima slide |
+| Selettore cartelle import | `lib/widgets/folder_card_selector.dart` | 1 tap apre+seleziona; foglia seleziona senza chiudere dialog; `showFolderLimitInfo: false` in import |
+| Separatore path corrotto | `lib/services/sharing_service.dart` | Path cartelle con `›` corretto (fix mojibake) |
+| Anteprima post post-import | `sharing_service`, `folder_service_sharing`, `folder_service_sync`, `folder_detail_page`, `main.dart` | ID post reale; upsert mock post; refresh UI con `highlightPostId`; merge `previewStorageUrl` in sync |
+| Limiti cartelle in import | `folder_card_selector.dart` | Nascosto conteggio limiti livelli in basso durante scelta cartella |
+
+### DB comune `global_posts` e dedup cross-utente
+
+- Nuova Cloud Function **`getGlobalPostByUrl`**: lookup read-only, no incremento `saveCount`.
+- Client: `GlobalPostLookupService` + `UrlMetadataService.resolveImportMetadata()` — controlla cache globale **prima** dello scraping.
+- Al salvataggio: `ensureGlobalPost` collega post utente a metadati condivisi.
+- Campo `metadataProvider` su nuovi record globali (`client_scrape` default; preparato per futuro SociaVault).
+- **SaveIn non usa SociaVault** — dedup evita re-scrape quando un altro utente ha gia' importato lo stesso URL.
+
+### Ordine release consigliato (13/07/2026)
+
+**1. Codice e versione**
+```powershell
+cd C:\Users\dinop\saveit
+# pubspec.yaml → version: 1.0.0+41
+flutter analyze
+```
+
+**2. Deploy Firebase Functions (obbligatorio per dedup)**
+```powershell
+cd C:\Users\dinop\saveit\functions
+# index.js e' pesante (~7–11s load): alza timeout discovery altrimenti deploy fallisce a 10s
+$env:FUNCTIONS_DISCOVERY_TIMEOUT="120000"
+firebase deploy --only functions:getGlobalPostByUrl,functions:ensureGlobalPost --project saveit-app-1784d
+```
+Errore tipico senza timeout: `User code failed to load. Cannot determine backend specification. Timeout after 10000`.
+
+**3. Build Android**
+```powershell
+cd C:\Users\dinop\saveit
+flutter clean
+flutter pub get
+flutter build appbundle --release
+```
+Output: `build\app\outputs\bundle\release\app-release.aab`
+
+**4. Play Console** — Test interni → carica `.aab` `1.0.0+41` → note release → tester opt-in.
+
+**5. Build iOS** — Codemagic → TestFlight (stesso build number).
+
+**6. Dashboard web** (solo se modificata): `flutter build web --release --base-href /` + `firebase deploy --only hosting`.
+
+**7. Verifica post-release** — import social; anteprima subito in cartella; stesso URL su secondo account → metadati da `global_posts`; selettore cartelle senza banner limiti.

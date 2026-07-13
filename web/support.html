@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Assistenza SaveIn! — contattaci per supporto tecnico, segnalazioni e domande sull'app.">
+  <title>Assistenza — SaveIn!</title>
+  <style>
+    :root {
+      --brand: #1a1a2e;
+      --brand-light: #e0f2fe;
+      --accent: #67bae6;
+      --text: #333333;
+      --muted: #555555;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background: linear-gradient(180deg, #eef0f5 0%, #ffffff 240px);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 28px rgba(26, 26, 46, 0.1);
+      border: 1px solid rgba(26, 26, 46, 0.08);
+      overflow: hidden;
+    }
+
+    .header {
+      background: var(--brand);
+      color: #fff;
+      padding: 28px 28px 24px;
+      border-bottom: 4px solid var(--accent);
+    }
+
+    .header h1 {
+      margin: 0 0 8px;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+
+    .header p {
+      margin: 0;
+      opacity: 0.92;
+    }
+
+    .content {
+      padding: 28px;
+    }
+
+    .content h2 {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      color: var(--brand);
+    }
+
+    .content p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    .contact-box {
+      display: block;
+      margin: 20px 0 28px;
+      padding: 20px 22px;
+      border-radius: 14px;
+      background: var(--brand-light);
+      border: 1px solid rgba(103, 186, 230, 0.35);
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .contact-box:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(26, 26, 46, 0.1);
+    }
+
+    .contact-label {
+      display: block;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .contact-email {
+      display: block;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--brand);
+      word-break: break-all;
+    }
+
+    .faq {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .faq li {
+      padding: 14px 0;
+      border-top: 1px solid #eeeeee;
+    }
+
+    .faq li:first-child {
+      border-top: none;
+      padding-top: 0;
+    }
+
+    .faq strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+
+    .faq span {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .footer {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .footer a {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <h1>SaveIn! — Assistenza</h1>
+        <p>Hai bisogno di aiuto con l'app? Siamo qui per te.</p>
+      </div>
+
+      <div class="content">
+        <h2>Contattaci</h2>
+        <p>
+          Per supporto tecnico, segnalazioni di bug, richieste sull'account o domande
+          sull'utilizzo di SaveIn!, scrivici all'indirizzo email ufficiale di assistenza.
+          Ti risponderemo il prima possibile.
+        </p>
+
+        <a class="contact-box" href="mailto:support@savein.eu">
+          <span class="contact-label">Email assistenza</span>
+          <span class="contact-email">support@savein.eu</span>
+        </a>
+
+        <h2>Domande frequenti</h2>
+        <ul class="faq">
+          <li>
+            <strong>Non riesco ad accedere</strong>
+            <span>Prova a uscire e rientrare nell'app. Se il problema persiste, scrivici indicando la tua email e il modello del dispositivo.</span>
+          </li>
+          <li>
+            <strong>Non vedo i contenuti salvati</strong>
+            <span>Verifica di essere entrato con la stessa email usata in precedenza.</span>
+          </li>
+          <li>
+            <strong>Come salvo un link?</strong>
+            <span>Condividi il contenuto da browser o social e seleziona SaveIn! dall'elenco delle app.</span>
+          </li>
+          <li>
+            <strong>Voglio eliminare il mio account</strong>
+            <span>Dall'app vai in Account → Elimina account. Se non riesci, contattaci dalla stessa email dell'account.</span>
+          </li>
+          <li>
+            <strong>Hai già l'app installata?</strong>
+            <span>Puoi anche inviarci un messaggio direttamente da SaveIn!: Account → Contattaci.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      © SaveIn! · <a href="/">Torna al sito</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Termini</a>
+    </p>
+  </div>
+</body>
+</html>

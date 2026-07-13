@@ -335,21 +335,26 @@ class UrlMetadata {
   final String? title;
   final String? description;
   final String? imageUrl;
+  final String? previewStorageUrl;
   final String? creatorName;
   final String? creatorUsername;
   final String? siteName;
   final String? favicon;
   final List<String> extractedHashtags;
+  /// true se i metadati provengono da global_posts (già importato da altro utente).
+  final bool fromGlobalCache;
 
   UrlMetadata({
     this.title,
     this.description,
     this.imageUrl,
+    this.previewStorageUrl,
     this.creatorName,
     this.creatorUsername,
     this.siteName,
     this.favicon,
     this.extractedHashtags = const [],
+    this.fromGlobalCache = false,
   });
 
   factory UrlMetadata.fromJson(Map<String, dynamic> json) {
@@ -357,6 +362,7 @@ class UrlMetadata {
       title: json['title'],
       description: json['description'],
       imageUrl: json['imageUrl'],
+      previewStorageUrl: json['previewStorageUrl'],
       creatorName: json['creatorName'],
       creatorUsername: json['creatorUsername'],
       siteName: json['siteName'],
@@ -364,6 +370,7 @@ class UrlMetadata {
       extractedHashtags: json['extractedHashtags'] != null
           ? List<String>.from(json['extractedHashtags'])
           : [],
+      fromGlobalCache: json['fromGlobalCache'] == true,
     );
   }
 
@@ -372,18 +379,30 @@ class UrlMetadata {
       'title': title,
       'description': description,
       'imageUrl': imageUrl,
+      'previewStorageUrl': previewStorageUrl,
       'creatorName': creatorName,
       'creatorUsername': creatorUsername,
       'siteName': siteName,
       'favicon': favicon,
       'extractedHashtags': extractedHashtags,
+      'fromGlobalCache': fromGlobalCache,
     };
+  }
+
+  /// Anteprima da mostrare in UI (preferisce storage condiviso).
+  String? get displayImageUrl {
+    final stable = previewStorageUrl?.trim();
+    if (stable != null && stable.isNotEmpty) return stable;
+    final original = imageUrl?.trim();
+    if (original != null && original.isNotEmpty) return original;
+    return null;
   }
 
   bool get hasValidData =>
       title?.isNotEmpty == true ||
       description?.isNotEmpty == true ||
-      imageUrl?.isNotEmpty == true;
+      imageUrl?.isNotEmpty == true ||
+      previewStorageUrl?.isNotEmpty == true;
 
   bool get hasExtractedHashtags => extractedHashtags.isNotEmpty;
 
@@ -816,6 +835,7 @@ extension UrlMetadataFirestore on UrlMetadata {
       'title': title?.trim(),
       'description': description?.trim(),
       'imageUrl': imageUrl?.trim(),
+      'previewStorageUrl': previewStorageUrl?.trim(),
       'creatorName': creatorName?.trim(),
       'creatorUsername': creatorUsername?.trim(),
       'siteName': siteName?.trim(),
@@ -830,6 +850,7 @@ extension UrlMetadataFirestore on UrlMetadata {
       title: data['title'] as String?,
       description: data['description'] as String?,
       imageUrl: data['imageUrl'] as String?,
+      previewStorageUrl: data['previewStorageUrl'] as String?,
       creatorName: data['creatorName'] as String?,
       creatorUsername: data['creatorUsername'] as String?,
       siteName: data['siteName'] as String?,

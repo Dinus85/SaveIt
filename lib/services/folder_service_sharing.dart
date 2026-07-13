@@ -263,11 +263,12 @@ mixin FolderServiceSharing on FolderServiceBase {
   // SALVATAGGIO POST CONDIVISI - FIX PRINCIPALE
   // ============================================================================
 
-  Future<String> saveSharedPostWithOptionalFolder({
+  Future<SharedPostSaveResult> saveSharedPostWithOptionalFolder({
     required String url,
     required String title,
     required String description,
     String? imageUrl,
+    String? previewStorageUrl,
     String? creatorName,
     String? creatorUsername,
     List<String> tags = const [],
@@ -353,13 +354,20 @@ mixin FolderServiceSharing on FolderServiceBase {
           title: title,
           description: description,
           imageUrl: imageUrl,
+          previewStorageUrl: previewStorageUrl,
           creatorName: creatorName,
           creatorUsername: creatorUsername,
           tags: tags,
           folderId: realFolderId,
+          isShared: true,
         );
 
         print('DEBUG: Post salvato con ID: ${savedPost.id}');
+
+        upsertMockPostFromSavedPost(
+          savedPost,
+          sourceFolder: targetMockFolder,
+        );
 
         final duration = endActionTiming('save_shared_post');
         final socialNetwork = extractSocialNetwork(url);
@@ -373,6 +381,8 @@ mixin FolderServiceSharing on FolderServiceBase {
             'target_folder_id': realFolderId,
             'social_network': socialNetwork,
             'save_time_ms': duration?.inMilliseconds,
+            'global_post_reused': savedPost.globalPostId != null,
+            'url_hash': savedPost.urlHash,
           },
           actionDuration: duration,
         );
@@ -380,7 +390,10 @@ mixin FolderServiceSharing on FolderServiceBase {
         // Sync con ritardo
         syncWithDelayAndRetry();
 
-        return targetFolderDisplayName;
+        return SharedPostSaveResult(
+          folderDisplayName: targetFolderDisplayName,
+          savedPost: savedPost,
+        );
       }, 'save_shared_post');
     } catch (e) {
       print('ERRORE: Salvataggio post condiviso fallito: $e');
@@ -643,4 +656,8 @@ mixin FolderServiceSharing on FolderServiceBase {
   Future<void> syncWithDelayAndRetry();
   Future<Map<String, dynamic>> verifyDataIntegrity();
   String? extractSocialNetwork(String url);
+  void upsertMockPostFromSavedPost(
+    SavedPost savedPost, {
+    MockFolder? sourceFolder,
+  });
 }

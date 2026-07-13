@@ -72,6 +72,17 @@ class SearchResult {
   });
 }
 
+/// Risultato del salvataggio di un post condiviso.
+class SharedPostSaveResult {
+  final String folderDisplayName;
+  final SavedPost savedPost;
+
+  const SharedPostSaveResult({
+    required this.folderDisplayName,
+    required this.savedPost,
+  });
+}
+
 // NOTA: MockPost viene importato da '../models.dart'
 // Non ridefinirlo qui per evitare conflitti
 
