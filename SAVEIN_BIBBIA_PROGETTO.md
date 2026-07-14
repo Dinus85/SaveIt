@@ -1580,3 +1580,30 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 **6. Dashboard web** (solo se modificata): `flutter build web --release --base-href /` + `firebase deploy --only hosting`.
 
 **7. Verifica post-release** — import social; anteprima subito in cartella; stesso URL su secondo account → metadati da `global_posts`; selettore cartelle senza banner limiti.
+
+## Aggiornamenti 14/07/2026
+
+### Verifica Firebase iOS — allineamento bundle (SaveIn OK)
+
+Controllo effettuato in parallelo al fix SmartChef (errore `invalid-credential`: audience `it.smartchef.app` ≠ `com.smartchef.smartChefSm`):
+
+| Controllo | Valore SaveIn | Stato |
+|---|---|---|
+| Xcode `PRODUCT_BUNDLE_IDENTIFIER` | `eu.savein.app` | ✅ |
+| `ios/Runner/GoogleService-Info.plist` → `BUNDLE_ID` | `eu.savein.app` | ✅ |
+| `lib/firebase_options.dart` → `ios.iosBundleId` | `eu.savein.app` | ✅ |
+| Firebase app iOS | **SaveIn! iOS** (`1:776660339631:ios:ac36b2aba03689b49e7d5a`) | ✅ |
+| Firebase Auth → Apple | Deve restare **abilitato** per review iOS | ⚠️ Verificare in console |
+
+**Nessuna modifica a `GoogleService-Info.plist` o `firebase_options.dart` richiesta per SaveIn App Store.**
+
+Nota: `firebase_options.dart` → `macos` usa ancora bundle legacy `com.example.saveit` (solo macOS dev, non impatta build iOS App Store).
+
+### SaveIn — release iOS post-review auth (build `1.0.0+42`)
+
+Commit `c7a4fd7` — fix race condition auth Apple/registrazione (`_isCompletingAuthBootstrap` in `auth_service.dart`), **non** correlato al bundle Firebase.
+
+**Prossimi passi SaveIn iOS:**
+1. Codemagic build `1.0.0+42` → TestFlight
+2. Test: account demo `tester1@tester.com` / `Tester1!`, Sign in with Apple, registrazione nuovo utente
+3. Submit review App Store (EULA/metadata già aggiornati in App Store Connect)
