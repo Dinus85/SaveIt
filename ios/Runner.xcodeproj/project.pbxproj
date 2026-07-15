@@ -15,6 +15,7 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A1B2C3D71CF9000F007C117D /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D61CF9000F007C117D /* ShareViewController.swift */; };
+		A1B2C3E91CF9000F007C117D /* RSIShareExtensionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3EA1CF9000F007C117D /* RSIShareExtensionSupport.swift */; };
 		A1B2C3DC1CF9000F007C117D /* Share Extension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D51CF9000F007C117D /* Share Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A1B2C3E21CF9000F007C117D /* MainInterface.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3E31CF9000F007C117D /* MainInterface.storyboard */; };
 /* End PBXBuildFile section */
@@ -78,6 +79,7 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D51CF9000F007C117D /* Share Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Share Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D61CF9000F007C117D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		A1B2C3EA1CF9000F007C117D /* RSIShareExtensionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RSIShareExtensionSupport.swift; sourceTree = "<group>"; };
 		A1B2C3D81CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3DA1CF9000F007C117D /* Share Extension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Share Extension.entitlements"; sourceTree = "<group>"; };
 		A1B2C3E01CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/MainInterface.storyboard; sourceTree = "<group>"; };
@@ -160,6 +162,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3DA1CF9000F007C117D /* Share Extension.entitlements */,
+				A1B2C3EA1CF9000F007C117D /* RSIShareExtensionSupport.swift */,
 				A1B2C3D61CF9000F007C117D /* ShareViewController.swift */,
 				A1B2C3E31CF9000F007C117D /* MainInterface.storyboard */,
 				A1B2C3D81CF9000F007C117D /* Info.plist */,
@@ -345,6 +348,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3E91CF9000F007C117D /* RSIShareExtensionSupport.swift in Sources */,
 				A1B2C3D71CF9000F007C117D /* ShareViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

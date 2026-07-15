@@ -1645,3 +1645,9 @@ Abilitare provider **Apple** su progetto `saveit-app-1784d` (errore `identity pr
 - Incremento build number in `pubspec.yaml` per nuova build Codemagic post Share Extension (`e82fdaa`).
 - Nessuna modifica codice rispetto al commit Share Extension; stessi requisiti Apple Developer della sezione sopra.
 - Codemagic build **`1.0.0+46`** ? TestFlight ? submit review con note Guideline 2.3.
+
+### Build `1.0.0+47` — fix Codemagic Share Extension compile
+
+- Errore Codemagic: `addApplicationDelegate is unavailable in application extensions` (plugin `receive_sharing_intent` compilato nel target extension).
+- Fix: codice extension-safe in `ios/Share Extension/RSIShareExtensionSupport.swift`; rimosso pod `receive_sharing_intent` dal target Share Extension nel Podfile.
+- Riavviare build Codemagic con `1.0.0+47`.
