@@ -1607,3 +1607,35 @@ Commit `c7a4fd7` — fix race condition auth Apple/registrazione (`_isCompleting
 1. Codemagic build `1.0.0+42` → TestFlight
 2. Test: account demo `tester1@tester.com` / `Tester1!`, Sign in with Apple, registrazione nuovo utente
 3. Submit review App Store (EULA/metadata già aggiornati in App Store Connect)
+
+## Aggiornamenti 15/07/2026 — Share Extension iOS + aggiunta contenuti in cartella (build `1.0.0+45`)
+
+### Rifiuto Apple Guideline 2.3 (build 42, iPad)
+
+Apple non trovava come **aggiungere contenuti nelle cartelle**: il pulsante **+** crea solo cartelle/sottocartelle; il salvataggio link avveniva solo via share Android (intent), **non** su iOS.
+
+### Fix applicato
+
+| Area | Modifica |
+|---|---|
+| **Share Extension iOS** | Nuovo target `Share Extension` (`eu.savein.app.ShareExtension`) — SaveIn! compare nel foglio Condividi di Safari/social |
+| **App Group** | `group.eu.savein.app.share` — Runner + extension |
+| **Podfile** | Target `Share Extension` con pod `receive_sharing_intent` |
+| **In-app UX** | Pulsante **Aggiungi contenuto** nello stato vuoto cartella + menu **+** (link / sottocartella) |
+| **sharing_service.dart** | Android: `receive_intent`; iOS: `getMediaStream` / `getInitialMedia` |
+
+### Apple Developer — setup obbligatorio (SaveIn)
+
+1. **Identifiers → App Groups** → `group.eu.savein.app.share`
+2. **App ID `eu.savein.app`** → capability **App Groups** → seleziona il gruppo
+3. **App ID `eu.savein.app.ShareExtension`** → stesso App Group
+4. Codemagic build **`1.0.0+45`** → TestFlight
+
+### Note review App Store Connect
+
+> In-app: open folder → **Aggiungi contenuto** → paste URL → save.  
+> From Safari: Share → **SaveIn!** → choose folder → save.
+
+### Firebase Auth Apple (SaveIn)
+
+Abilitare provider **Apple** su progetto `saveit-app-1784d` (errore `identity provider configuration is not found` se disattivato).

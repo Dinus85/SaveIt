@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:receive_intent/receive_intent.dart' as receive_intent;
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:savein/models.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/url_metadata_service.dart';
@@ -39,6 +41,7 @@ class SharingService {
   SharingService._();
 
   StreamSubscription? _intentDataStreamSubscription;
+  StreamSubscription? _iosSharingSubscription;
   Function(SharedContent)? _onSharedContent;
 
   static Function()? _onDataChanged;
@@ -60,32 +63,51 @@ class SharingService {
     // NUOVO: Registra callback con DataService per sincronizzazione automatica
     _setupDataServiceCallback();
 
-    // Listen for intents while app is running
-    _intentDataStreamSubscription =
-        receive_intent.ReceiveIntent.receivedIntentStream.listen(
-      (receive_intent.Intent? intent) {
+    // Listen for intents while app is running (Android only)
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      _intentDataStreamSubscription =
+          receive_intent.ReceiveIntent.receivedIntentStream.listen(
+        (receive_intent.Intent? intent) {
+          if (intent != null) {
+            print('DEBUG: Ricevuto intent: ${intent.action}');
+            _handleReceivedIntent(intent);
+          }
+        },
+        onError: (err) {
+          print("ERRORE: Errore durante la ricezione dell'intent: $err");
+        },
+      );
+
+      receive_intent.ReceiveIntent.getInitialIntent()
+          .then((receive_intent.Intent? intent) {
         if (intent != null) {
-          print('DEBUG: Ricevuto intent: ${intent.action}');
+          print('DEBUG: Ricevuto intent iniziale: ${intent.action}');
           _handleReceivedIntent(intent);
+        } else {
+          print('DEBUG: Nessun intent iniziale');
         }
-      },
-      onError: (err) {
-        print("ERRORE: Errore durante la ricezione dell'intent: $err");
-      },
-    );
+      });
+    }
 
-    // Check for initial intent (when app was closed and opened by sharing)
-    receive_intent.ReceiveIntent.getInitialIntent()
-        .then((receive_intent.Intent? intent) {
-      if (intent != null) {
-        print('DEBUG: Ricevuto intent iniziale: ${intent.action}');
-        _handleReceivedIntent(intent);
-      } else {
-        print('DEBUG: Nessun intent iniziale');
-      }
-    });
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      _iosSharingSubscription =
+          ReceiveSharingIntent.instance.getMediaStream().listen(
+        (files) {
+          _handleIosSharedMedia(files);
+        },
+        onError: (err) {
+          print("ERRORE: Ricezione condivisione iOS: $err");
+        },
+      );
 
-    print('DEBUG: SharingService inizializzato con receive_intent');
+      ReceiveSharingIntent.instance.getInitialMedia().then((files) {
+        if (files.isNotEmpty) {
+          _handleIosSharedMedia(files);
+        }
+      });
+    }
+
+    print('DEBUG: SharingService inizializzato');
   }
 
   // NUOVO: Configura callback DataService per ricevere notifiche di salvataggio
@@ -160,6 +182,26 @@ class SharingService {
     if (_onDataChanged != null) {
       _onDataChanged!();
     }
+  }
+
+  void _handleIosSharedMedia(List<SharedMediaFile> files) {
+    for (final file in files) {
+      final payload = file.path.trim();
+      if (payload.isEmpty) continue;
+
+      if (file.type == SharedMediaType.url ||
+          file.type == SharedMediaType.text) {
+        _handleSharedText(payload);
+        continue;
+      }
+
+      if (file.type == SharedMediaType.file &&
+          (file.mimeType?.startsWith('text/') ?? false)) {
+        _handleSharedText(payload);
+      }
+    }
+
+    ReceiveSharingIntent.instance.reset();
   }
 
   void _handleReceivedIntent(receive_intent.Intent intent) {
@@ -502,11 +544,134 @@ class SharingService {
     _onSharedContent?.call(sharedContent);
   }
 
+  /// Apre un dialog per incollare un link e salvarlo in cartella (discoverable in-app).
+  static Future<Map<String, String>?> promptAndSaveLink(
+    BuildContext context, {
+    String? initialFolderPath,
+    bool isDarkTheme = true,
+  }) async {
+    final controller = TextEditingController();
+    final urlText = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final themeColors = isDarkTheme
+            ? const Color(0xFF1E1E1E)
+            : Colors.white;
+        final textColor = isDarkTheme ? Colors.white : Colors.black87;
+        return AlertDialog(
+          backgroundColor: themeColors,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            'Aggiungi contenuto',
+            style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                initialFolderPath == null || initialFolderPath.isEmpty
+                    ? 'Incolla un link da salvare.'
+                    : 'Il link verrà salvato in: $initialFolderPath',
+                style: TextStyle(color: textColor.withOpacity(0.75), fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.done,
+                style: TextStyle(color: textColor),
+                decoration: InputDecoration(
+                  hintText: 'https://...',
+                  hintStyle: TextStyle(color: textColor.withOpacity(0.45)),
+                  filled: true,
+                  fillColor: isDarkTheme
+                      ? Colors.white.withOpacity(0.08)
+                      : Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                onSubmitted: (value) {
+                  final trimmed = value.trim();
+                  if (trimmed.isNotEmpty) {
+                    Navigator.pop(dialogContext, trimmed);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Annulla'),
+            ),
+            TextButton(
+              onPressed: () {
+                final trimmed = controller.text.trim();
+                if (trimmed.isNotEmpty) {
+                  Navigator.pop(dialogContext, trimmed);
+                }
+              },
+              child: const Text('Continua'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (urlText == null || urlText.trim().isEmpty || !context.mounted) {
+      return null;
+    }
+
+    var normalized = urlText.trim();
+    if (!normalized.startsWith('http://') &&
+        !normalized.startsWith('https://')) {
+      normalized = 'https://$normalized';
+    }
+
+    final sharedContent = SharedContent(
+      url: normalized,
+      text: urlText.trim(),
+      platform: _getSocialPlatformStatic(normalized),
+      extractedHashtags: const [],
+    );
+
+    return showSaveDialog(
+      context,
+      sharedContent,
+      isDarkTheme: isDarkTheme,
+      initialFolderPath: initialFolderPath,
+    );
+  }
+
+  static String? _getSocialPlatformStatic(String url) {
+    try {
+      final domain = Uri.parse(url).host.toLowerCase();
+      if (domain.contains('instagram')) return 'Instagram';
+      if (domain.contains('tiktok')) return 'TikTok';
+      if (domain.contains('youtube')) return 'YouTube';
+      if (domain.contains('twitter') || domain.contains('x.com')) {
+        return 'Twitter/X';
+      }
+      if (domain.contains('facebook')) return 'Facebook';
+      if (domain.contains('linkedin')) return 'LinkedIn';
+      if (domain.contains('pinterest')) return 'Pinterest';
+      if (domain.contains('reddit')) return 'Reddit';
+    } catch (_) {}
+    return null;
+  }
+
   // Ã°Å¸Å¡â‚¬ MODIFICATO: Show dialog VELOCE con hashtag automatici E NAVIGAZIONE AUTOMATICA
   static Future<Map<String, String>?> showSaveDialog(
     BuildContext context,
     SharedContent sharedContent, {
     bool isDarkTheme = true,
+    String? initialFolderPath,
   }) async {
     print(
         'DEBUG: ========== APERTURA DIALOG CON NAVIGAZIONE AUTOMATICA ==========');
@@ -563,6 +728,7 @@ class SharingService {
             isLoadingMetadata: !snapshot.hasData,
             prefilledHashtags:
                 combinedHashtags, // NUOVO: Passa hashtag pre-compilati
+            initialFolderPath: initialFolderPath,
           );
         },
       ),
@@ -702,6 +868,7 @@ class SharingService {
     print('DEBUG: ========== DISPOSE SHARINGSERVICE ==========');
 
     _intentDataStreamSubscription?.cancel();
+    _iosSharingSubscription?.cancel();
 
     // NUOVO: Rimuovi callback DataService durante dispose
     if (_isDataServiceCallbackRegistered && _dataServiceCallback != null) {
@@ -725,6 +892,7 @@ class SaveSharedContentDialog extends StatefulWidget {
   final bool isDarkTheme;
   final bool isLoadingMetadata;
   final List<String> prefilledHashtags;
+  final String? initialFolderPath;
   // RIMUOVI questa riga:
   // final Function(String folderPath, String postId)? onSaveComplete;
 
@@ -735,6 +903,7 @@ class SaveSharedContentDialog extends StatefulWidget {
     this.isDarkTheme = true,
     this.isLoadingMetadata = false,
     this.prefilledHashtags = const [],
+    this.initialFolderPath,
   }) : super(key: key);
 
   @override
@@ -773,6 +942,11 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
     _titleController = TextEditingController();
     _tagInputController =
         TextEditingController(); // NUOVO: Inizializza controller tag
+
+    if (widget.initialFolderPath != null &&
+        widget.initialFolderPath!.trim().isNotEmpty) {
+      _selectedFolderPath = widget.initialFolderPath!.trim();
+    }
 
     // NUOVO: Pre-popola con hashtag estratti automaticamente
     _initializePrefilledTags();

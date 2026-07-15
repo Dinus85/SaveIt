@@ -57,7 +57,17 @@
 				<string>com.googleusercontent.apps.776660339631-qhgsdg8vin4gabllbbgd5526bffivosp</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ShareMedia-$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			</array>
+		</dict>
 	</array>
+	<key>AppGroupId</key>
+	<string>$(CUSTOM_GROUP_ID)</string>
 	
 	<!-- PERMESSI PER GOOGLE SIGN-IN (opzionale ma consigliato) -->
 	<key>LSApplicationQueriesSchemes</key>
