@@ -1658,3 +1658,23 @@ Abilitare provider **Apple** su progetto `saveit-app-1784d` (errore `identity pr
 - Rimosso `RSIShareExtensionSupport.swift` vendored (copia incompleta che poteva rompere l'avvio).
 - Share Extension: `NSExtensionPrincipalClass` al posto dello storyboard.
 - Codemagic build **`1.0.0+48`** ? TestFlight (Appetize non supporta app con extension).
+
+### Build `1.0.0+49` - fix Appetize "Unexpected error occurred" (tentativo 1, incompleto)
+
+- Ipotesi iniziale: Xcode 16 genera `.debug.dylib`/`__preview.dylib` in Debug che Appetize potrebbe non gestire.
+- Fix applicato: `ENABLE_DEBUG_DYLIB = NO` nelle config Debug di Runner e Share Extension in `project.pbxproj`.
+- Risultato: confermato che i file `.debug.dylib` erano stati rimossi dal bundle, ma Appetize continuava a dare lo stesso errore generico senza log. Causa reale non era questa.
+
+### Build `1.0.0+50` - causa reale trovata: Info.plist della Share Extension senza CFBundleVersion
+
+Diagnosi definitiva (confermata confrontando la build `1.0.0+42`, funzionante su Appetize, con le build successive che introducono la Share Extension):
+
+- Il target Share Extension aveva contemporaneamente `GENERATE_INFOPLIST_FILE = YES` e `INFOPLIST_FILE = "Share Extension/Info.plist"` (un file scritto a mano con `CFBundleVersion = $(FLUTTER_BUILD_NUMBER)`).
+- Con questa combinazione Xcode scarta le chiavi CFBundle* scritte a mano nel plist custom (perche si aspetta che arrivino solo dalle build settings / INFOPLIST_KEY_*), e non le rigenera in modo affidabile: il plist compilato dell'extension non conteneva ne CFBundleVersion ne CFBundleShortVersionString, verificato ispezionando il bundle scaricato da Codemagic.
+- Un'app extension iOS senza CFBundleVersion e un bundle non valido: l'installer di sistema (usato anche da Appetize per installare l'app nel simulatore prima di lanciarla) rifiuta l'intera app prima che venga eseguito codice, il che spiega l'errore generico senza log in Appetize.
+- Il target Runner non ha mai avuto questo problema perche usa solo INFOPLIST_FILE senza GENERATE_INFOPLIST_FILE = YES.
+
+Fix:
+1. Rimosso `GENERATE_INFOPLIST_FILE = YES` e `INFOPLIST_KEY_CFBundleDisplayName` dalle 3 config (Debug/Release/Profile) del target Share Extension in `project.pbxproj`.
+2. Aggiunte a `ios/Share Extension/Info.plist` le chiavi `CFBundleDisplayName` (SaveIn!) e `CFBundleShortVersionString` ($(FLUTTER_BUILD_NAME)), oltre a `CFBundleVersion` gia presente.
+3. Codemagic build **`1.0.0+50`** -> testare sia su Appetize (simulatore) sia su TestFlight (device reale).
