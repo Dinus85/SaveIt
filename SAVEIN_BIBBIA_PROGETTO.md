@@ -1639,3 +1639,9 @@ Apple non trovava come **aggiungere contenuti nelle cartelle**: il pulsante **+*
 ### Firebase Auth Apple (SaveIn)
 
 Abilitare provider **Apple** su progetto `saveit-app-1784d` (errore `identity provider configuration is not found` se disattivato).
+
+### Build `1.0.0+46` (bump TestFlight)
+
+- Incremento build number in `pubspec.yaml` per nuova build Codemagic post Share Extension (`e82fdaa`).
+- Nessuna modifica codice rispetto al commit Share Extension; stessi requisiti Apple Developer della sezione sopra.
+- Codemagic build **`1.0.0+46`** ? TestFlight ? submit review con note Guideline 2.3.
