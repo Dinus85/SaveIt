@@ -1651,3 +1651,10 @@ Abilitare provider **Apple** su progetto `saveit-app-1784d` (errore `identity pr
 - Errore Codemagic: `addApplicationDelegate is unavailable in application extensions` (plugin `receive_sharing_intent` compilato nel target extension).
 - Fix: codice extension-safe in `ios/Share Extension/RSIShareExtensionSupport.swift`; rimosso pod `receive_sharing_intent` dal target Share Extension nel Podfile.
 - Riavviare build Codemagic con `1.0.0+47`.
+
+### Build `1.0.0+48` — fix Share Extension (runtime + Codemagic)
+
+- Ripristinato `import receive_sharing_intent` con Podfile `inherit! :search_paths` (setup ufficiale plugin 1.8.1).
+- Rimosso `RSIShareExtensionSupport.swift` vendored (copia incompleta che poteva rompere l'avvio).
+- Share Extension: `NSExtensionPrincipalClass` al posto dello storyboard.
+- Codemagic build **`1.0.0+48`** ? TestFlight (Appetize non supporta app con extension).
