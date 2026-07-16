@@ -27,6 +27,10 @@ struct PendingShare: Codable {
     let folderDisplayPath: String
     let enqueuedAt: String
     let source: String
+    let tags: [String]?
+    let newFolderName: String?
+    let newFolderParentId: String?
+    let newFolderParentPath: String?
 }
 
 enum AppGroupShareStore {

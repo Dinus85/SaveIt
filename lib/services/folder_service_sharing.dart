@@ -274,6 +274,7 @@ mixin FolderServiceSharing on FolderServiceBase {
     List<String> tags = const [],
     String? selectedFolderId,
     String? selectedFolderPath, // Path completo es. "A › B"
+    bool markAsImported = true,
   }) async {
     startActionTiming('save_shared_post');
 
@@ -388,7 +389,7 @@ mixin FolderServiceSharing on FolderServiceBase {
           creatorUsername: creatorUsername,
           tags: tags,
           folderId: realFolderId,
-          isShared: true,
+          isShared: markAsImported,
         );
 
         print('DEBUG: Post salvato con ID: ${savedPost.id}');

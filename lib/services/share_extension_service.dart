@@ -148,8 +148,11 @@ class ShareExtensionService {
             const <dynamic>[];
     if (rawItems.isEmpty) return;
 
-    final foldersById = {for (final folder in folders) folder.id: folder};
-    final defaultFolder = _findDefaultFolder(folders);
+    final workingFolders = List<Folder>.from(folders);
+    final foldersById = {
+      for (final folder in workingFolders) folder.id: folder,
+    };
+    final defaultFolder = _findDefaultFolder(workingFolders);
     if (defaultFolder == null) return;
 
     for (final rawItem in rawItems) {
@@ -169,17 +172,68 @@ class ShareExtensionService {
 
       try {
         final requestedFolderId = item['folderId']?.toString();
-        final targetFolder =
-            foldersById[requestedFolderId] ?? defaultFolder;
+        var targetFolder = foldersById[requestedFolderId] ?? defaultFolder;
         final queuedPath = item['folderDisplayPath']?.toString().trim();
-        final folderPath = targetFolder.isDefault
+        var folderPath = targetFolder.isDefault
             ? 'Tutti'
             : (queuedPath == null || queuedPath.isEmpty
                 ? targetFolder.name
                 : queuedPath);
 
+        final newFolderName = item['newFolderName']?.toString().trim();
+        if (newFolderName != null && newFolderName.isNotEmpty) {
+          final requestedParentId =
+              item['newFolderParentId']?.toString().trim();
+          final parentFolder = foldersById[requestedParentId];
+          final parentId = parentFolder == null || parentFolder.isDefault
+              ? null
+              : parentFolder.id;
+
+          Folder? createdOrExisting;
+          for (final folder in workingFolders) {
+            if (!folder.isDefault &&
+                folder.parentId == parentId &&
+                folder.name.toLowerCase() == newFolderName.toLowerCase()) {
+              createdOrExisting = folder;
+              break;
+            }
+          }
+          createdOrExisting ??= await DataService.instance.createFolder(
+            name: newFolderName,
+            color: '#BB86FC',
+            parentId: parentId,
+          );
+
+          targetFolder = createdOrExisting;
+          if (!foldersById.containsKey(createdOrExisting.id)) {
+            workingFolders.add(createdOrExisting);
+            foldersById[createdOrExisting.id] = createdOrExisting;
+          }
+
+          final parentPath = item['newFolderParentPath']?.toString().trim();
+          folderPath =
+              parentId == null || parentPath == null || parentPath.isEmpty
+                  ? createdOrExisting.name
+                  : '$parentPath › ${createdOrExisting.name}';
+        }
+
         final metadata = await UrlMetadataService.resolveImportMetadata(url);
         final title = metadata.title?.trim();
+        final queuedTags = item['tags'] is List
+            ? List<dynamic>.from(item['tags'] as List)
+                .map((tag) => tag.toString().trim())
+                .where((tag) => tag.isNotEmpty)
+            : const Iterable<String>.empty();
+        final tags = <String>[];
+        final normalizedTags = <String>{};
+        for (final tag in [
+          ...metadata.extractedHashtags,
+          ...queuedTags,
+        ]) {
+          if (normalizedTags.add(tag.toLowerCase())) {
+            tags.add(tag);
+          }
+        }
 
         await FolderService().saveSharedPostWithOptionalFolder(
           url: url,
@@ -192,9 +246,10 @@ class ShareExtensionService {
           previewStorageUrl: metadata.previewStorageUrl,
           creatorName: metadata.creatorName,
           creatorUsername: metadata.creatorUsername,
-          tags: metadata.extractedHashtags,
+          tags: tags,
           selectedFolderId: targetFolder.id,
           selectedFolderPath: folderPath,
+          markAsImported: false,
         );
 
         await _channel.invokeMethod<void>(

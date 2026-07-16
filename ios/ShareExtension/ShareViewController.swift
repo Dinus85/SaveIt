@@ -5,12 +5,40 @@ final class ShareViewController: UIViewController {
     private let urlLabel = UILabel()
     private let messageLabel = UILabel()
     private let saveButton = UIButton(type: .system)
+    private let newFolderButton = UIButton(type: .system)
+    private let tagsTextField = UITextField()
 
     private var catalog: SharedFolderCatalog?
     private var folders: [SharedFolder] = []
     private var selectedFolder: SharedFolder?
+    private var expandedFolderIds = Set<String>()
+    private var pendingNewFolderName: String?
+    private var pendingNewFolderParent: SharedFolder?
     private var sharedURL: String?
     private var sharedText: String?
+
+    private var visibleFolders: [SharedFolder] {
+        let folderIds = Set(folders.map(\.id))
+        let defaultFolders = folders.filter(\.isDefault)
+        let roots = folders.filter { folder in
+            guard !folder.isDefault else { return false }
+            guard let parentId = folder.parentId else { return true }
+            return !folderIds.contains(parentId)
+        }
+
+        var result = sortedFolders(defaultFolders)
+        func append(_ folder: SharedFolder) {
+            result.append(folder)
+            guard expandedFolderIds.contains(folder.id) else { return }
+            for child in children(of: folder) {
+                append(child)
+            }
+        }
+        for root in sortedFolders(roots) {
+            append(root)
+        }
+        return result
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -64,6 +92,22 @@ final class ShareViewController: UIViewController {
         messageLabel.numberOfLines = 0
         messageLabel.text = "Caricamento cartelle…"
 
+        newFolderButton.setTitle("+ Nuova cartella", for: .normal)
+        newFolderButton.contentHorizontalAlignment = .left
+        newFolderButton.addTarget(
+            self,
+            action: #selector(showNewFolderPrompt),
+            for: .touchUpInside
+        )
+        newFolderButton.isEnabled = false
+
+        tagsTextField.borderStyle = .roundedRect
+        tagsTextField.placeholder = "Tag opzionali, separati da virgola"
+        tagsTextField.autocapitalizationType = .none
+        tagsTextField.autocorrectionType = .no
+        tagsTextField.returnKeyType = .done
+        tagsTextField.delegate = self
+
         tableView.dataSource = self
         tableView.delegate = self
         tableView.rowHeight = 50
@@ -72,6 +116,8 @@ final class ShareViewController: UIViewController {
             header,
             urlLabel,
             messageLabel,
+            newFolderButton,
+            tagsTextField,
             tableView,
         ])
         stack.axis = .vertical
@@ -122,7 +168,8 @@ final class ShareViewController: UIViewController {
                 ?? folders.first
             messageLabel.text = folders.isEmpty
                 ? "Nessuna cartella disponibile."
-                : "Scegli la cartella di destinazione:"
+                : "Tocca una cartella con ▸ per espanderla."
+            newFolderButton.isEnabled = !folders.isEmpty
             tableView.reloadData()
             updateSaveButton()
         } catch {
@@ -251,6 +298,92 @@ final class ShareViewController: UIViewController {
             sharedURL != nil && selectedFolder != nil && catalog != nil
     }
 
+    private func sortedFolders(_ values: [SharedFolder]) -> [SharedFolder] {
+        values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func children(of folder: SharedFolder) -> [SharedFolder] {
+        sortedFolders(
+            folders.filter {
+                !$0.isDefault && $0.parentId == folder.id
+            }
+        )
+    }
+
+    private func hasChildren(_ folder: SharedFolder) -> Bool {
+        folders.contains {
+            !$0.isDefault && $0.parentId == folder.id
+        }
+    }
+
+    private func updateDestinationMessage() {
+        guard let selectedFolder else { return }
+        if let pendingNewFolderName {
+            let parentPath = pendingNewFolderParent?.displayPath ?? "radice"
+            messageLabel.text =
+                "Nuova cartella “\(pendingNewFolderName)” in \(parentPath)."
+        } else {
+            messageLabel.text =
+                "Destinazione: \(selectedFolder.displayPath)"
+        }
+    }
+
+    private func parsedTags() -> [String] {
+        var seen = Set<String>()
+        return (tagsTextField.text ?? "")
+            .split(separator: ",")
+            .map {
+                String($0)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            }
+            .filter { tag in
+                guard !tag.isEmpty && tag.count <= 30 else { return false }
+                return seen.insert(tag.lowercased()).inserted
+            }
+            .prefix(20)
+            .map { $0 }
+    }
+
+    @objc private func showNewFolderPrompt() {
+        guard let selectedFolder else { return }
+
+        let parent = selectedFolder.isDefault ? nil : selectedFolder
+        let alert = UIAlertController(
+            title: "Nuova cartella",
+            message: parent == nil
+                ? "Verrà creata al livello principale."
+                : "Verrà creata dentro \(parent!.displayPath).",
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "Nome cartella"
+            textField.autocapitalizationType = .sentences
+            textField.returnKeyType = .done
+        }
+        alert.addAction(UIAlertAction(title: "Annulla", style: .cancel))
+        alert.addAction(
+            UIAlertAction(title: "Crea e seleziona", style: .default) {
+                [weak self, weak alert] _ in
+                guard
+                    let self,
+                    let name = alert?.textFields?.first?.text?
+                        .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !name.isEmpty
+                else {
+                    return
+                }
+                self.pendingNewFolderName = String(name.prefix(100))
+                self.pendingNewFolderParent = parent
+                self.updateDestinationMessage()
+                self.updateSaveButton()
+            }
+        )
+        present(alert, animated: true)
+    }
+
     @objc private func saveShare() {
         guard
             let catalog,
@@ -270,11 +403,20 @@ final class ShareViewController: UIViewController {
                 folderId: selectedFolder.id,
                 folderDisplayPath: selectedFolder.displayPath,
                 enqueuedAt: ISO8601DateFormatter().string(from: Date()),
-                source: "ios_share_extension"
+                source: "ios_share_extension",
+                tags: parsedTags(),
+                newFolderName: pendingNewFolderName,
+                newFolderParentId: pendingNewFolderParent?.id,
+                newFolderParentPath: pendingNewFolderParent?.displayPath
             )
             try AppGroupShareStore.enqueue(item)
+            let destination = pendingNewFolderName.map { name in
+                pendingNewFolderParent.map {
+                    "\($0.displayPath) › \(name)"
+                } ?? name
+            } ?? selectedFolder.displayPath
             messageLabel.text =
-                "Salvato in \(selectedFolder.displayPath). Apri SaveIn! per completare l’importazione."
+                "Salvato in \(destination). Apri SaveIn! per completare l’importazione."
             tableView.isUserInteractionEnabled = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 [weak self] in
@@ -297,7 +439,7 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         _ tableView: UITableView,
         numberOfRowsInSection section: Int
     ) -> Int {
-        folders.count
+        visibleFolders.count
     }
 
     func tableView(
@@ -307,9 +449,13 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         let identifier = "FolderCell"
         let cell = tableView.dequeueReusableCell(withIdentifier: identifier)
             ?? UITableViewCell(style: .subtitle, reuseIdentifier: identifier)
-        let folder = folders[indexPath.row]
+        let folder = visibleFolders[indexPath.row]
+        let expandable = hasChildren(folder)
+        let marker = expandable
+            ? (expandedFolderIds.contains(folder.id) ? "▾ " : "▸ ")
+            : ""
 
-        cell.textLabel?.text = folder.name
+        cell.textLabel?.text = marker + folder.name
         cell.detailTextLabel?.text = folder.isDefault
             ? "Tutti i post"
             : folder.displayPath
@@ -324,8 +470,26 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         _ tableView: UITableView,
         didSelectRowAt indexPath: IndexPath
     ) {
-        selectedFolder = folders[indexPath.row]
+        let folder = visibleFolders[indexPath.row]
+        selectedFolder = folder
+        pendingNewFolderName = nil
+        pendingNewFolderParent = nil
+        if hasChildren(folder) {
+            if expandedFolderIds.contains(folder.id) {
+                expandedFolderIds.remove(folder.id)
+            } else {
+                expandedFolderIds.insert(folder.id)
+            }
+        }
+        updateDestinationMessage()
         tableView.reloadData()
         updateSaveButton()
+    }
+}
+
+extension ShareViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
 }

@@ -1612,3 +1612,14 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
    `Salva`.
 4. Riaprire SaveIn! e verificare che il post compaia nella cartella scelta.
 5. Ripetere con un post social che fornisce un URL o testo contenente un URL.
+
+### Build `1.0.0+46` — selettore gerarchico, cartelle e tag
+
+- Il selettore della Share Extension mostra inizialmente solo le cartelle root;
+  `▸`/`▾` apre e chiude le sottocartelle.
+- `+ Nuova cartella` accoda la creazione alla radice (se è selezionato `Tutti`)
+  o dentro la cartella selezionata; il Runner la crea su Firebase prima del post.
+- Campo tag opzionale: massimo 20 tag separati da virgola, uniti senza duplicati
+  agli hashtag estratti dai metadati.
+- I post provenienti dalla nuova extension iOS non mostrano il badge
+  `post importato`; Android mantiene il comportamento esistente.
