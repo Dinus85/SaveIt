@@ -55,16 +55,35 @@ final class ShareViewController: UIViewController {
     private func loadSharedURL() {
         guard
             let item = extensionContext?.inputItems.first as? NSExtensionItem,
-            let provider = item.attachments?.first(where: {
-                $0.hasItemConformingToTypeIdentifier("public.url")
-            })
+            let providers = item.attachments
         else {
             urlLabel.text = "Nessun link web ricevuto."
             return
         }
 
+        if let urlProvider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier("public.url")
+        }) {
+            loadValue(from: urlProvider, typeIdentifier: "public.url")
+            return
+        }
+
+        if let textProvider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier("public.plain-text")
+        }) {
+            loadValue(from: textProvider, typeIdentifier: "public.plain-text")
+            return
+        }
+
+        urlLabel.text = "Nessun link web riconosciuto."
+    }
+
+    private func loadValue(
+        from provider: NSItemProvider,
+        typeIdentifier: String
+    ) {
         provider.loadItem(
-            forTypeIdentifier: "public.url",
+            forTypeIdentifier: typeIdentifier,
             options: nil
         ) { [weak self] value, error in
             DispatchQueue.main.async {
