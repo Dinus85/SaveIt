@@ -8,9 +8,11 @@ import UIKit
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
-    ShareExtensionBridge.register(
-      with: registrar(forPlugin: "ShareExtensionBridge")
-    )
+    if let shareExtensionRegistrar = registrar(
+      forPlugin: "ShareExtensionBridge"
+    ) {
+      ShareExtensionBridge.register(with: shareExtensionRegistrar)
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
