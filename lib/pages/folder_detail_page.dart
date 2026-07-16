@@ -675,7 +675,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       bottomNavigationBar: CustomBottomNavigationBar(
         isDarkTheme: widget.isDarkTheme,
         onHomeTap: () => Navigator.popUntil(context, (route) => route.isFirst),
-        onAddTap: () => _onAddButtonTap(themeColors),
+        onAddTap: () => _showCreateFolderDialog(themeColors),
         onAccountTap: _openAccountPage,
       ),
       floatingActionButton: (!_isSearching && _showScrollToTopButton)
@@ -793,21 +793,10 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                       ),
               ),
               if (AuthService().currentUser != null && !_isSearching)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Aggiungi contenuto',
-                      icon: Icon(Icons.add_link,
-                          color: themeColors.iconColor, size: 26),
-                      onPressed: _addContentToFolder,
-                    ),
-                    LogoutButton(
-                      onLogoutComplete: () {},
-                      isDarkTheme: widget.isDarkTheme,
-                      onThemeChanged: widget.onThemeChanged,
-                    ),
-                  ],
+                LogoutButton(
+                  onLogoutComplete: () {},
+                  isDarkTheme: widget.isDarkTheme,
+                  onThemeChanged: widget.onThemeChanged,
                 ),
             ],
           ),
@@ -1138,117 +1127,31 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
   Widget _buildEmptyState(ThemeColors themeColors) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              _currentFolder.isSpecial ? Icons.folder_special : Icons.folder_open,
-              color: themeColors.subtitleColor,
-              size: 64,
-            ),
-            SizedBox(height: 16),
-            Text(
-              _currentFolder.isSpecial ? 'Nessun post salvato' : 'Cartella vuota',
-              style: TextStyle(color: themeColors.subtitleColor, fontSize: 18),
-            ),
-            SizedBox(height: 8),
-            Text(
-              _currentFolder.isSpecial
-                  ? 'Aggiungi un link con il pulsante qui sotto oppure condividi da Safari o social.'
-                  : _subfolderCreationError == null
-                      ? 'Aggiungi contenuti in questa cartella con il pulsante qui sotto. Usa + per creare sottocartelle.'
-                      : _subfolderCreationError!,
-              style: TextStyle(color: themeColors.subtitleColor, fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _addContentToFolder,
-                icon: const Icon(Icons.add_link),
-                label: const Text('Aggiungi contenuto'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue.shade700,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _addContentToFolder() async {
-    final folderPath = _currentFolder.isSpecial
-        ? ''
-        : buildFullPathForFolder(_currentFolder);
-
-    final result = await SharingService.promptAndSaveLink(
-      context,
-      initialFolderPath: folderPath.isEmpty ? null : folderPath,
-      isDarkTheme: widget.isDarkTheme,
-    );
-
-    if (!mounted) return;
-
-    if (result != null) {
-      await _forceRefreshPosts();
-      if (mounted) {
-        setState(() {
-          _loadPosts();
-        });
-      }
-    }
-  }
-
-  void _onAddButtonTap(ThemeColors themeColors) {
-    if (_currentFolder.isSpecial) {
-      _addContentToFolder();
-      return;
-    }
-
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor:
-          widget.isDarkTheme ? Colors.grey.shade900 : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.add_link, color: Colors.blue),
-                title: const Text('Aggiungi contenuto'),
-                subtitle: const Text('Salva un link in questa cartella'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _addContentToFolder();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.create_new_folder_outlined),
-                title: const Text('Nuova sottocartella'),
-                subtitle: const Text('Organizza con una sottocartella'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _showCreateFolderDialog(themeColors);
-                },
-              ),
-            ],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _currentFolder.isSpecial ? Icons.folder_special : Icons.folder_open,
+            color: themeColors.subtitleColor,
+            size: 64,
           ),
-        );
-      },
+          SizedBox(height: 16),
+          Text(
+            _currentFolder.isSpecial ? 'Nessun post salvato' : 'Cartella vuota',
+            style: TextStyle(color: themeColors.subtitleColor, fontSize: 18),
+          ),
+          SizedBox(height: 8),
+          Text(
+            _currentFolder.isSpecial
+                ? 'I post che salvi appariranno qui'
+                : _subfolderCreationError == null
+                    ? 'Usa il pulsante + per creare sottocartelle'
+                    : _subfolderCreationError!,
+            style: TextStyle(color: themeColors.subtitleColor, fontSize: 14),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
     );
   }
 
