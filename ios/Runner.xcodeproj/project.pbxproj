@@ -16,6 +16,9 @@
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		B43000011CF9000F007C117D /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43000061CF9000F007C117D /* ShareViewController.swift */; };
 		B43000021CF9000F007C117D /* ShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B43000051CF9000F007C117D /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C50000011CF9000F007C117D /* AppGroupShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000041CF9000F007C117D /* AppGroupShareStore.swift */; };
+		C50000021CF9000F007C117D /* AppGroupShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000041CF9000F007C117D /* AppGroupShareStore.swift */; };
+		C50000031CF9000F007C117D /* ShareExtensionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000051CF9000F007C117D /* ShareExtensionBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -79,6 +82,9 @@
 		B43000061CF9000F007C117D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		B43000071CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B43000081CF9000F007C117D /* ShareExtension.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = ShareExtension.xcconfig; path = Flutter/ShareExtension.xcconfig; sourceTree = "<group>"; };
+		C50000041CF9000F007C117D /* AppGroupShareStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupShareStore.swift; sourceTree = "<group>"; };
+		C50000051CF9000F007C117D /* ShareExtensionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareExtensionBridge.swift; sourceTree = "<group>"; };
+		C50000061CF9000F007C117D /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -124,6 +130,7 @@
 			children = (
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
+				C50000071CF9000F007C117D /* Shared */,
 				B43000091CF9000F007C117D /* ShareExtension */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
@@ -150,9 +157,18 @@
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
+				C50000051CF9000F007C117D /* ShareExtensionBridge.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
+			sourceTree = "<group>";
+		};
+		C50000071CF9000F007C117D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				C50000041CF9000F007C117D /* AppGroupShareStore.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		B43000091CF9000F007C117D /* ShareExtension */ = {
@@ -160,6 +176,7 @@
 			children = (
 				B43000061CF9000F007C117D /* ShareViewController.swift */,
 				B43000071CF9000F007C117D /* Info.plist */,
+				C50000061CF9000F007C117D /* ShareExtension.entitlements */,
 			);
 			path = ShareExtension;
 			sourceTree = "<group>";
@@ -342,6 +359,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				C50000011CF9000F007C117D /* AppGroupShareStore.swift in Sources */,
+				C50000031CF9000F007C117D /* ShareExtensionBridge.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -351,6 +370,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B43000011CF9000F007C117D /* ShareViewController.swift in Sources */,
+				C50000021CF9000F007C117D /* AppGroupShareStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -672,6 +692,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				GENERATE_INFOPLIST_FILE = NO;
@@ -698,6 +719,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				GENERATE_INFOPLIST_FILE = NO;
@@ -723,6 +745,7 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				GENERATE_INFOPLIST_FILE = NO;

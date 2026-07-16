@@ -172,7 +172,8 @@ abstract class FolderServiceBase {
       }
     } else if (isAuthenticated && previousUserId != currentUserId) {
       // Stesso stato (loggato), ma utente diverso: svuota e ricarica
-      print('DEBUG: Cambio utente da $previousUserId a $currentUserId - forcing reload');
+      print(
+          'DEBUG: Cambio utente da $previousUserId a $currentUserId - forcing reload');
       DataService.instance.handleUserLogout(previousUserId: previousUserId);
       await handleUserLogout();
       await handleUserLogin();
@@ -515,7 +516,8 @@ abstract class FolderServiceBase {
       if (user != null) {
         isAuthenticated = true;
         currentUserId = user.id;
-        print('DEBUG: Auth sincronizzata in executeAuthenticatedOperation (userId: ${user.id})');
+        print(
+            'DEBUG: Auth sincronizzata in executeAuthenticatedOperation (userId: ${user.id})');
       }
     }
 
@@ -662,8 +664,7 @@ abstract class FolderServiceBase {
   /// Usato per convertire ID database → MockFolder UI
   MockFolder? findMockFolderByRealId(String folderId) {
     MockFolder? searchRecursive(MockFolder folder) {
-      // Cerca nel folder corrente (confronta con realFolders se necessario)
-      // Per ora uso il nome, ma potremmo aggiungere un mapping ID
+      if (folder.id == folderId) return folder;
 
       for (var child in folder.children) {
         final result = searchRecursive(child);

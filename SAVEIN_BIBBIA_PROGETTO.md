@@ -1580,3 +1580,35 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 **6. Dashboard web** (solo se modificata): `flutter build web --release --base-href /` + `firebase deploy --only hosting`.
 
 **7. Verifica post-release** — import social; anteprima subito in cartella; stesso URL su secondo account → metadati da `global_posts`; selettore cartelle senza banner limiti.
+
+## Aggiornamenti 16/07/2026 — Share Extension nativa isolata (build `1.0.0+44`)
+
+Le implementazioni sperimentali delle build 45–50 descritte sopra sono state
+annullate. La nuova implementazione riparte dalla build stabile 42 senza
+`receive_sharing_intent` sul target iOS.
+
+### Architettura validata
+
+- Target nativo `ShareExtension` (`eu.savein.app.ShareExtension`), senza Flutter
+  né plugin CocoaPods.
+- App Group condiviso: `group.eu.savein.app.share`.
+- Il Runner esporta nell'App Group un catalogo JSON delle cartelle, inclusi
+  ID, gerarchia e percorso completo.
+- La Share Extension mostra il selettore cartelle nativo, riceve URL o testo
+  contenente un URL e accoda atomicamente la richiesta di salvataggio.
+- Il Runner importa la coda al successivo avvio/rientro in primo piano,
+  recupera i metadati e salva il post tramite il flusso Firebase esistente.
+- Se una cartella è stata eliminata, l'import usa `Tutti`; una richiesta
+  appartenente a un altro account non viene importata.
+- `tool/validate_ios_share_bundle.py` resta il controllo obbligatorio
+  dell'artefatto `.app`/`.app.zip` prodotto da Codemagic.
+
+### Sequenza test build 44
+
+1. Aprire SaveIn! ed effettuare il login, così il catalogo cartelle viene
+   esportato.
+2. Safari → Condividi → SaveIn!.
+3. Verificare URL, elenco gerarchico delle cartelle, selezione e pulsante
+   `Salva`.
+4. Riaprire SaveIn! e verificare che il post compaia nella cartella scelta.
+5. Ripetere con un post social che fornisce un URL o testo contenente un URL.

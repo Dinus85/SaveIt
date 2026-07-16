@@ -26,6 +26,7 @@ import 'package:savein/widgets/banner_ad_widget.dart';
 import 'package:savein/services/auth_service.dart';
 import 'package:savein/widgets/custom_bottom_nav.dart';
 import 'package:savein/services/sharing_service.dart';
+import 'package:savein/services/share_extension_service.dart';
 import 'package:savein/widgets/new_signup_premium_promo_dialog.dart';
 import 'package:savein/utils/theme_helpers.dart';
 import 'package:savein/utils/dialog_helpers.dart';
@@ -460,13 +461,19 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
       _wasInBackground = true;
       _lastBackgroundTime = DateTime.now();
       _analytics.endSession();
-    } else if (state == AppLifecycleState.resumed && _wasInBackground) {
-      _wasInBackground = false;
+      unawaited(ShareExtensionService.instance.exportCatalog());
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(
+        ShareExtensionService.instance.refreshCatalogAndImport(),
+      );
 
-      if (kDebugMode) {
-        print('DEBUG: App resumed - sincronizzo profilo utente da Firestore');
+      if (_wasInBackground) {
+        _wasInBackground = false;
+        if (kDebugMode) {
+          print('DEBUG: App resumed - sincronizzo profilo utente da Firestore');
+        }
+        unawaited(AuthService().reloadCurrentUserFromFirestore());
       }
-      unawaited(AuthService().reloadCurrentUserFromFirestore());
     }
   }
 
@@ -478,6 +485,9 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
 
       AuthService().onUserProfileChanged = () {
         PlanLimitsService.invalidateUsageCache();
+        unawaited(
+          ShareExtensionService.instance.refreshCatalogAndImport(),
+        );
       };
 
       // Pre-carica i limiti e l'utilizzo per velocizzare i controlli UI
@@ -486,6 +496,9 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
 
       _sharingService.initialize(
         onSharedContent: _handleSharedContent,
+      );
+      unawaited(
+        ShareExtensionService.instance.refreshCatalogAndImport(),
       );
 
       if (kDebugMode) DebugLogger.logSuccess('Tutti i servizi inizializzati');
@@ -1467,7 +1480,8 @@ class _WebHomePageState extends State<WebHomePage>
       final user = AuthService().currentUser;
       if (user == null) return;
 
-      final canUseReminders = await PlanLimitsService.canUseFeature('reminders');
+      final canUseReminders =
+          await PlanLimitsService.canUseFeature('reminders');
       if (!canUseReminders) return;
 
       final prefs = await SharedPreferences.getInstance();
@@ -1788,7 +1802,8 @@ class _WebHomePageState extends State<WebHomePage>
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Aggiornamento cartelle non riuscito: ${e.toString()}'),
+            content:
+                Text('Aggiornamento cartelle non riuscito: ${e.toString()}'),
             backgroundColor: Colors.red,
             duration: Duration(seconds: 4),
           ),
@@ -2801,14 +2816,14 @@ class _WebHomePageState extends State<WebHomePage>
       final folders = await DataService.instance
           .getFolders(forceRefresh: true)
           .timeout(const Duration(seconds: 6));
-      return folders.any((folder) =>
-          !folder.isDefault && _isRealUserFolderName(folder.name));
+      return folders.any(
+          (folder) => !folder.isDefault && _isRealUserFolderName(folder.name));
     } catch (e) {
       if (kDebugMode) {
         print('DEBUG: controllo prima cartella da backend fallito: $e');
       }
-      return _folderService.folders.any((folder) =>
-          !folder.isSpecial && _isRealUserFolderName(folder.name));
+      return _folderService.folders.any(
+          (folder) => !folder.isSpecial && _isRealUserFolderName(folder.name));
     }
   }
 
@@ -2841,7 +2856,8 @@ class _WebHomePageState extends State<WebHomePage>
           );
     } catch (e) {
       if (kDebugMode) {
-        print('DEBUG: richiesta consenso notifiche dopo prima cartella fallita: $e');
+        print(
+            'DEBUG: richiesta consenso notifiche dopo prima cartella fallita: $e');
       }
     }
   }
@@ -3138,8 +3154,8 @@ class _RemindersBannerSheet extends StatelessWidget {
                             textColor: textColor,
                             subtitleColor: subtitleColor,
                             onTap: () async {
-                              final canOpen =
-                                  await AppAccessService().checkFeatureAvailable(
+                              final canOpen = await AppAccessService()
+                                  .checkFeatureAvailable(
                                 context,
                                 'reminders',
                                 'Reminder',

@@ -299,7 +299,36 @@ mixin FolderServiceSharing on FolderServiceBase {
         print('DEBUG: selectedFolderPath: $selectedFolderPath');
         print('DEBUG: selectedFolderId: $selectedFolderId');
 
-        if (selectedFolderPath == null ||
+        if (selectedFolderId != null && selectedFolderId.isNotEmpty) {
+          final matchingFolders =
+              realFolders.where((folder) => folder.id == selectedFolderId);
+          final selectedRealFolder =
+              matchingFolders.isEmpty ? null : matchingFolders.first;
+
+          if (selectedRealFolder == null) {
+            print(
+                'WARNING: Folder ID $selectedFolderId non trovata, usando Tutti');
+            final defaultFolder =
+                realFolders.firstWhere((folder) => folder.isDefault);
+            realFolderId = defaultFolder.id;
+            targetFolderDisplayName = 'Tutti';
+            targetMockFolder = folders.firstWhere((folder) => folder.isSpecial);
+          } else {
+            realFolderId = selectedRealFolder.id;
+            targetFolderDisplayName = selectedRealFolder.isDefault
+                ? 'Tutti'
+                : (selectedFolderPath?.isNotEmpty == true
+                    ? selectedFolderPath!
+                    : selectedRealFolder.name);
+            targetMockFolder = findMockFolderByRealId(selectedRealFolder.id);
+            if (selectedRealFolder.isDefault && targetMockFolder == null) {
+              targetMockFolder =
+                  folders.firstWhere((folder) => folder.isSpecial);
+            }
+            print(
+                'DEBUG: Trovata cartella tramite ID: ${selectedRealFolder.name} (${selectedRealFolder.id})');
+          }
+        } else if (selectedFolderPath == null ||
             selectedFolderPath.isEmpty ||
             selectedFolderPath == 'Tutti') {
           // Salva in "Tutti"
