@@ -6,6 +6,17 @@ struct SharedFolderCatalog: Codable {
     let defaultFolderId: String
     let exportedAt: String
     let folders: [SharedFolder]
+    let limits: SharedPlanLimits?
+}
+
+struct SharedPlanLimits: Codable {
+    let rootFoldersEnabled: Bool
+    let rootFolderLimit: Int
+    let childFoldersEnabled: Bool
+    let childFolderLimit: Int
+    let folderLevelsEnabled: Bool
+    let folderLevelLimit: Int
+    let manualTagsEnabled: Bool
 }
 
 struct SharedFolder: Codable {

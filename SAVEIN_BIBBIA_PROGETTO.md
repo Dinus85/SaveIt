@@ -1623,3 +1623,19 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
   agli hashtag estratti dai metadati.
 - I post provenienti dalla nuova extension iOS non mostrano il badge
   `post importato`; Android mantiene il comportamento esistente.
+
+### Build `1.0.0+47` — azioni contestuali e limiti dashboard
+
+- Il pulsante `+` è accanto a ogni cartella: su `Tutti` crea una root, sulle
+  altre crea una sottocartella.
+- I nomi root non ripetono più lo stesso percorso nella seconda riga.
+- I tag manuali sono presentati dall'azione evidente `Aggiungi tag al post`,
+  con riepilogo dei tag selezionati.
+- Il Runner esporta nell'App Group i limiti correnti di `root_folders`,
+  `child_folders`, `folder_levels` e `manual_tags`, letti da
+  `PlanLimitsService`/dashboard.
+- L'importazione ricontrolla i limiti correnti prima di creare la cartella o
+  applicare tag manuali; i tag automatici estratti dai metadati restano
+  indipendenti.
+- Creazione Firebase e applicazione dei tag avvengono quando SaveIn! torna in
+  primo piano e importa la coda, non al semplice tocco del `+` nell'extension.

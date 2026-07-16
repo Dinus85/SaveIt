@@ -5,8 +5,7 @@ final class ShareViewController: UIViewController {
     private let urlLabel = UILabel()
     private let messageLabel = UILabel()
     private let saveButton = UIButton(type: .system)
-    private let newFolderButton = UIButton(type: .system)
-    private let tagsTextField = UITextField()
+    private let tagsButton = UIButton(type: .system)
 
     private var catalog: SharedFolderCatalog?
     private var folders: [SharedFolder] = []
@@ -14,6 +13,7 @@ final class ShareViewController: UIViewController {
     private var expandedFolderIds = Set<String>()
     private var pendingNewFolderName: String?
     private var pendingNewFolderParent: SharedFolder?
+    private var selectedTags: [String] = []
     private var sharedURL: String?
     private var sharedText: String?
 
@@ -92,21 +92,15 @@ final class ShareViewController: UIViewController {
         messageLabel.numberOfLines = 0
         messageLabel.text = "Caricamento cartelle…"
 
-        newFolderButton.setTitle("+ Nuova cartella", for: .normal)
-        newFolderButton.contentHorizontalAlignment = .left
-        newFolderButton.addTarget(
+        tagsButton.setTitle("+ Aggiungi tag al post", for: .normal)
+        tagsButton.contentHorizontalAlignment = .left
+        tagsButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        tagsButton.addTarget(
             self,
-            action: #selector(showNewFolderPrompt),
+            action: #selector(showTagsPrompt),
             for: .touchUpInside
         )
-        newFolderButton.isEnabled = false
-
-        tagsTextField.borderStyle = .roundedRect
-        tagsTextField.placeholder = "Tag opzionali, separati da virgola"
-        tagsTextField.autocapitalizationType = .none
-        tagsTextField.autocorrectionType = .no
-        tagsTextField.returnKeyType = .done
-        tagsTextField.delegate = self
+        tagsButton.isEnabled = false
 
         tableView.dataSource = self
         tableView.delegate = self
@@ -116,8 +110,7 @@ final class ShareViewController: UIViewController {
             header,
             urlLabel,
             messageLabel,
-            newFolderButton,
-            tagsTextField,
+            tagsButton,
             tableView,
         ])
         stack.axis = .vertical
@@ -142,7 +135,7 @@ final class ShareViewController: UIViewController {
                 equalTo: view.safeAreaLayoutGuide.bottomAnchor,
                 constant: -12
             ),
-            tableView.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            tableView.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
         ])
     }
 
@@ -169,7 +162,7 @@ final class ShareViewController: UIViewController {
             messageLabel.text = folders.isEmpty
                 ? "Nessuna cartella disponibile."
                 : "Tocca una cartella con ▸ per espanderla."
-            newFolderButton.isEnabled = !folders.isEmpty
+            updateTagsButton()
             tableView.reloadData()
             updateSaveButton()
         } catch {
@@ -323,16 +316,23 @@ final class ShareViewController: UIViewController {
         if let pendingNewFolderName {
             let parentPath = pendingNewFolderParent?.displayPath ?? "radice"
             messageLabel.text =
-                "Nuova cartella “\(pendingNewFolderName)” in \(parentPath)."
+                "“\(pendingNewFolderName)” verrà creata in \(parentPath) "
+                + "quando salvi il post."
+            saveButton.setTitle("Crea e salva", for: .normal)
         } else {
             messageLabel.text =
                 "Destinazione: \(selectedFolder.displayPath)"
+            saveButton.setTitle("Salva", for: .normal)
         }
     }
 
     private func parsedTags() -> [String] {
+        selectedTags
+    }
+
+    private func parseTags(from text: String) -> [String] {
         var seen = Set<String>()
-        return (tagsTextField.text ?? "")
+        return text
             .split(separator: ",")
             .map {
                 String($0)
@@ -347,10 +347,112 @@ final class ShareViewController: UIViewController {
             .map { $0 }
     }
 
-    @objc private func showNewFolderPrompt() {
-        guard let selectedFolder else { return }
+    private func updateTagsButton() {
+        let allowed = catalog?.limits?.manualTagsEnabled == true
+        tagsButton.isEnabled = allowed
+        if !allowed {
+            tagsButton.setTitle(
+                "Tag manuali non disponibili per il tuo piano",
+                for: .normal
+            )
+        } else if selectedTags.isEmpty {
+            tagsButton.setTitle("+ Aggiungi tag al post", for: .normal)
+        } else {
+            tagsButton.setTitle(
+                "🏷 Tag: \(selectedTags.joined(separator: ", "))",
+                for: .normal
+            )
+        }
+    }
 
-        let parent = selectedFolder.isDefault ? nil : selectedFolder
+    @objc private func showTagsPrompt() {
+        guard catalog?.limits?.manualTagsEnabled == true else { return }
+        let alert = UIAlertController(
+            title: "Aggiungi tag al post",
+            message: "Inserisci fino a 20 tag separati da virgola.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { [selectedTags] textField in
+            textField.text = selectedTags.joined(separator: ", ")
+            textField.placeholder = "es. ricette, dolci, estate"
+            textField.autocapitalizationType = .none
+            textField.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Annulla", style: .cancel))
+        alert.addAction(
+            UIAlertAction(title: "Conferma", style: .default) {
+                [weak self, weak alert] _ in
+                guard let self else { return }
+                self.selectedTags = self.parseTags(
+                    from: alert?.textFields?.first?.text ?? ""
+                )
+                self.updateTagsButton()
+            }
+        )
+        present(alert, animated: true)
+    }
+
+    private func folderCreationBlockMessage(
+        for parentCandidate: SharedFolder
+    ) -> String? {
+        guard let limits = catalog?.limits else {
+            return "Apri SaveIn! per aggiornare i limiti del tuo piano."
+        }
+
+        if parentCandidate.isDefault {
+            guard limits.rootFoldersEnabled else {
+                return "La creazione di cartelle principali è disabilitata."
+            }
+            let rootCount = folders.filter {
+                !$0.isDefault && $0.parentId == nil
+            }.count
+            if limits.rootFolderLimit > 0 &&
+                rootCount >= limits.rootFolderLimit
+            {
+                return "Hai raggiunto il limite di cartelle principali."
+            }
+            return nil
+        }
+
+        guard limits.childFoldersEnabled else {
+            return "La creazione di sottocartelle è disabilitata."
+        }
+        guard limits.folderLevelsEnabled else {
+            return "La creazione di nuovi livelli è disabilitata."
+        }
+        let childCount = children(of: parentCandidate).count
+        if limits.childFolderLimit > 0 &&
+            childCount >= limits.childFolderLimit
+        {
+            return "Hai raggiunto il limite di sottocartelle."
+        }
+        if limits.folderLevelLimit > 0 &&
+            parentCandidate.level >= limits.folderLevelLimit - 1
+        {
+            return "Hai raggiunto il limite di livelli delle cartelle."
+        }
+        return nil
+    }
+
+    @objc private func createFolderFromRow(_ sender: UIButton) {
+        let currentFolders = visibleFolders
+        guard currentFolders.indices.contains(sender.tag) else { return }
+        let parentCandidate = currentFolders[sender.tag]
+        if let message = folderCreationBlockMessage(for: parentCandidate) {
+            let alert = UIAlertController(
+                title: "Nuova cartella non disponibile",
+                message: message,
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        showNewFolderPrompt(for: parentCandidate)
+    }
+
+    private func showNewFolderPrompt(for parentCandidate: SharedFolder) {
+        let parent = parentCandidate.isDefault ? nil : parentCandidate
         let alert = UIAlertController(
             title: "Nuova cartella",
             message: parent == nil
@@ -365,7 +467,7 @@ final class ShareViewController: UIViewController {
         }
         alert.addAction(UIAlertAction(title: "Annulla", style: .cancel))
         alert.addAction(
-            UIAlertAction(title: "Crea e seleziona", style: .default) {
+            UIAlertAction(title: "Usa questa cartella", style: .default) {
                 [weak self, weak alert] _ in
                 guard
                     let self,
@@ -377,8 +479,10 @@ final class ShareViewController: UIViewController {
                 }
                 self.pendingNewFolderName = String(name.prefix(100))
                 self.pendingNewFolderParent = parent
+                self.selectedFolder = parentCandidate
                 self.updateDestinationMessage()
                 self.updateSaveButton()
+                self.tableView.reloadData()
             }
         )
         present(alert, animated: true)
@@ -458,11 +562,39 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         cell.textLabel?.text = marker + folder.name
         cell.detailTextLabel?.text = folder.isDefault
             ? "Tutti i post"
-            : folder.displayPath
+            : (folder.level == 0 ? nil : folder.displayPath)
         cell.indentationLevel = folder.isDefault ? 0 : folder.level
         cell.indentationWidth = 18
-        cell.accessoryType =
-            selectedFolder?.id == folder.id ? .checkmark : .none
+
+        let accessoryStack = UIStackView()
+        accessoryStack.axis = .horizontal
+        accessoryStack.alignment = .center
+        accessoryStack.spacing = 10
+        if selectedFolder?.id == folder.id {
+            let checkmark = UIImageView(
+                image: UIImage(systemName: "checkmark")
+            )
+            checkmark.tintColor = view.tintColor
+            accessoryStack.addArrangedSubview(checkmark)
+        }
+
+        let addButton = UIButton(type: .system)
+        addButton.setImage(UIImage(systemName: "plus.circle"), for: .normal)
+        addButton.tag = indexPath.row
+        addButton.accessibilityLabel = folder.isDefault
+            ? "Crea cartella principale"
+            : "Crea sottocartella in \(folder.name)"
+        addButton.addTarget(
+            self,
+            action: #selector(createFolderFromRow(_:)),
+            for: .touchUpInside
+        )
+        if folderCreationBlockMessage(for: folder) != nil {
+            addButton.tintColor = .tertiaryLabel
+        }
+        accessoryStack.addArrangedSubview(addButton)
+        cell.accessoryType = .none
+        cell.accessoryView = accessoryStack
         return cell
     }
 
@@ -474,6 +606,7 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         selectedFolder = folder
         pendingNewFolderName = nil
         pendingNewFolderParent = nil
+        saveButton.setTitle("Salva", for: .normal)
         if hasChildren(folder) {
             if expandedFolderIds.contains(folder.id) {
                 expandedFolderIds.remove(folder.id)
@@ -484,12 +617,5 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         updateDestinationMessage()
         tableView.reloadData()
         updateSaveButton()
-    }
-}
-
-extension ShareViewController: UITextFieldDelegate {
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        textField.resignFirstResponder()
-        return true
     }
 }

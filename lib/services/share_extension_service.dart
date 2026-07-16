@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/models.dart';
 import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/url_metadata_service.dart';
 
 /// Sincronizza cartelle e import differiti con la Share Extension iOS.
@@ -86,6 +87,24 @@ class ShareExtensionService {
     final foldersById = {for (final folder in folders) folder.id: folder};
     final defaultFolder = _findDefaultFolder(folders);
     if (defaultFolder == null) return;
+    final rootRule = await PlanLimitsService.getRule(
+      'root_folders',
+      forceRefresh: true,
+    );
+    final childRule = await PlanLimitsService.getRule(
+      'child_folders',
+      forceRefresh: false,
+    );
+    final levelRule = await PlanLimitsService.getRule(
+      'folder_levels',
+      forceRefresh: false,
+    );
+    final manualTagsRule = await PlanLimitsService.getRule(
+      'manual_tags',
+      forceRefresh: false,
+    );
+    final manualTagsAllowed = manualTagsRule.enabled &&
+        await PlanLimitsService.canUseFeature('manual_tags');
 
     String displayPathFor(Folder folder) {
       if (folder.isDefault) return 'Tutti';
@@ -123,6 +142,15 @@ class ShareExtensionService {
       'userId': userId,
       'defaultFolderId': defaultFolder.id,
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'limits': {
+        'rootFoldersEnabled': rootRule.enabled,
+        'rootFolderLimit': rootRule.limit,
+        'childFoldersEnabled': childRule.enabled,
+        'childFolderLimit': childRule.limit,
+        'folderLevelsEnabled': levelRule.enabled,
+        'folderLevelLimit': levelRule.limit,
+        'manualTagsEnabled': manualTagsAllowed,
+      },
       'folders': folders
           .map(
             (folder) => {
@@ -147,6 +175,11 @@ class ShareExtensionService {
         await _channel.invokeListMethod<dynamic>('readPendingShares') ??
             const <dynamic>[];
     if (rawItems.isEmpty) return;
+    if (kDebugMode) {
+      debugPrint(
+        'Share Extension: ${rawItems.length} richieste in coda.',
+      );
+    }
 
     final workingFolders = List<Folder>.from(folders);
     final foldersById = {
@@ -198,11 +231,22 @@ class ShareExtensionService {
               break;
             }
           }
-          createdOrExisting ??= await DataService.instance.createFolder(
-            name: newFolderName,
-            color: '#BB86FC',
-            parentId: parentId,
-          );
+          if (createdOrExisting == null) {
+            await _validateNewFolderCreation(
+              parentFolder: parentFolder,
+              folders: workingFolders,
+            );
+            createdOrExisting = await DataService.instance.createFolder(
+              name: newFolderName,
+              color: '#BB86FC',
+              parentId: parentId,
+            );
+            if (kDebugMode) {
+              debugPrint(
+                'Share Extension: cartella creata ${createdOrExisting.id}.',
+              );
+            }
+          }
 
           targetFolder = createdOrExisting;
           if (!foldersById.containsKey(createdOrExisting.id)) {
@@ -219,10 +263,15 @@ class ShareExtensionService {
 
         final metadata = await UrlMetadataService.resolveImportMetadata(url);
         final title = metadata.title?.trim();
-        final queuedTags = item['tags'] is List
+        final requestedManualTags = item['tags'] is List
             ? List<dynamic>.from(item['tags'] as List)
                 .map((tag) => tag.toString().trim())
                 .where((tag) => tag.isNotEmpty)
+            : const Iterable<String>.empty();
+        final manualTagsAllowed = requestedManualTags.isEmpty ||
+            await PlanLimitsService.canUseFeature('manual_tags');
+        final queuedTags = manualTagsAllowed
+            ? requestedManualTags
             : const Iterable<String>.empty();
         final tags = <String>[];
         final normalizedTags = <String>{};
@@ -251,6 +300,12 @@ class ShareExtensionService {
           selectedFolderPath: folderPath,
           markAsImported: false,
         );
+        if (kDebugMode) {
+          debugPrint(
+            'Share Extension: post importato in ${targetFolder.id} '
+            'con ${tags.length} tag.',
+          );
+        }
 
         await _channel.invokeMethod<void>(
           'acknowledgePendingShares',
@@ -258,6 +313,17 @@ class ShareExtensionService {
             'ids': [queueId],
           },
         );
+        if (queuedTags.isNotEmpty) {
+          try {
+            await PlanLimitsService.recordFeatureSuccess('manual_tags');
+          } catch (error) {
+            if (kDebugMode) {
+              debugPrint(
+                'Conteggio tag manuali non aggiornato: $error',
+              );
+            }
+          }
+        }
       } catch (error) {
         if (kDebugMode) {
           debugPrint('Import Share Extension $queueId non riuscito: $error');
@@ -271,6 +337,65 @@ class ShareExtensionService {
     return uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
         uri.host.isNotEmpty;
+  }
+
+  Future<void> _validateNewFolderCreation({
+    required Folder? parentFolder,
+    required List<Folder> folders,
+  }) async {
+    if (parentFolder == null || parentFolder.isDefault) {
+      final rule = await PlanLimitsService.getRule(
+        'root_folders',
+        forceRefresh: true,
+      );
+      final rootCount = folders
+          .where((folder) => !folder.isDefault && folder.parentId == null)
+          .length;
+      if (!rule.enabled) {
+        throw Exception(
+          'La creazione di cartelle principali è disabilitata.',
+        );
+      }
+      if (rule.limit > 0 && rootCount >= rule.limit) {
+        throw Exception('Limite cartelle principali raggiunto.');
+      }
+      return;
+    }
+
+    final childRule = await PlanLimitsService.getRule(
+      'child_folders',
+      forceRefresh: true,
+    );
+    final levelRule = await PlanLimitsService.getRule(
+      'folder_levels',
+      forceRefresh: false,
+    );
+    if (!childRule.enabled || !levelRule.enabled) {
+      throw Exception('La creazione di sottocartelle è disabilitata.');
+    }
+
+    final directChildren = folders
+        .where(
+          (folder) => !folder.isDefault && folder.parentId == parentFolder.id,
+        )
+        .length;
+    if (childRule.limit > 0 && directChildren >= childRule.limit) {
+      throw Exception('Limite sottocartelle raggiunto.');
+    }
+
+    final foldersById = {for (final folder in folders) folder.id: folder};
+    var parentLevel = 0;
+    var ancestorId = parentFolder.parentId;
+    final visited = <String>{parentFolder.id};
+    while (ancestorId != null && visited.add(ancestorId)) {
+      final ancestor = foldersById[ancestorId];
+      if (ancestor == null || ancestor.isDefault) break;
+      parentLevel++;
+      ancestorId = ancestor.parentId;
+    }
+    if (levelRule.limit > 0 && parentLevel >= levelRule.limit - 1) {
+      throw Exception('Limite livelli cartelle raggiunto.');
+    }
   }
 
   Folder? _findDefaultFolder(List<Folder> folders) {
