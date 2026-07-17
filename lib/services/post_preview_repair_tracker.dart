@@ -7,6 +7,7 @@ class PostPreviewRepairTracker {
   static final PostPreviewRepairTracker instance = PostPreviewRepairTracker._();
 
   bool _startupRepairStarted = false;
+  DateTime? _lastRepairBatchAt;
   final Set<String> _attemptedPostIds = <String>{};
 
   /// True se il batch di repair all'apertura e' gia' partito in questa sessione.
@@ -15,6 +16,20 @@ class PostPreviewRepairTracker {
   bool tryBeginStartupRepair() {
     if (_startupRepairStarted) return false;
     _startupRepairStarted = true;
+    _lastRepairBatchAt = DateTime.now();
+    return true;
+  }
+
+  /// Permette un nuovo batch (es. al resume) con cooldown anti-spam.
+  bool tryBeginRepairBatch({
+    Duration cooldown = const Duration(seconds: 20),
+  }) {
+    final last = _lastRepairBatchAt;
+    if (last != null && DateTime.now().difference(last) < cooldown) {
+      return false;
+    }
+    _startupRepairStarted = true;
+    _lastRepairBatchAt = DateTime.now();
     return true;
   }
 
@@ -35,6 +50,7 @@ class PostPreviewRepairTracker {
 
   void resetForLogout() {
     _startupRepairStarted = false;
+    _lastRepairBatchAt = null;
     _attemptedPostIds.clear();
   }
 }

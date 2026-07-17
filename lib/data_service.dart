@@ -1292,38 +1292,102 @@ class DataService {
     }
   }
 
-  /// Ripara in background i post senza backup remoto stabile (una volta per apertura app).
-  void repairMissingPreviewsInBackground({int maxItems = 30}) {
+  /// Ripara in background anteprime mancanti in locale e/o su Storage.
+  ///
+  /// Caso tipico cross-device: su iOS l'immagine è già in cache locale, su
+  /// Android no. All'apertura/resume scarichiamo le anteprime assenti senza
+  /// attendere un pull-to-refresh manuale.
+  void repairMissingPreviewsInBackground({
+    int maxItems = 40,
+    bool force = false,
+  }) {
     final userId = currentUserId;
     if (userId == null || userId.isEmpty) return;
-    if (!PostPreviewRepairTracker.instance.tryBeginStartupRepair()) return;
+    final canStart = force
+        ? PostPreviewRepairTracker.instance.tryBeginRepairBatch()
+        : PostPreviewRepairTracker.instance.tryBeginStartupRepair();
+    if (!canStart) return;
 
     unawaited(
       Future(() async {
         try {
-          final posts = await getPosts();
+          final posts = await getPosts(forceRefresh: force);
+          final sorted = List<SavedPost>.from(posts)
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          final cache = const PostPreviewCache();
           var processed = 0;
-          for (final post in posts) {
+          var repaired = 0;
+
+          for (final post in sorted) {
             if (processed >= maxItems) break;
-            if (PostPreviewUrlUtils.isStablePreviewStorageUrl(
+
+            final hasImage = post.imageUrl?.trim().isNotEmpty == true;
+            final hasStable = PostPreviewUrlUtils.isStablePreviewStorageUrl(
               post.previewStorageUrl,
-            )) {
+            );
+            if (!hasImage && !hasStable) {
               continue;
             }
-            if (PostPreviewRepairTracker.instance.wasAttempted(post.id)) {
+
+            final localPath = await cache.getCachedPreviewPath(post.id);
+            if (localPath != null && hasStable) {
               continue;
             }
-            if ((post.imageUrl?.trim().isEmpty ?? true) &&
-                (post.previewStorageUrl?.trim().isEmpty ?? true)) {
-              PostPreviewRepairTracker.instance.markAttempted(post.id);
-              continue;
+
+            // Nuovo device: riprova anche se in sessione precedente era fallito
+            // senza avere ancora i metadati/immagine.
+            if (force || localPath == null) {
+              PostPreviewRepairTracker.instance.clearAttempt(post.id);
             }
+
             processed++;
-            await _ensureRemotePreviewForPost(
+            final remoteUrl = await _ensureRemotePreviewForPost(
               post,
               userId: userId,
+              forceRetry: true,
               notifyCacheChange: false,
             );
+
+            final updatedLocal =
+                await cache.getCachedPreviewPath(post.id);
+            final updatedStable =
+                PostPreviewUrlUtils.isStablePreviewStorageUrl(remoteUrl);
+            if (updatedLocal == null && !updatedStable) {
+              continue;
+            }
+
+            repaired++;
+            final latest = _userPostsCache[userId]?.firstWhere(
+                  (p) => p.id == post.id,
+                  orElse: () => post,
+                ) ??
+                post;
+            final withRemote = updatedStable &&
+                    remoteUrl != null &&
+                    latest.previewStorageUrl?.trim() != remoteUrl.trim()
+                ? latest.copyWith(
+                    previewStorageUrl: remoteUrl.trim(),
+                    updatedAt: DateTime.now(),
+                  )
+                : latest;
+            if (withRemote.previewStorageUrl != latest.previewStorageUrl ||
+                updatedLocal != null) {
+              addPostToCache(withRemote, notifyChange: false);
+            }
+          }
+
+          if (repaired > 0) {
+            _notifyDataChange('preview_repaired', {
+              'repaired': repaired,
+              'processed': processed,
+              'userId': userId,
+            });
+            if (kDebugMode) {
+              print(
+                'DEBUG: repairMissingPreviews riparate $repaired anteprime '
+                '(su $processed controllate)',
+              );
+            }
           }
         } catch (e) {
           if (kDebugMode) {

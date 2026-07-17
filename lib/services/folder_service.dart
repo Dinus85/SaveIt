@@ -416,9 +416,28 @@ class FolderService extends FolderServiceBase
       case 'data_cleared':
         _handleDataStructureChangedOptimistically(changeData);
         break;
+      case 'preview_repaired':
+        _handlePreviewRepairedOptimistically(changeData);
+        break;
       default:
         _handleGenericDataChangeOptimistically(changeData);
     }
+  }
+
+  void _handlePreviewRepairedOptimistically(Map<String, dynamic> data) {
+    print('DEBUG: 🖼️ Anteprime riparate, aggiorno MockPost/UI');
+    Future.microtask(() async {
+      try {
+        final realPosts = await DataService.instance.getPosts();
+        final realFolders = await DataService.instance.getFolders();
+        await syncPostsFromDataService(realPosts, realFolders);
+        updateTuttiCount();
+        notifyDataChanged();
+      } catch (e) {
+        print('DEBUG: Aggiornamento anteprime riparate fallito: $e');
+        notifyUICallbacks();
+      }
+    });
   }
 
   void _handlePostAddedOptimistically(Map<String, dynamic> data) {

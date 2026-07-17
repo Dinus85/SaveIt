@@ -491,6 +491,9 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
   Future<void> _refreshContentAfterResume() async {
     try {
       await FolderService().handleAppResumed();
+      // Dopo il sync Firestore: scarica in locale le anteprime mancanti
+      // (salvate su un altro device) senza aspettare pull-to-refresh.
+      DataService.instance.repairMissingPreviewsInBackground(force: true);
       SharingService.notifyDataChangedFromExternal();
       if (kDebugMode) {
         print('DEBUG: Resume sync post/cartelle completato');
@@ -1874,7 +1877,7 @@ class _WebHomePageState extends State<WebHomePage>
           await _folderService.syncWithDataService().timeout(
                 const Duration(seconds: 25),
               );
-          DataService.instance.repairMissingPreviewsInBackground();
+          DataService.instance.repairMissingPreviewsInBackground(force: true);
           if (mounted) {
             setState(() {
               _forceRefresh();
