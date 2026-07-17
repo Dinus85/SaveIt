@@ -3054,21 +3054,175 @@ const fetchShareUrlMetadata = async (rawUrl) => {
     title: "",
     description: "",
     imageUrl: null,
+    creatorName: null,
+    creatorUsername: null,
     metadataProvider: "ios_share_extension",
   };
   try {
+    let workingUrl = (rawUrl || "").toString().trim();
+    if (isAnyTikTokUrl(workingUrl)) {
+      workingUrl = await resolveTikTokShareUrl(workingUrl);
+      const tikTok = await fetchTikTokOEmbedMetadata(workingUrl);
+      if (tikTok.title || tikTok.imageUrl) {
+        return {
+          ...empty,
+          ...tikTok,
+          metadataProvider: "ios_share_extension_tiktok",
+        };
+      }
+    }
+
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+    };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(rawUrl, {
+    const response = await fetch(workingUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers,
+    });
+    clearTimeout(timer);
+    let title = "";
+    let description = "";
+    let imageUrl = null;
+    if (response.ok) {
+      const html = (await response.text()).slice(0, 350000);
+      title =
+        extractMetaContent(html, ["og:title", "twitter:title"]) ||
+        decodeHtmlEntities(
+            ((html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || "")
+        );
+      description = extractMetaContent(html, [
+        "og:description",
+        "twitter:description",
+        "description",
+      ]);
+      imageUrl = absoluteShareUrl(
+          extractMetaContent(html, [
+            "og:image",
+            "twitter:image",
+            "og:image:url",
+          ]),
+          workingUrl
+      );
+    }
+
+    if (isInstagramPostUrl(workingUrl) &&
+        (isThinShareTitle(title, "") || !imageUrl)) {
+      const ig = await fetchInstagramEmbedMetadata(workingUrl);
+      if (isThinShareTitle(title, "") && ig.title) title = ig.title;
+      if (!description && ig.description) description = ig.description;
+      if (!imageUrl && ig.imageUrl) imageUrl = ig.imageUrl;
+      if (ig.creatorName || ig.creatorUsername || ig.imageUrl) {
+        return {
+          title: (title || "").substring(0, 300),
+          description: (description || "").substring(0, 2000),
+          imageUrl,
+          creatorName: ig.creatorName || null,
+          creatorUsername: ig.creatorUsername || null,
+          metadataProvider: "ios_share_extension_instagram",
+        };
+      }
+    }
+
+    if (isTikTokVideoUrl(workingUrl) &&
+        (isInvalidTikTokTitle(title) || !imageUrl)) {
+      const tikTok = await fetchTikTokOEmbedMetadata(workingUrl);
+      if (tikTok.title || tikTok.imageUrl) {
+        return {
+          title: (tikTok.title || title || "").substring(0, 300),
+          description: (tikTok.description || description || "")
+              .substring(0, 2000),
+          imageUrl: tikTok.imageUrl || imageUrl,
+          creatorName: tikTok.creatorName || null,
+          creatorUsername: tikTok.creatorUsername || null,
+          metadataProvider: "ios_share_extension_tiktok",
+        };
+      }
+    }
+
+    return {
+      title: (title || "").substring(0, 300),
+      description: (description || "").substring(0, 2000),
+      imageUrl,
+      creatorName: null,
+      creatorUsername: null,
+      metadataProvider: "ios_share_extension_og",
+    };
+  } catch (error) {
+    console.warn("fetchShareUrlMetadata failed", {
+      url: rawUrl,
+      message: error && error.message,
+    });
+    return empty;
+  }
+};
+
+const isInstagramPostUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("instagram.com") && !host.includes("instagr.am")) {
+      return false;
+    }
+    return extractInstagramPostSegments(parsed.pathname) != null;
+  } catch (_) {
+    const lower = (url || "").toLowerCase();
+    return (lower.includes("instagram.com") || lower.includes("instagr.am")) &&
+      (lower.includes("/p/") || lower.includes("/reel/") ||
+        lower.includes("/tv/"));
+  }
+};
+
+const extractInstagramPostSegments = (pathname) => {
+  const parts = (pathname || "").split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  const prefix = parts[0].toLowerCase();
+  if (!["p", "reel", "reels", "tv"].includes(prefix)) return null;
+  return [parts[0], parts[1]];
+};
+
+const buildInstagramEmbedUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    const segments = extractInstagramPostSegments(parsed.pathname);
+    if (!segments) return null;
+    parsed.search = "";
+    parsed.hash = "";
+    parsed.pathname = `/${segments[0]}/${segments[1]}/embed/captioned/`;
+    return parsed.toString();
+  } catch (_) {
+    return null;
+  }
+};
+
+const fetchInstagramEmbedMetadata = async (url) => {
+  const empty = {
+    title: "",
+    description: "",
+    imageUrl: null,
+    creatorName: null,
+    creatorUsername: null,
+  };
+  const embedUrl = buildInstagramEmbedUrl(url);
+  if (!embedUrl) return empty;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(embedUrl, {
       method: "GET",
       redirect: "follow",
       signal: controller.signal,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html",
       },
     });
     clearTimeout(timer);
@@ -3084,19 +3238,146 @@ const fetchShareUrlMetadata = async (rawUrl) => {
       "twitter:description",
       "description",
     ]);
-    const imageUrl = absoluteShareUrl(
-        extractMetaContent(html, ["og:image", "twitter:image", "og:image:url"]),
-        rawUrl
+    let imageUrl = absoluteShareUrl(
+        extractMetaContent(html, ["og:image", "twitter:image"]),
+        embedUrl
     );
+    if (!imageUrl) {
+      const mediaMatch = html.match(
+          /class=["']EmbeddedMediaImage["'][^>]+src=["']([^"']+)["']/i
+      ) || html.match(
+          /src=["']([^"']+)["'][^>]+class=["']EmbeddedMediaImage["']/i
+      );
+      if (mediaMatch && mediaMatch[1]) {
+        imageUrl = absoluteShareUrl(mediaMatch[1], embedUrl);
+      }
+    }
     return {
-      title: title.substring(0, 300),
-      description: description.substring(0, 2000),
+      title: (title || "").substring(0, 300),
+      description: (description || "").substring(0, 2000),
       imageUrl,
-      metadataProvider: "ios_share_extension_og",
+      creatorName: null,
+      creatorUsername: null,
     };
   } catch (error) {
-    console.warn("fetchShareUrlMetadata failed", {
-      url: rawUrl,
+    console.warn("fetchInstagramEmbedMetadata failed", {
+      url,
+      message: error && error.message,
+    });
+    return empty;
+  }
+};
+
+const isAnyTikTokUrl = (url) => {
+  try {
+    return new URL(url).hostname.toLowerCase().includes("tiktok.com");
+  } catch (_) {
+    return (url || "").toLowerCase().includes("tiktok.com");
+  }
+};
+
+const isTikTokVideoUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.toLowerCase().includes("tiktok.com")) return false;
+    return parsed.pathname.toLowerCase().includes("/video/");
+  } catch (_) {
+    const lower = (url || "").toLowerCase();
+    return lower.includes("tiktok.com") && lower.includes("/video/");
+  }
+};
+
+const isInvalidTikTokTitle = (title) => {
+  const normalized = (title || "").toString().trim().toLowerCase();
+  if (!normalized) return true;
+  return normalized === "log in | tiktok" ||
+    normalized === "login | tiktok" ||
+    normalized === "tiktok" ||
+    normalized === "log in to tiktok";
+};
+
+const resolveTikTokShareUrl = async (url) => {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
+        "Accept": "text/html",
+      },
+    });
+    clearTimeout(timer);
+    const finalUrl = (response.url || "").toString();
+    if (finalUrl.includes("/video/")) return finalUrl;
+    return url;
+  } catch (_) {
+    return url;
+  }
+};
+
+const fetchTikTokOEmbedMetadata = async (url) => {
+  const empty = {
+    title: "",
+    description: "",
+    imageUrl: null,
+    creatorName: null,
+    creatorUsername: null,
+  };
+  if (!isAnyTikTokUrl(url)) return empty;
+  try {
+    let normalized = url;
+    try {
+      const parsed = new URL(url);
+      parsed.search = "";
+      parsed.hash = "";
+      normalized = parsed.toString();
+    } catch (_) {}
+    const oEmbedUrl =
+      `https://www.tiktok.com/oembed?url=${encodeURIComponent(normalized)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(oEmbedUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
+        "Accept": "application/json",
+      },
+    });
+    clearTimeout(timer);
+    if (!response.ok) return empty;
+    const data = await response.json();
+    const title = (data && data.title || "").toString().trim();
+    const imageUrl = (data && data.thumbnail_url || "").toString().trim() ||
+      null;
+    const creatorName = (data && data.author_name || "").toString().trim() ||
+      null;
+    let creatorUsername = null;
+    const authorUrl = (data && data.author_url || "").toString().trim();
+    if (authorUrl) {
+      try {
+        const parts = new URL(authorUrl).pathname.split("/").filter(Boolean);
+        if (parts[0] && parts[0].startsWith("@")) {
+          creatorUsername = parts[0].replace(/^@/, "");
+        }
+      } catch (_) {}
+    }
+    return {
+      title: isInvalidTikTokTitle(title) ? "" : title.substring(0, 300),
+      description: isInvalidTikTokTitle(title) ? "" : title.substring(0, 2000),
+      imageUrl,
+      creatorName,
+      creatorUsername,
+    };
+  } catch (error) {
+    console.warn("fetchTikTokOEmbedMetadata failed", {
+      url,
       message: error && error.message,
     });
     return empty;
@@ -3107,7 +3388,9 @@ const isThinShareTitle = (title, hostname) => {
   const value = (title || "").toString().trim().toLowerCase();
   if (!value) return true;
   const host = (hostname || "").toString().replace(/^www\./, "").toLowerCase();
-  return value === host || value === "post salvato";
+  return value === host ||
+    value === "post salvato" ||
+    isInvalidTikTokTitle(value);
 };
 
 const assertShareExtensionRule = (rule, feature, count) => {
@@ -3910,6 +4193,12 @@ exports.savePostFromShare = onRequest(
           }
           if (!imageUrl && scraped.imageUrl) {
             imageUrl = scraped.imageUrl;
+          }
+          if (!creatorName && scraped.creatorName) {
+            creatorName = scraped.creatorName;
+          }
+          if (!creatorUsername && scraped.creatorUsername) {
+            creatorUsername = scraped.creatorUsername;
           }
           if (scraped.metadataProvider) {
             metadataProvider = scraped.metadataProvider;
