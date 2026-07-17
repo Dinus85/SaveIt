@@ -33,6 +33,24 @@ final class ShareExtensionBridge: NSObject, FlutterPlugin {
                 try AppGroupShareStore.clearCatalog()
                 result(nil)
 
+            case "exportAuthSession":
+                guard let session = call.arguments as? [String: Any] else {
+                    result(
+                        FlutterError(
+                            code: "invalid_auth_session",
+                            message: "Sessione Share Extension non valida.",
+                            details: nil
+                        )
+                    )
+                    return
+                }
+                try AppGroupShareStore.writeAuthSession(jsonObject: session)
+                result(nil)
+
+            case "clearAuthSession":
+                try AppGroupShareStore.clearAuthSession()
+                result(nil)
+
             case "readPendingShares":
                 result(try AppGroupShareStore.readPendingJSONObjects())
 

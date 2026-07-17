@@ -2933,6 +2933,187 @@ const lookupGlobalPostByUrl = async (rawUrl) => {
   };
 };
 
+const shareExtensionRulesForUser = async (userData) => {
+  const defaults = _default_feature_rules();
+  const remote = await _get_plan_limits();
+  const configured = remote && remote.featureRules &&
+    typeof remote.featureRules === "object" ? remote.featureRules : {};
+  const role = (userData.role || "free").toString().toLowerCase();
+  const premiumUntil = userData.premiumUntil &&
+    typeof userData.premiumUntil.toDate === "function" ?
+    userData.premiumUntil.toDate() :
+    null;
+  const premiumActive = role === "premium" &&
+    (!premiumUntil || premiumUntil.getTime() > Date.now());
+  const isAdmin = role === "admin";
+  const tier = isAdmin || premiumActive ? "premium" : "free";
+  const rule = (feature) => ({
+    ...(defaults[feature] && defaults[feature][tier] ?
+      defaults[feature][tier] : {}),
+    ...(configured[feature] && configured[feature][tier] ?
+      configured[feature][tier] : {}),
+  });
+  return {isAdmin, tier, rule};
+};
+
+const shareExtensionPeriodKey = (period) => {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = `${now.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getUTCDate()}`.padStart(2, "0");
+  if (period === "day") return `d_${year}${month}${day}`;
+  if (period === "month") return `m_${year}${month}`;
+  if (period === "week") {
+    const week = Math.ceil(now.getUTCDate() / 7);
+    return `w_${year}${month}_${week}`;
+  }
+  return "total";
+};
+
+const assertShareExtensionRule = (rule, feature, count) => {
+  if (!rule || rule.enabled === false) {
+    throw new HttpsError(
+        "permission-denied",
+        `Funzione ${feature} disabilitata dal piano`
+    );
+  }
+  const limit = Number(rule.limit || 0);
+  if (limit > 0 && count >= limit) {
+    throw new HttpsError(
+        "resource-exhausted",
+        `Limite ${feature} raggiunto`
+    );
+  }
+};
+
+const rollbackShareExtensionFolders = async (uid, createdFolderIds) => {
+  for (const folderId of [...createdFolderIds].reverse()) {
+    const [children, posts] = await Promise.all([
+      userFoldersRef(uid).where("parentId", "==", folderId).limit(1).get(),
+      userPostsRef(uid).where("folderId", "==", folderId).limit(1).get(),
+    ]);
+    if (children.empty && posts.empty) {
+      await userFoldersRef(uid).doc(folderId).delete();
+    }
+  }
+};
+
+const createShareExtensionFolderDrafts = async ({
+  uid,
+  drafts,
+  rules,
+  folderRecords,
+}) => {
+  const resolvedDraftIds = new Map();
+  const createdFolderIds = [];
+  const unresolved = [...drafts];
+
+  while (unresolved.length) {
+    let progressed = false;
+    for (let index = unresolved.length - 1; index >= 0; index--) {
+      const draft = unresolved[index] || {};
+      const draftId = (draft.id || "").toString().trim();
+      const name = (draft.name || "").toString().trim();
+      const parentDraftId = (draft.parentDraftId || "").toString().trim();
+      if (!draftId || !name || name.length > 100) {
+        throw new HttpsError("invalid-argument", "Cartella temporanea non valida");
+      }
+      if (resolvedDraftIds.has(draftId)) {
+        throw new HttpsError("invalid-argument", "ID cartella temporanea duplicato");
+      }
+      if (parentDraftId && !resolvedDraftIds.has(parentDraftId)) continue;
+
+      let parentId = parentDraftId ?
+        resolvedDraftIds.get(parentDraftId) :
+        normalizeShareId(draft.parentFolderId);
+      if (parentId) {
+        const parent = folderRecords.get(parentId);
+        if (!parent || parent.isDefault === true) {
+          throw new HttpsError("not-found", "Cartella padre non trovata");
+        }
+      } else {
+        parentId = null;
+      }
+
+      let depth = 0;
+      let ancestorId = parentId;
+      const visited = new Set();
+      while (ancestorId) {
+        if (visited.has(ancestorId)) {
+          throw new HttpsError("invalid-argument", "Gerarchia cartelle ciclica");
+        }
+        visited.add(ancestorId);
+        const ancestor = folderRecords.get(ancestorId);
+        if (!ancestor) break;
+        depth++;
+        ancestorId = ancestor.parentId || null;
+      }
+
+      if (!rules.isAdmin) {
+        const levelRule = rules.rule("folder_levels");
+        if (levelRule.enabled === false) {
+          throw new HttpsError(
+              "permission-denied",
+              "Creazione livelli cartelle disabilitata"
+          );
+        }
+        const levelLimit = Number(levelRule.limit || 0);
+        if (levelLimit > 0 && depth > levelLimit) {
+          throw new HttpsError(
+              "resource-exhausted",
+              "Limite livelli cartelle raggiunto"
+          );
+        }
+        const siblings = [...folderRecords.values()].filter((folder) =>
+          folder.isDefault !== true &&
+          (folder.parentId || null) === parentId
+        ).length;
+        assertShareExtensionRule(
+            rules.rule(parentId ? "child_folders" : "root_folders"),
+            parentId ? "sottocartelle" : "cartelle principali",
+            siblings
+        );
+      }
+
+      const existing = [...folderRecords.entries()].find(([, folder]) =>
+        folder.isDefault !== true &&
+        (folder.parentId || null) === parentId &&
+        (folder.name || "").toString().trim().toLowerCase() ===
+          name.toLowerCase()
+      );
+      if (existing) {
+        resolvedDraftIds.set(draftId, existing[0]);
+      } else {
+        const ref = userFoldersRef(uid).doc();
+        const record = {
+          name,
+          color: (draft.color || "#BB86FC").toString(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          isDefault: false,
+          parentId,
+          isShared: false,
+        };
+        await ref.set(record);
+        folderRecords.set(ref.id, record);
+        resolvedDraftIds.set(draftId, ref.id);
+        createdFolderIds.push(ref.id);
+      }
+
+      unresolved.splice(index, 1);
+      progressed = true;
+    }
+    if (!progressed) {
+      throw new HttpsError(
+          "invalid-argument",
+          "Gerarchia cartelle temporanee non risolvibile"
+      );
+    }
+  }
+
+  return {resolvedDraftIds, createdFolderIds};
+};
+
 const createBatchWriter = () => {
   let batch = db.batch();
   let count = 0;
@@ -3402,6 +3583,239 @@ exports.getGlobalPostByUrl = onCall(
         ok: true,
         ...result,
       };
+    }
+);
+
+exports.savePostFromShare = onRequest(
+    {
+      region: "us-central1",
+      timeoutSeconds: 60,
+      memory: "512MiB",
+    },
+    async (request, response) => {
+      response.set("Content-Type", "application/json; charset=utf-8");
+      if (request.method !== "POST") {
+        response.status(405).json({ok: false, code: "method_not_allowed"});
+        return;
+      }
+
+      let uid = null;
+      let createdFolderIds = [];
+      try {
+        const authorization = (request.get("authorization") || "").trim();
+        if (!authorization.toLowerCase().startsWith("bearer ")) {
+          throw new HttpsError("unauthenticated", "Sessione mancante");
+        }
+        const decoded = await admin.auth().verifyIdToken(
+            authorization.substring(7).trim()
+        );
+        uid = decoded.uid;
+
+        const body = request.body && typeof request.body === "object" ?
+          request.body :
+          {};
+        const url = (body.url || "").toString().trim();
+        let parsedUrl;
+        try {
+          parsedUrl = new URL(url);
+        } catch (_) {
+          throw new HttpsError("invalid-argument", "URL non valido");
+        }
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+          throw new HttpsError("invalid-argument", "URL non valido");
+        }
+
+        const requestId = (body.clientRequestId || "").toString().trim();
+        if (!/^[A-Za-z0-9-]{8,80}$/.test(requestId)) {
+          throw new HttpsError(
+              "invalid-argument",
+              "Identificativo richiesta non valido"
+          );
+        }
+        const postRef = userPostsRef(uid).doc(requestId);
+        const existingPost = await postRef.get();
+        if (existingPost.exists) {
+          const data = existingPost.data() || {};
+          response.status(200).json({
+            ok: true,
+            reusedRequest: true,
+            postId: postRef.id,
+            folderId: data.folderId || null,
+            globalPostId: data.globalPostId || null,
+          });
+          return;
+        }
+
+        const userDoc = await db.collection("users").doc(uid).get();
+        const userData = userDoc.exists ? userDoc.data() || {} : {};
+        if (userData.isBlocked === true) {
+          throw new HttpsError("permission-denied", "Account bloccato");
+        }
+        const rules = await shareExtensionRulesForUser(userData);
+
+        const folderSnapshot = await userFoldersRef(uid).get();
+        const folderRecords = new Map(
+            folderSnapshot.docs.map((doc) => [doc.id, doc.data() || {}])
+        );
+        const drafts = Array.isArray(body.folderDrafts) ?
+          body.folderDrafts :
+          [];
+        if (drafts.length > 20) {
+          throw new HttpsError(
+              "invalid-argument",
+              "Troppe cartelle temporanee"
+          );
+        }
+        const draftResult = await createShareExtensionFolderDrafts({
+          uid,
+          drafts,
+          rules,
+          folderRecords,
+        });
+        createdFolderIds = draftResult.createdFolderIds;
+
+        const destinationDraftId = (body.destinationDraftId || "")
+            .toString()
+            .trim();
+        let folderId = destinationDraftId ?
+          draftResult.resolvedDraftIds.get(destinationDraftId) :
+          null;
+        if (destinationDraftId && !folderId) {
+          throw new HttpsError(
+              "invalid-argument",
+              "Cartella temporanea di destinazione non trovata"
+          );
+        }
+        if (!folderId) {
+          folderId = await validateTargetFolder(
+              uid,
+              body.destinationFolderId
+          );
+        }
+        if (!folderId) {
+          folderId = await resolveDefaultTargetFolder(uid);
+        }
+
+        const tags = [];
+        const seenTags = new Set();
+        const rawTags = Array.isArray(body.tags) ? body.tags : [];
+        for (const rawTag of rawTags) {
+          const tag = rawTag.toString().trim().replace(/^#+/, "");
+          const normalized = tag.toLowerCase();
+          if (tag && tag.length <= 30 && !seenTags.has(normalized)) {
+            seenTags.add(normalized);
+            tags.push(tag);
+          }
+          if (tags.length >= 20) break;
+        }
+
+        let manualTagRule = null;
+        let manualTagPeriodKey = null;
+        if (tags.length && !rules.isAdmin) {
+          manualTagRule = rules.rule("manual_tags");
+          const period = (manualTagRule.period || "total").toString();
+          manualTagPeriodKey = shareExtensionPeriodKey(period);
+          const usageDoc = await db.collection("feature_usage").doc(uid).get();
+          const usageData = usageDoc.exists ? usageDoc.data() || {} : {};
+          const featureUsage = usageData.manual_tags || {};
+          const count = Number(featureUsage[manualTagPeriodKey] || 0);
+          assertShareExtensionRule(
+              manualTagRule,
+              "tag manuali",
+              count
+          );
+        }
+
+        const sharedText = (body.sharedText || "").toString().trim();
+        const source = {
+          url,
+          title: (body.title || "").toString().trim() ||
+            parsedUrl.hostname.replace(/^www\./, "") ||
+            "Post salvato",
+          description: (body.description || "").toString().trim() ||
+            (sharedText === url ? "" : sharedText.substring(0, 2000)),
+          imageUrl: body.imageUrl || null,
+          previewStorageUrl: body.previewStorageUrl || null,
+          creatorName: body.creatorName || null,
+          creatorUsername: body.creatorUsername || null,
+          metadataProvider: "ios_share_extension",
+        };
+        const global = await ensureGlobalPost({source, ownerId: uid});
+        const canonical = global.canonical || source;
+        await postRef.create({
+          url: canonical.url || url,
+          title: canonical.title || source.title,
+          description: canonical.description || source.description,
+          imageUrl: canonical.imageUrl || null,
+          creatorName: canonical.creatorName || null,
+          creatorUsername: canonical.creatorUsername || null,
+          previewStorageUrl: canonical.previewStorageUrl || null,
+          tags,
+          folderId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          isShared: false,
+          globalPostId: global.globalPostId,
+          urlHash: global.urlHash,
+          normalizedUrl: global.normalizedUrl,
+        });
+
+        if (tags.length && manualTagRule && manualTagPeriodKey) {
+          const usageRef = db.collection("feature_usage").doc(uid);
+          await db.runTransaction(async (transaction) => {
+            const usageDoc = await transaction.get(usageRef);
+            const data = usageDoc.exists ? usageDoc.data() || {} : {};
+            const featureUsage = {...(data.manual_tags || {})};
+            featureUsage[manualTagPeriodKey] =
+              Number(featureUsage[manualTagPeriodKey] || 0) + 1;
+            featureUsage.last_update =
+              admin.firestore.FieldValue.serverTimestamp();
+            transaction.set(
+                usageRef,
+                {manual_tags: featureUsage},
+                {merge: true}
+            );
+          });
+        }
+
+        response.status(200).json({
+          ok: true,
+          postId: postRef.id,
+          folderId,
+          globalPostId: global.globalPostId,
+          createdFolderIds,
+          canonical,
+        });
+      } catch (error) {
+        if (uid && createdFolderIds.length) {
+          try {
+            await rollbackShareExtensionFolders(uid, createdFolderIds);
+          } catch (rollbackError) {
+            console.error("Share Extension rollback failed", rollbackError);
+          }
+        }
+        console.error("savePostFromShare failed", {
+          uid,
+          code: error && error.code,
+          message: error && error.message,
+        });
+        const statusByCode = {
+          "unauthenticated": 401,
+          "permission-denied": 403,
+          "resource-exhausted": 403,
+          "not-found": 404,
+          "invalid-argument": 400,
+          "already-exists": 409,
+        };
+        const code = error && error.code ? error.code : "internal";
+        response.status(statusByCode[code] || 500).json({
+          ok: false,
+          code,
+          message: error && error.message ?
+            error.message :
+            "Salvataggio non riuscito",
+        });
+      }
     }
 );
 

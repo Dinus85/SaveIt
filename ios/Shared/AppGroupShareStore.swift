@@ -29,6 +29,44 @@ struct SharedFolder: Codable {
     let level: Int
 }
 
+struct SharedAuthSession: Codable {
+    let schemaVersion: Int
+    let userId: String
+    let idToken: String
+    let expiresAt: String
+    let exportedAt: String
+    let saveEndpoint: String
+
+    var isUsable: Bool {
+        guard !idToken.isEmpty, let expiration = Self.parseISO8601(expiresAt) else {
+            return false
+        }
+        return expiration.timeIntervalSinceNow > 60
+    }
+
+    private static func parseISO8601(_ value: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFraction.date(from: value) {
+            return date
+        }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: value)
+    }
+}
+
+struct SharedFolderDraft: Codable {
+    let id: String
+    let name: String
+    let parentFolderId: String?
+    let parentDraftId: String?
+    let parentDisplayPath: String?
+    let displayPath: String
+    let level: Int
+    let color: String
+}
+
 struct PendingShare: Codable {
     let id: String
     let userId: String
@@ -42,12 +80,15 @@ struct PendingShare: Codable {
     let newFolderName: String?
     let newFolderParentId: String?
     let newFolderParentPath: String?
+    let folderDrafts: [SharedFolderDraft]?
+    let destinationDraftId: String?
 }
 
 enum AppGroupShareStore {
     static let appGroupIdentifier = "group.eu.savein.app.share"
 
     private static let catalogFilename = "folder_catalog.json"
+    private static let authSessionFilename = "auth_session.json"
     private static let pendingDirectoryName = "PendingShares"
 
     private static var containerURL: URL? {
@@ -65,6 +106,10 @@ enum AppGroupShareStore {
             pendingDirectoryName,
             isDirectory: true
         )
+    }
+
+    private static var authSessionURL: URL? {
+        containerURL?.appendingPathComponent(authSessionFilename)
     }
 
     static func loadCatalog() throws -> SharedFolderCatalog? {
@@ -104,6 +149,43 @@ enum AppGroupShareStore {
             return
         }
         try FileManager.default.removeItem(at: catalogURL)
+    }
+
+    static func loadAuthSession() throws -> SharedAuthSession? {
+        guard let authSessionURL else {
+            throw StoreError.containerUnavailable
+        }
+        guard FileManager.default.fileExists(atPath: authSessionURL.path) else {
+            return nil
+        }
+        return try JSONDecoder().decode(
+            SharedAuthSession.self,
+            from: Data(contentsOf: authSessionURL)
+        )
+    }
+
+    static func writeAuthSession(jsonObject: Any) throws {
+        guard JSONSerialization.isValidJSONObject(jsonObject) else {
+            throw StoreError.invalidJSON
+        }
+        guard let authSessionURL else {
+            throw StoreError.containerUnavailable
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: jsonObject,
+            options: [.sortedKeys]
+        )
+        try data.write(to: authSessionURL, options: [.atomic])
+    }
+
+    static func clearAuthSession() throws {
+        guard let authSessionURL else {
+            throw StoreError.containerUnavailable
+        }
+        guard FileManager.default.fileExists(atPath: authSessionURL.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: authSessionURL)
     }
 
     static func enqueue(_ item: PendingShare) throws {

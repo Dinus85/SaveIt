@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -18,23 +20,28 @@ class ShareExtensionService {
 
   static const MethodChannel _channel =
       MethodChannel('eu.savein.app/share_extension');
+  static const String _saveEndpoint =
+      'https://us-central1-saveit-app-1784d.cloudfunctions.net/savePostFromShare';
 
   bool _isRefreshing = false;
+  StreamSubscription<User?>? _tokenSubscription;
 
   bool get _isSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<void> refreshCatalogAndImport() async {
     if (!_isSupported || _isRefreshing) return;
+    _ensureTokenSync();
     _isRefreshing = true;
 
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        await _channel.invokeMethod<void>('clearCatalog');
+        await _clearSharedSession();
         return;
       }
 
+      await _exportAuthSession(user);
       final folders = await DataService.instance.getFolders();
       if (folders.isEmpty) return;
 
@@ -60,11 +67,12 @@ class ShareExtensionService {
 
   Future<void> exportCatalog() async {
     if (!_isSupported) return;
+    _ensureTokenSync();
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       try {
-        await _channel.invokeMethod<void>('clearCatalog');
+        await _clearSharedSession();
       } on MissingPluginException {
         // Il bridge esiste solo nel Runner iOS.
       }
@@ -72,6 +80,7 @@ class ShareExtensionService {
     }
 
     try {
+      await _exportAuthSession(user);
       final folders = await DataService.instance.getFolders();
       if (folders.isNotEmpty) {
         await _exportCatalog(user.uid, folders);
@@ -81,6 +90,50 @@ class ShareExtensionService {
         debugPrint('Errore export cartelle Share Extension: $error');
       }
     }
+  }
+
+  void _ensureTokenSync() {
+    _tokenSubscription ??=
+        FirebaseAuth.instance.idTokenChanges().listen((user) async {
+      if (!_isSupported) return;
+      try {
+        if (user == null) {
+          await _clearSharedSession();
+        } else {
+          await _exportAuthSession(user);
+        }
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('Sync token Share Extension fallita: $error');
+        }
+      }
+    });
+  }
+
+  Future<void> _exportAuthSession(User user) async {
+    var tokenResult = await user.getIdTokenResult();
+    final expiration = tokenResult.expirationTime;
+    if (expiration == null ||
+        expiration.difference(DateTime.now()) < const Duration(minutes: 5)) {
+      tokenResult = await user.getIdTokenResult(true);
+    }
+    final token = tokenResult.token;
+    final expiresAt = tokenResult.expirationTime;
+    if (token == null || token.isEmpty || expiresAt == null) return;
+
+    await _channel.invokeMethod<void>('exportAuthSession', {
+      'schemaVersion': 1,
+      'userId': user.uid,
+      'idToken': token,
+      'expiresAt': expiresAt.toUtc().toIso8601String(),
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'saveEndpoint': _saveEndpoint,
+    });
+  }
+
+  Future<void> _clearSharedSession() async {
+    await _channel.invokeMethod<void>('clearCatalog');
+    await _channel.invokeMethod<void>('clearAuthSession');
   }
 
   Future<void> _exportCatalog(String userId, List<Folder> folders) async {

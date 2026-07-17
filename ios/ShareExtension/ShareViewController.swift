@@ -11,11 +11,11 @@ final class ShareViewController: UIViewController {
     private var folders: [SharedFolder] = []
     private var selectedFolder: SharedFolder?
     private var expandedFolderIds = Set<String>()
-    private var pendingNewFolderName: String?
-    private var pendingNewFolderParent: SharedFolder?
+    private var folderDrafts: [SharedFolderDraft] = []
     private var selectedTags: [String] = []
     private var sharedURL: String?
     private var sharedText: String?
+    private var isSaving = false
 
     private var visibleFolders: [SharedFolder] {
         let folderIds = Set(folders.map(\.id))
@@ -288,7 +288,10 @@ final class ShareViewController: UIViewController {
 
     private func updateSaveButton() {
         saveButton.isEnabled =
-            sharedURL != nil && selectedFolder != nil && catalog != nil
+            !isSaving &&
+            sharedURL != nil &&
+            selectedFolder != nil &&
+            catalog != nil
     }
 
     private func sortedFolders(_ values: [SharedFolder]) -> [SharedFolder] {
@@ -311,13 +314,50 @@ final class ShareViewController: UIViewController {
         }
     }
 
+    private func isDraft(_ folder: SharedFolder) -> Bool {
+        folderDrafts.contains { $0.id == folder.id }
+    }
+
+    private func draft(for folder: SharedFolder) -> SharedFolderDraft? {
+        folderDrafts.first { $0.id == folder.id }
+    }
+
+    private func discardAllDrafts() {
+        let draftIds = Set(folderDrafts.map(\.id))
+        folders.removeAll { draftIds.contains($0.id) }
+        expandedFolderIds.subtract(draftIds)
+        folderDrafts.removeAll()
+    }
+
+    private func discardDraftAndDescendants(_ draftId: String) {
+        var idsToRemove: Set<String> = [draftId]
+        var foundChild = true
+        while foundChild {
+            foundChild = false
+            for draft in folderDrafts
+            where draft.parentDraftId.map(idsToRemove.contains) == true {
+                if idsToRemove.insert(draft.id).inserted {
+                    foundChild = true
+                }
+            }
+        }
+        folderDrafts.removeAll { idsToRemove.contains($0.id) }
+        folders.removeAll { idsToRemove.contains($0.id) }
+        expandedFolderIds.subtract(idsToRemove)
+
+        if let selectedFolder, idsToRemove.contains(selectedFolder.id) {
+            self.selectedFolder =
+                folders.first { $0.id == catalog?.defaultFolderId }
+                ?? folders.first
+        }
+    }
+
     private func updateDestinationMessage() {
         guard let selectedFolder else { return }
-        if let pendingNewFolderName {
-            let parentPath = pendingNewFolderParent?.displayPath ?? "radice"
+        if isDraft(selectedFolder) {
             messageLabel.text =
-                "“\(pendingNewFolderName)” verrà creata in \(parentPath) "
-                + "quando salvi il post."
+                "Destinazione temporanea: \(selectedFolder.displayPath). "
+                + "Le cartelle verranno create solo quando tocchi Salva."
             saveButton.setTitle("Crea e salva", for: .normal)
         } else {
             messageLabel.text =
@@ -477,15 +517,88 @@ final class ShareViewController: UIViewController {
                 else {
                     return
                 }
-                self.pendingNewFolderName = String(name.prefix(100))
-                self.pendingNewFolderParent = parent
-                self.selectedFolder = parentCandidate
+                let safeName = String(name.prefix(100))
+                let siblingParentId = parentCandidate.isDefault
+                    ? nil
+                    : parentCandidate.id
+                let duplicate = self.folders.contains {
+                    !$0.isDefault &&
+                        $0.parentId == siblingParentId &&
+                        $0.name.compare(
+                            safeName,
+                            options: [.caseInsensitive, .diacriticInsensitive]
+                        ) == .orderedSame
+                }
+                if duplicate {
+                    self.messageLabel.text =
+                        "Esiste già una cartella con questo nome qui."
+                    return
+                }
+                let draftId = UUID().uuidString
+                let parentDraft = parent.flatMap { self.draft(for: $0) }
+                let displayPath = parent.map {
+                    "\($0.displayPath) › \(safeName)"
+                } ?? safeName
+                let level = parent.map { $0.level + 1 } ?? 0
+                let draft = SharedFolderDraft(
+                    id: draftId,
+                    name: safeName,
+                    parentFolderId: parentDraft == nil ? parent?.id : nil,
+                    parentDraftId: parentDraft?.id,
+                    parentDisplayPath: parent?.displayPath,
+                    displayPath: displayPath,
+                    level: level,
+                    color: "#BB86FC"
+                )
+                self.folderDrafts.append(draft)
+                let temporaryFolder = SharedFolder(
+                    id: draft.id,
+                    name: draft.name,
+                    parentId: siblingParentId,
+                    color: draft.color,
+                    isDefault: false,
+                    displayPath: draft.displayPath,
+                    level: draft.level
+                )
+                self.folders.append(temporaryFolder)
+                self.selectedFolder = temporaryFolder
+                if let parent {
+                    self.expandedFolderIds.insert(parent.id)
+                }
+                self.expandedFolderIds.insert(temporaryFolder.id)
                 self.updateDestinationMessage()
                 self.updateSaveButton()
                 self.tableView.reloadData()
             }
         )
         present(alert, animated: true)
+    }
+
+    private func discardAbandonedDrafts(keepingPathTo folder: SharedFolder) {
+        let keepIds = draftAncestorIds(for: folder)
+        let abandoned = folderDrafts.filter { !keepIds.contains($0.id) }
+        for draft in abandoned {
+            discardDraftAndDescendants(draft.id)
+        }
+    }
+
+    private func draftAncestorIds(for folder: SharedFolder) -> Set<String> {
+        var keepIds = Set<String>()
+        guard isDraft(folder) else { return keepIds }
+
+        var currentId: String? = folder.id
+        while let id = currentId {
+            keepIds.insert(id)
+            currentId = folderDrafts.first { $0.id == id }?.parentDraftId
+        }
+        return keepIds
+    }
+
+    private func draftsRequiredForSave(
+        destination: SharedFolder
+    ) -> [SharedFolderDraft] {
+        let keepIds = draftAncestorIds(for: destination)
+        return folderDrafts.filter { keepIds.contains($0.id) }
     }
 
     @objc private func saveShare() {
@@ -497,44 +610,209 @@ final class ShareViewController: UIViewController {
             return
         }
 
+        isSaving = true
         saveButton.isEnabled = false
-        do {
-            let item = PendingShare(
-                id: UUID().uuidString,
-                userId: catalog.userId,
-                url: sharedURL,
-                sharedText: sharedText,
-                folderId: selectedFolder.id,
-                folderDisplayPath: selectedFolder.displayPath,
-                enqueuedAt: ISO8601DateFormatter().string(from: Date()),
-                source: "ios_share_extension",
-                tags: parsedTags(),
-                newFolderName: pendingNewFolderName,
-                newFolderParentId: pendingNewFolderParent?.id,
-                newFolderParentPath: pendingNewFolderParent?.displayPath
-            )
-            try AppGroupShareStore.enqueue(item)
-            let destination = pendingNewFolderName.map { name in
-                pendingNewFolderParent.map {
-                    "\($0.displayPath) › \(name)"
-                } ?? name
-            } ?? selectedFolder.displayPath
-            messageLabel.text =
-                "Salvato in \(destination). Apri SaveIn! per completare l’importazione."
-            tableView.isUserInteractionEnabled = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                [weak self] in
-                self?.extensionContext?.completeRequest(returningItems: nil)
+        tableView.isUserInteractionEnabled = false
+        tagsButton.isEnabled = false
+        messageLabel.text = "Salvataggio in corso…"
+        saveButton.setTitle("Salvo…", for: .normal)
+
+        let drafts = draftsRequiredForSave(destination: selectedFolder)
+        let destinationDraftId = isDraft(selectedFolder)
+            ? selectedFolder.id
+            : nil
+        let destinationFolderId = isDraft(selectedFolder)
+            ? nil
+            : selectedFolder.id
+        let requestId = UUID().uuidString
+        let tags = parsedTags()
+        let sharedTextValue = sharedText
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                guard let session = try AppGroupShareStore.loadAuthSession(),
+                      session.isUsable,
+                      session.userId == catalog.userId
+                else {
+                    throw SaveError.authRequired
+                }
+
+                var body: [String: Any] = [
+                    "clientRequestId": requestId,
+                    "url": sharedURL,
+                    "tags": tags,
+                    "folderDrafts": drafts.map { draft -> [String: Any] in
+                        var item: [String: Any] = [
+                            "id": draft.id,
+                            "name": draft.name,
+                            "displayPath": draft.displayPath,
+                            "level": draft.level,
+                            "color": draft.color,
+                        ]
+                        if let parentFolderId = draft.parentFolderId {
+                            item["parentFolderId"] = parentFolderId
+                        }
+                        if let parentDraftId = draft.parentDraftId {
+                            item["parentDraftId"] = parentDraftId
+                        }
+                        if let parentDisplayPath = draft.parentDisplayPath {
+                            item["parentDisplayPath"] = parentDisplayPath
+                        }
+                        return item
+                    },
+                ]
+                if let sharedTextValue, !sharedTextValue.isEmpty {
+                    body["sharedText"] = sharedTextValue
+                }
+                if let destinationDraftId {
+                    body["destinationDraftId"] = destinationDraftId
+                }
+                if let destinationFolderId {
+                    body["destinationFolderId"] = destinationFolderId
+                }
+
+                let result = try Self.postShareSave(
+                    endpoint: session.saveEndpoint,
+                    token: session.idToken,
+                    body: body
+                )
+
+                DispatchQueue.main.async {
+                    self?.finishSaveSuccess(
+                        destination: selectedFolder.displayPath,
+                        createdFolders: result.createdFolderCount
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.finishSaveFailure(error)
+                }
             }
-        } catch {
-            messageLabel.text =
-                "Salvataggio non riuscito. Riprova tra poco."
-            updateSaveButton()
         }
     }
 
+    private func finishSaveSuccess(
+        destination: String,
+        createdFolders: Int
+    ) {
+        isSaving = false
+        folderDrafts.removeAll()
+        let folderNote = createdFolders > 0
+            ? " Cartelle create: \(createdFolders)."
+            : ""
+        messageLabel.text =
+            "Salvato in \(destination).\(folderNote)"
+        saveButton.setTitle("Fatto", for: .normal)
+        saveButton.isEnabled = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            [weak self] in
+            self?.extensionContext?.completeRequest(returningItems: nil)
+        }
+    }
+
+    private func finishSaveFailure(_ error: Error) {
+        isSaving = false
+        tableView.isUserInteractionEnabled = true
+        updateTagsButton()
+        updateDestinationMessage()
+        if let saveError = error as? SaveError {
+            messageLabel.text = saveError.localizedDescription
+        } else {
+            messageLabel.text =
+                "Salvataggio non riuscito. Riprova tra poco."
+        }
+        updateSaveButton()
+    }
+
+    private static func postShareSave(
+        endpoint: String,
+        token: String,
+        body: [String: Any]
+    ) throws -> (createdFolderCount: Int) {
+        guard let url = URL(string: endpoint) else {
+            throw SaveError.invalidEndpoint
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(
+            "Bearer \(token)",
+            forHTTPHeaderField: "Authorization"
+        )
+        request.setValue(
+            "application/json",
+            forHTTPHeaderField: "Content-Type"
+        )
+        request.timeoutInterval = 45
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: body,
+            options: []
+        )
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var responseData: Data?
+        var responseError: Error?
+        var statusCode = 0
+
+        let task = URLSession.shared.dataTask(with: request) {
+            data, response, error in
+            responseData = data
+            responseError = error
+            statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            semaphore.signal()
+        }
+        task.resume()
+        if semaphore.wait(timeout: .now() + 50) == .timedOut {
+            throw SaveError.timeout
+        }
+        if let responseError {
+            throw responseError
+        }
+        guard let responseData else {
+            throw SaveError.invalidResponse
+        }
+        let object = try JSONSerialization.jsonObject(with: responseData)
+        guard let json = object as? [String: Any] else {
+            throw SaveError.invalidResponse
+        }
+        if statusCode >= 200 && statusCode < 300, json["ok"] as? Bool == true {
+            let created = json["createdFolderIds"] as? [Any] ?? []
+            return (createdFolderCount: created.count)
+        }
+        let message = (json["message"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        throw SaveError.server(
+            message?.isEmpty == false
+                ? message!
+                : "Salvataggio non riuscito."
+        )
+    }
+
     @objc private func closeExtension() {
+        discardAllDrafts()
         extensionContext?.completeRequest(returningItems: nil)
+    }
+
+    private enum SaveError: LocalizedError {
+        case authRequired
+        case invalidEndpoint
+        case invalidResponse
+        case timeout
+        case server(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .authRequired:
+                return "Apri SaveIn! e resta connesso, poi riprova."
+            case .invalidEndpoint:
+                return "Endpoint di salvataggio non valido."
+            case .invalidResponse:
+                return "Risposta server non valida."
+            case .timeout:
+                return "Timeout di salvataggio. Riprova."
+            case .server(let message):
+                return message
+            }
+        }
     }
 }
 
@@ -562,19 +840,35 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         cell.textLabel?.text = marker + folder.name
         cell.detailTextLabel?.text = folder.isDefault
             ? "Tutti i post"
-            : (folder.level == 0 ? nil : folder.displayPath)
+            : (isDraft(folder)
+                ? "Temporanea"
+                : (folder.level == 0 ? nil : folder.displayPath))
         cell.indentationLevel = folder.isDefault ? 0 : folder.level
         cell.indentationWidth = 18
+        let isSelected = selectedFolder?.id == folder.id
+        cell.backgroundColor = isSelected
+            ? view.tintColor.withAlphaComponent(0.12)
+            : .secondarySystemGroupedBackground
+        cell.textLabel?.font = isSelected
+            ? .preferredFont(forTextStyle: .headline)
+            : .preferredFont(forTextStyle: .body)
 
         let accessoryStack = UIStackView()
         accessoryStack.axis = .horizontal
         accessoryStack.alignment = .center
         accessoryStack.spacing = 10
-        if selectedFolder?.id == folder.id {
+        accessoryStack.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: isSelected ? 70 : 36,
+            height: 36
+        )
+        if isSelected {
             let checkmark = UIImageView(
                 image: UIImage(systemName: "checkmark")
             )
             checkmark.tintColor = view.tintColor
+            checkmark.frame = CGRect(x: 0, y: 0, width: 20, height: 20)
             accessoryStack.addArrangedSubview(checkmark)
         }
 
@@ -592,6 +886,10 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
         if folderCreationBlockMessage(for: folder) != nil {
             addButton.tintColor = .tertiaryLabel
         }
+        NSLayoutConstraint.activate([
+            addButton.widthAnchor.constraint(equalToConstant: 30),
+            addButton.heightAnchor.constraint(equalToConstant: 30),
+        ])
         accessoryStack.addArrangedSubview(addButton)
         cell.accessoryType = .none
         cell.accessoryView = accessoryStack
@@ -604,9 +902,7 @@ extension ShareViewController: UITableViewDataSource, UITableViewDelegate {
     ) {
         let folder = visibleFolders[indexPath.row]
         selectedFolder = folder
-        pendingNewFolderName = nil
-        pendingNewFolderParent = nil
-        saveButton.setTitle("Salva", for: .normal)
+        discardAbandonedDrafts(keepingPathTo: folder)
         if hasChildren(folder) {
             if expandedFolderIds.contains(folder.id) {
                 expandedFolderIds.remove(folder.id)

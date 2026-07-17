@@ -1639,3 +1639,20 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
   indipendenti.
 - Creazione Firebase e applicazione dei tag avvengono quando SaveIn! torna in
   primo piano e importa la coda, non al semplice tocco del `+` nell'extension.
+
+### Build `1.0.0+49` — salvataggio immediato e cartelle temporanee
+
+- Le cartelle create con `+` restano **temporanee in memoria** (etichetta
+  `Temporanea`): annulla/chiudi le scarta; cambiare destinazione scarta i
+  draft fuori dal percorso selezionato. Niente Firebase finché non si salva.
+- `Salva` chiama l'endpoint HTTP `savePostFromShare` (Bearer ID token) e crea
+  gerarchia + post subito, senza riaprire l'app. Rollback delle cartelle vuote
+  se il salvataggio post fallisce. Idempotenza via `clientRequestId`.
+- Il Runner esporta nell'App Group la sessione auth (`idToken`, scadenza,
+  endpoint) oltre al catalogo cartelle/limiti. Serve aver aperto SaveIn!
+  loggato almeno una volta prima di condividere.
+- Evidenziazione riga selezionata + checkmark; `+` sempre visibile accanto a
+  ogni cartella. Tag manuali restano soggetti a `manual_tags` del piano.
+- La coda App Group resta come fallback per eventuali request legacy; il
+  percorso primario è il salvataggio diretto dall'extension.
+- Deploy obbligatorio: `firebase deploy --only functions:savePostFromShare`.
