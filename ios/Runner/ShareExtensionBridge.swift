@@ -71,6 +71,9 @@ final class ShareExtensionBridge: NSObject, FlutterPlugin {
                 try AppGroupShareStore.acknowledge(ids: ids)
                 result(nil)
 
+            case "consumeLastShareResult":
+                result(try AppGroupShareStore.consumeLastShareResultJSONObject())
+
             default:
                 result(FlutterMethodNotImplemented)
             }

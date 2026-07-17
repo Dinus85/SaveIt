@@ -84,11 +84,22 @@ struct PendingShare: Codable {
     let destinationDraftId: String?
 }
 
+struct LastShareResult: Codable {
+    let schemaVersion: Int
+    let postId: String
+    let folderId: String?
+    let destinationPath: String
+    let url: String
+    let savedAt: String
+    let createdFolderCount: Int
+}
+
 enum AppGroupShareStore {
     static let appGroupIdentifier = "group.eu.savein.app.share"
 
     private static let catalogFilename = "folder_catalog.json"
     private static let authSessionFilename = "auth_session.json"
+    private static let lastShareResultFilename = "last_share_result.json"
     private static let pendingDirectoryName = "PendingShares"
 
     private static var containerURL: URL? {
@@ -110,6 +121,10 @@ enum AppGroupShareStore {
 
     private static var authSessionURL: URL? {
         containerURL?.appendingPathComponent(authSessionFilename)
+    }
+
+    private static var lastShareResultURL: URL? {
+        containerURL?.appendingPathComponent(lastShareResultFilename)
     }
 
     static func loadCatalog() throws -> SharedFolderCatalog? {
@@ -186,6 +201,37 @@ enum AppGroupShareStore {
             return
         }
         try FileManager.default.removeItem(at: authSessionURL)
+    }
+
+    static func writeLastShareResult(jsonObject: Any) throws {
+        guard JSONSerialization.isValidJSONObject(jsonObject) else {
+            throw StoreError.invalidJSON
+        }
+        guard let lastShareResultURL else {
+            throw StoreError.containerUnavailable
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: jsonObject,
+            options: [.sortedKeys]
+        )
+        try data.write(to: lastShareResultURL, options: [.atomic])
+    }
+
+    static func consumeLastShareResultJSONObject() throws -> [String: Any]? {
+        guard let lastShareResultURL else {
+            throw StoreError.containerUnavailable
+        }
+        guard FileManager.default.fileExists(atPath: lastShareResultURL.path) else {
+            return nil
+        }
+        let object = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: lastShareResultURL)
+        )
+        guard let dictionary = object as? [String: Any] else {
+            throw StoreError.invalidJSON
+        }
+        try FileManager.default.removeItem(at: lastShareResultURL)
+        return dictionary
     }
 
     static func enqueue(_ item: PendingShare) throws {

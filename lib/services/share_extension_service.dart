@@ -47,6 +47,7 @@ class ShareExtensionService {
 
       await _exportCatalog(user.uid, folders);
       await _importPendingShares(user.uid, folders);
+      await _consumeDirectShareResult();
     } on MissingPluginException {
       // Il bridge esiste solo nel Runner iOS.
     } on PlatformException catch (error) {
@@ -134,6 +135,26 @@ class ShareExtensionService {
   Future<void> _clearSharedSession() async {
     await _channel.invokeMethod<void>('clearCatalog');
     await _channel.invokeMethod<void>('clearAuthSession');
+  }
+
+  Future<void> _consumeDirectShareResult() async {
+    final raw = await _channel.invokeMapMethod<String, dynamic>(
+      'consumeLastShareResult',
+    );
+    if (raw == null || raw.isEmpty) return;
+
+    final destination = raw['destinationPath']?.toString() ?? 'cartella';
+    final url = raw['url']?.toString() ?? '';
+    if (kDebugMode) {
+      debugPrint(
+        'Share Extension: salvataggio diretto rilevato '
+        '(${raw['postId']}) in $destination'
+        '${url.isEmpty ? '' : ' → $url'}',
+      );
+    }
+
+    DataService.instance.invalidateCache(folders: true, posts: true);
+    await FolderService().forceRefreshFromDataService();
   }
 
   Future<void> _exportCatalog(String userId, List<Folder> folders) async {

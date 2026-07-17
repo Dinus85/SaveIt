@@ -6,6 +6,7 @@ final class ShareViewController: UIViewController {
     private let messageLabel = UILabel()
     private let saveButton = UIButton(type: .system)
     private let tagsButton = UIButton(type: .system)
+    private let activityIndicator = UIActivityIndicatorView(style: .medium)
 
     private var catalog: SharedFolderCatalog?
     private var folders: [SharedFolder] = []
@@ -102,6 +103,15 @@ final class ShareViewController: UIViewController {
         )
         tagsButton.isEnabled = false
 
+        activityIndicator.hidesWhenStopped = true
+        let statusRow = UIStackView(arrangedSubviews: [
+            activityIndicator,
+            messageLabel,
+        ])
+        statusRow.axis = .horizontal
+        statusRow.alignment = .center
+        statusRow.spacing = 8
+
         tableView.dataSource = self
         tableView.delegate = self
         tableView.rowHeight = 50
@@ -109,7 +119,7 @@ final class ShareViewController: UIViewController {
         let stack = UIStackView(arrangedSubviews: [
             header,
             urlLabel,
-            messageLabel,
+            statusRow,
             tagsButton,
             tableView,
         ])
@@ -614,7 +624,9 @@ final class ShareViewController: UIViewController {
         saveButton.isEnabled = false
         tableView.isUserInteractionEnabled = false
         tagsButton.isEnabled = false
-        messageLabel.text = "Salvataggio in corso…"
+        activityIndicator.startAnimating()
+        messageLabel.text =
+            "Salvataggio in corso… può richiedere alcuni secondi."
         saveButton.setTitle("Salvo…", for: .normal)
 
         let drafts = draftsRequiredForSave(destination: selectedFolder)
@@ -627,6 +639,8 @@ final class ShareViewController: UIViewController {
         let requestId = UUID().uuidString
         let tags = parsedTags()
         let sharedTextValue = sharedText
+        let destinationPath = selectedFolder.displayPath
+        let sharedURLValue = sharedURL
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
@@ -639,7 +653,7 @@ final class ShareViewController: UIViewController {
 
                 var body: [String: Any] = [
                     "clientRequestId": requestId,
-                    "url": sharedURL,
+                    "url": sharedURLValue,
                     "tags": tags,
                     "folderDrafts": drafts.map { draft -> [String: Any] in
                         var item: [String: Any] = [
@@ -671,16 +685,31 @@ final class ShareViewController: UIViewController {
                     body["destinationFolderId"] = destinationFolderId
                 }
 
-                let createdFolderCount = try Self.postShareSave(
+                let saveResult = try Self.postShareSave(
                     endpoint: session.saveEndpoint,
                     token: session.idToken,
                     body: body
                 )
 
+                var resultPayload: [String: Any] = [
+                    "schemaVersion": 1,
+                    "postId": saveResult.postId,
+                    "destinationPath": destinationPath,
+                    "url": sharedURLValue,
+                    "savedAt": ISO8601DateFormatter().string(from: Date()),
+                    "createdFolderCount": saveResult.createdFolderCount,
+                ]
+                if let folderId = saveResult.folderId {
+                    resultPayload["folderId"] = folderId
+                }
+                try? AppGroupShareStore.writeLastShareResult(
+                    jsonObject: resultPayload
+                )
+
                 DispatchQueue.main.async {
                     self?.finishSaveSuccess(
-                        destination: selectedFolder.displayPath,
-                        createdFolders: createdFolderCount
+                        destination: destinationPath,
+                        createdFolders: saveResult.createdFolderCount
                     )
                 }
             } catch {
@@ -696,15 +725,16 @@ final class ShareViewController: UIViewController {
         createdFolders: Int
     ) {
         isSaving = false
+        activityIndicator.stopAnimating()
         folderDrafts.removeAll()
         let folderNote = createdFolders > 0
             ? " Cartelle create: \(createdFolders)."
             : ""
         messageLabel.text =
-            "Salvato in \(destination).\(folderNote)"
+            "Salvato in \(destination).\(folderNote) Riapri SaveIn! per vederlo."
         saveButton.setTitle("Fatto", for: .normal)
         saveButton.isEnabled = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             [weak self] in
             self?.extensionContext?.completeRequest(returningItems: nil)
         }
@@ -712,6 +742,7 @@ final class ShareViewController: UIViewController {
 
     private func finishSaveFailure(_ error: Error) {
         isSaving = false
+        activityIndicator.stopAnimating()
         tableView.isUserInteractionEnabled = true
         updateTagsButton()
         updateDestinationMessage()
@@ -728,7 +759,11 @@ final class ShareViewController: UIViewController {
         endpoint: String,
         token: String,
         body: [String: Any]
-    ) throws -> Int {
+    ) throws -> (
+        postId: String,
+        folderId: String?,
+        createdFolderCount: Int
+    ) {
         guard let url = URL(string: endpoint) else {
             throw SaveError.invalidEndpoint
         }
@@ -742,7 +777,7 @@ final class ShareViewController: UIViewController {
             "application/json",
             forHTTPHeaderField: "Content-Type"
         )
-        request.timeoutInterval = 45
+        request.timeoutInterval = 55
         request.httpBody = try JSONSerialization.data(
             withJSONObject: body,
             options: []
@@ -761,7 +796,7 @@ final class ShareViewController: UIViewController {
             semaphore.signal()
         }
         task.resume()
-        if semaphore.wait(timeout: .now() + 50) == .timedOut {
+        if semaphore.wait(timeout: .now() + 60) == .timedOut {
             throw SaveError.timeout
         }
         if let responseError {
@@ -776,7 +811,14 @@ final class ShareViewController: UIViewController {
         }
         if statusCode >= 200 && statusCode < 300, json["ok"] as? Bool == true {
             let created = json["createdFolderIds"] as? [Any] ?? []
-            return created.count
+            let postId = (json["postId"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackId = (body["clientRequestId"] as? String) ?? ""
+            return (
+                postId: (postId?.isEmpty == false ? postId! : fallbackId),
+                folderId: json["folderId"] as? String,
+                createdFolderCount: created.count
+            )
         }
         let message = (json["message"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)

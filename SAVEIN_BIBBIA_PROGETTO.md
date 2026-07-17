@@ -1656,3 +1656,12 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
 - La coda App Group resta come fallback per eventuali request legacy; il
   percorso primario è il salvataggio diretto dall'extension.
 - Deploy obbligatorio: `firebase deploy --only functions:savePostFromShare`.
+
+### Build `1.0.0+50` — refresh post-salvataggio e feedback UI
+
+- Il salvataggio diretto dalla Share Extension **funzionava già** (HTTP 200),
+  ma l'app non invalidava la cache al rientro: i post nuovi non comparivano.
+- Dopo `Salva`, l'extension scrive `last_share_result.json` nell'App Group;
+  al resume il Runner lo consuma, invalida cache cartelle/post e forza sync.
+- Spinner + messaggio "può richiedere alcuni secondi" durante il salvataggio;
+  conferma "Riapri SaveIn! per vederlo".
