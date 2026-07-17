@@ -1686,3 +1686,10 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
 - Al resume (dopo >2s in background) l'app invalida la cache e ricarica
   post/cartelle da Firestore (`Source.server`), così un salvataggio iOS
   mostra subito titolo/anteprima anche su Android senza pull-to-refresh.
+
+### Build `1.0.0+54` — repair anteprime locali all'apertura
+
+- All'apertura e al resume l'app controlla i post senza anteprima in cache
+  locale (o senza `previewStorageUrl` stabile), le scarica e se serve le
+  carica su Storage, poi aggiorna la UI — come un pull automatico solo per
+  le immagini mancanti.
