@@ -7,6 +7,7 @@ import 'package:savein/data_service.dart';
 import 'package:savein/models.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
+import 'package:savein/services/sharing_service.dart';
 import 'package:savein/url_metadata_service.dart';
 
 /// Sincronizza cartelle e import differiti con la Share Extension iOS.
@@ -160,6 +161,9 @@ class ShareExtensionService {
 
     DataService.instance.invalidateCache(folders: true, posts: true);
     await FolderService().forceRefreshFromDataService();
+    // Assicura rebuild home/folder detail dopo sync (anteprima inclusa).
+    FolderService().triggerOptimisticUpdate();
+    SharingService.notifyDataChangedFromExternal();
   }
 
   Future<void> _enrichDirectSharePost({

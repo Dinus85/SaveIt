@@ -464,6 +464,11 @@ abstract class FolderServiceBase {
       postsStreamController.add(List.from(allPosts));
     }
 
+    // Aggiorna anche le FolderDetailPage registrate: altrimenti i post
+    // importati dalla Share Extension restano senza anteprima finché
+    // l'utente non fa pull-to-refresh.
+    notifyUICallbacks();
+
     print('DEBUG: Notifica cambio dati inviata via stream');
   }
 

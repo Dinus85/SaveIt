@@ -51,6 +51,13 @@ class SharingService {
     _onDataChanged = callback;
   }
 
+  /// Usato da Share Extension / sync esterni per forzare refresh UI home.
+  static void notifyDataChangedFromExternal() {
+    if (_onDataChanged != null) {
+      _onDataChanged!();
+    }
+  }
+
   // CORRETTO: Initialize sharing intent listener
   void initialize({Function(SharedContent)? onSharedContent}) {
     _onSharedContent = onSharedContent;

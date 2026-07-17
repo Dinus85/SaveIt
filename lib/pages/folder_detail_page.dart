@@ -109,21 +109,16 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
     _folderService.trackFolderOpened(_currentFolder);
 
-    // Dopo import/share: aggiorna la lista quando arrivano anteprima/metadati.
-    // Tutti (isSpecial) deve sempre ascoltare, altrimenti i post salvati
-    // dalla Share Extension restano nascosti finché non fai pull-to-refresh.
-    if (widget.highlightPostId != null || _currentFolder.isSpecial) {
-      _folderService.setOnDataChangedCallback(_updateUISafely);
-      _firstRefreshTimer = Timer(const Duration(seconds: 2), () {
-        if (mounted) _loadPosts();
-      });
-      _secondRefreshTimer = Timer(const Duration(seconds: 5), () {
-        if (mounted) _loadPosts();
-      });
-    } else {
-      // L'aggiornamento avviene SOLO con pull-to-refresh manuale
-      _folderService.setOnDataChangedCallback(null);
-    }
+    // Dopo import/share: aggiorna la lista quando cambiano post/metadati.
+    // Serve su Tutti e su ogni cartella, altrimenti l'anteprima resta
+    // invisibile finché non si fa pull-to-refresh.
+    _folderService.setOnDataChangedCallback(_updateUISafely);
+    _firstRefreshTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) _loadPosts();
+    });
+    _secondRefreshTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) _loadPosts();
+    });
 
     _loadPostsEnsuringSync();
 
@@ -146,8 +141,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     _highlightTimer?.cancel();
     _highlightRetryTimer?.cancel();
     _pulseController.dispose();
-    _folderService
-        .setOnDataChangedCallback(null); // 🔥 NUOVO: Rimuovi il callback
+    _folderService.unregisterUIUpdateCallback(_updateUISafely);
     _contentScrollController.removeListener(_onContentScroll);
     _contentScrollController.dispose();
     super.dispose();
@@ -158,12 +152,17 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     print('DEBUG: FolderDetailPage - Lifecycle cambiato a: $state');
 
     if (state == AppLifecycleState.resumed) {
-      // 🔥 FIX: Al resume NON facciamo nulla di visibile.
-      // Il refresh dei dati avverrà in background tramite SaveInApp -> FolderService
-      // Quando i dati saranno pronti, verrà chiamato il callback che invocherà _updateUISafely().
-      // Questo previene flash, sparizioni e cambi di cartella indesiderati.
-      print(
-          'DEBUG: App resumed - Attendo aggiornamenti silenziosi dal servizio...');
+      // Dopo Share Extension il sync arriva in background: ricarica i post
+      // così titolo/anteprima compaiono senza pull-to-refresh.
+      Future<void>.delayed(const Duration(milliseconds: 800), () {
+        if (!mounted) return;
+        _updateCurrentFolder();
+        _loadPosts();
+      });
+      Future<void>.delayed(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        _loadPosts();
+      });
     }
   }
 

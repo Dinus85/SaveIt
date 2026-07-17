@@ -1674,3 +1674,9 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
   `UrlMetadataService` se il salvataggio diretto è ancora "magro".
 - La pagina `Tutti` ascolta di nuovo i cambi dati, così i post salvati dalla
   Share Extension compaiono senza pull-to-refresh obbligatorio.
+
+### Build `1.0.0+52` — anteprima senza pull-to-refresh
+
+- `notifyDataChanged` notifica anche i callback UI delle `FolderDetailPage`.
+- Ogni cartella ascolta i sync post-share; al resume ricarica i post.
+- Dopo il salvataggio diretto si forza anche il refresh della home.
