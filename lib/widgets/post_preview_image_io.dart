@@ -64,6 +64,10 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
       }
 
       final stableField = _stableRemoteFromField();
+      final originalUrl = widget.imageUrl?.trim();
+      final hasUsableSource = stableField != null ||
+          (originalUrl != null && originalUrl.isNotEmpty);
+
       if (stableField != null) {
         _networkDisplayUrl = stableField;
         await _cache.ensureCachedPreview(
@@ -74,19 +78,25 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
         if (cached != null) return cached;
       }
 
+      // Se non c'è ancora un'immagine (es. post Share Extension appena
+      // sincronizzato), non bruciare il tentativo: arriverà dopo il sync.
+      if (!hasUsableSource) {
+        return null;
+      }
+
       if (PostPreviewRepairTracker.instance.wasAttempted(widget.postId)) {
+        // Fonte disponibile ma download già fallito in questa sessione.
         _previewUnavailable = true;
         return null;
       }
 
       PostPreviewRepairTracker.instance.markAttempted(widget.postId);
 
-      var stableUrl = await _remote.resolveExistingPreviewUrl(
+      final stableUrl = await _remote.resolveExistingPreviewUrl(
         sourceUrl: widget.postUrl,
         imageUrl: widget.imageUrl,
       );
 
-      final originalUrl = widget.imageUrl?.trim();
       _networkDisplayUrl = stableUrl ?? originalUrl;
 
       await _cache.ensureCachedPreview(
@@ -102,6 +112,11 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
       return localPath;
     }
 
+    if (_networkDisplayUrl != null && _networkDisplayUrl!.trim().isNotEmpty) {
+      // Mostra comunque l'URL di rete finché la cache locale non è pronta.
+      return null;
+    }
+
     _previewUnavailable = true;
     return null;
   }
@@ -113,6 +128,17 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
         oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.remoteImageUrl != widget.remoteImageUrl ||
         oldWidget.postUrl != widget.postUrl) {
+      final hadNoImage =
+          (oldWidget.imageUrl == null || oldWidget.imageUrl!.trim().isEmpty) &&
+              (oldWidget.remoteImageUrl == null ||
+                  oldWidget.remoteImageUrl!.trim().isEmpty);
+      final hasImageNow =
+          (widget.imageUrl != null && widget.imageUrl!.trim().isNotEmpty) ||
+              (widget.remoteImageUrl != null &&
+                  widget.remoteImageUrl!.trim().isNotEmpty);
+      if (hadNoImage && hasImageNow) {
+        PostPreviewRepairTracker.instance.clearAttempt(widget.postId);
+      }
       _remoteBackupStarted = false;
       _networkDisplayUrl = null;
       _previewUnavailable = false;
@@ -215,7 +241,7 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
         final stableField = _stableRemoteFromField();
         final networkUrl = _networkDisplayUrl?.trim().isNotEmpty == true
             ? _networkDisplayUrl!.trim()
-            : stableField;
+            : (stableField ?? widget.imageUrl?.trim());
         if (networkUrl != null && networkUrl.isNotEmpty) {
           return CachedNetworkImage(
             imageUrl: networkUrl,
@@ -226,6 +252,11 @@ class _PostPreviewImageState extends State<PostPreviewImage> {
             placeholder: (context, _) => _buildPlaceholder(),
             errorWidget: (context, _, __) => _buildBrokenImage(),
           );
+        }
+
+        // Metadati ancora in arrivo (es. sync Share Extension).
+        if (!_previewUnavailable) {
+          return _buildPlaceholder();
         }
 
         return _buildBrokenImage();

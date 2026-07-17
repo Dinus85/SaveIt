@@ -28,6 +28,11 @@ class PostPreviewRepairTracker {
     _attemptedPostIds.add(postId);
   }
 
+  void clearAttempt(String postId) {
+    if (postId.isEmpty) return;
+    _attemptedPostIds.remove(postId);
+  }
+
   void resetForLogout() {
     _startupRepairStarted = false;
     _attemptedPostIds.clear();
