@@ -1665,3 +1665,12 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
   al resume il Runner lo consuma, invalida cache cartelle/post e forza sync.
 - Spinner + messaggio "può richiedere alcuni secondi" durante il salvataggio;
   conferma "Riapri SaveIn! per vederlo".
+
+### Build `1.0.0+51` — metadati OG e Tutti aggiornato
+
+- `savePostFromShare` recupera titolo/descrizione/immagine via Open Graph
+  (e riusa `global_posts` se già presenti) prima di creare il post.
+- Al resume l'app può arricchire ulteriormente i metadati con
+  `UrlMetadataService` se il salvataggio diretto è ancora "magro".
+- La pagina `Tutti` ascolta di nuovo i cambi dati, così i post salvati dalla
+  Share Extension compaiono senza pull-to-refresh obbligatorio.

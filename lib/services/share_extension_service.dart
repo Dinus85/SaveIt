@@ -145,16 +145,82 @@ class ShareExtensionService {
 
     final destination = raw['destinationPath']?.toString() ?? 'cartella';
     final url = raw['url']?.toString() ?? '';
+    final postId = raw['postId']?.toString() ?? '';
     if (kDebugMode) {
       debugPrint(
         'Share Extension: salvataggio diretto rilevato '
-        '(${raw['postId']}) in $destination'
+        '($postId) in $destination'
         '${url.isEmpty ? '' : ' → $url'}',
       );
     }
 
+    if (postId.isNotEmpty && url.isNotEmpty) {
+      await _enrichDirectSharePost(postId: postId, url: url);
+    }
+
     DataService.instance.invalidateCache(folders: true, posts: true);
     await FolderService().forceRefreshFromDataService();
+  }
+
+  Future<void> _enrichDirectSharePost({
+    required String postId,
+    required String url,
+  }) async {
+    try {
+      final posts = await DataService.instance.getPosts(forceRefresh: true);
+      SavedPost? existing;
+      for (final post in posts) {
+        if (post.id == postId) {
+          existing = post;
+          break;
+        }
+      }
+      if (existing == null) return;
+
+      final needsTitle = existing.title.trim().isEmpty ||
+          existing.title.toLowerCase() == 'post salvato' ||
+          existing.title.toLowerCase() ==
+              (Uri.tryParse(url)?.host.replaceFirst(RegExp(r'^www\.'), '') ??
+                  '');
+      final needsDescription = existing.description.trim().isEmpty;
+      final needsImage = (existing.imageUrl == null ||
+              existing.imageUrl!.trim().isEmpty) &&
+          (existing.previewStorageUrl == null ||
+              existing.previewStorageUrl!.trim().isEmpty);
+      if (!needsTitle && !needsDescription && !needsImage) return;
+
+      final metadata = await UrlMetadataService.resolveImportMetadata(url);
+      final updated = existing.copyWith(
+        title: needsTitle && (metadata.title?.trim().isNotEmpty ?? false)
+            ? metadata.title!.trim()
+            : existing.title,
+        description: needsDescription &&
+                (metadata.description?.trim().isNotEmpty ?? false)
+            ? metadata.description!.trim()
+            : existing.description,
+        imageUrl: needsImage && (metadata.imageUrl?.trim().isNotEmpty ?? false)
+            ? metadata.imageUrl
+            : existing.imageUrl,
+        previewStorageUrl: needsImage &&
+                (metadata.previewStorageUrl?.trim().isNotEmpty ?? false)
+            ? metadata.previewStorageUrl
+            : existing.previewStorageUrl,
+        creatorName: existing.creatorName ?? metadata.creatorName,
+        creatorUsername: existing.creatorUsername ?? metadata.creatorUsername,
+        updatedAt: DateTime.now(),
+      );
+      await DataService.instance.savePost(updated);
+      if (kDebugMode) {
+        debugPrint(
+          'Share Extension: metadati arricchiti per $postId '
+          '(${updated.title})',
+        );
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Share Extension: enrich metadati fallito: $error');
+      }
+    }
   }
 
   Future<void> _exportCatalog(String userId, List<Folder> folders) async {

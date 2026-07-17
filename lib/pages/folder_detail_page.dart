@@ -109,8 +109,10 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
     _folderService.trackFolderOpened(_currentFolder);
 
-    // Dopo import: aggiorna la lista quando arrivano anteprima/metadati in background.
-    if (widget.highlightPostId != null) {
+    // Dopo import/share: aggiorna la lista quando arrivano anteprima/metadati.
+    // Tutti (isSpecial) deve sempre ascoltare, altrimenti i post salvati
+    // dalla Share Extension restano nascosti finché non fai pull-to-refresh.
+    if (widget.highlightPostId != null || _currentFolder.isSpecial) {
       _folderService.setOnDataChangedCallback(_updateUISafely);
       _firstRefreshTimer = Timer(const Duration(seconds: 2), () {
         if (mounted) _loadPosts();

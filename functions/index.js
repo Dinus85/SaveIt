@@ -2846,22 +2846,52 @@ const ensureGlobalPost = async ({source, ownerId}) => {
       if (!existing.previewStorageUrl && safeSource.previewStorageUrl) {
         patch.previewStorageUrl = sharedPreviewStorageUrl(safeSource.previewStorageUrl);
       }
-      if (!existing.imageUrl && safeSource.imageUrl) patch.imageUrl = safeSource.imageUrl;
+      if (!existing.imageUrl && safeSource.imageUrl) {
+        patch.imageUrl = safeSource.imageUrl;
+      }
+      const existingTitle = (existing.title || "").toString().trim();
+      const sourceTitle = (safeSource.title || "").toString().trim();
+      if (
+        sourceTitle &&
+        (
+          !existingTitle ||
+          existingTitle.toLowerCase() === "post salvato" ||
+          (
+            existing.url &&
+            existingTitle.toLowerCase() ===
+              (normalizePostUrlForHash(existing.url) || "")
+                  .replace(/^https?:\/\//, "")
+                  .split("/")[0]
+                  .replace(/^www\./, "")
+          )
+        )
+      ) {
+        patch.title = sourceTitle;
+      }
+      if (!(existing.description || "").toString().trim() &&
+          (safeSource.description || "").toString().trim()) {
+        patch.description = safeSource.description.toString().trim();
+      }
       transaction.set(ref, patch, {merge: true});
+      const mergedTitle = patch.title || existing.title ||
+        safeSource.title || "Post salvato";
+      const mergedDescription = patch.description ||
+        existing.description || safeSource.description || "";
       return {
         globalPostId: ref.id,
         urlHash,
         normalizedUrl,
         canonical: {
           url: existing.url || safeSource.url || "",
-          title: existing.title || safeSource.title || "Post salvato",
-          description: existing.description || safeSource.description || "",
+          title: mergedTitle,
+          description: mergedDescription,
           imageUrl: existing.imageUrl || safeSource.imageUrl || null,
           previewStorageUrl: existing.previewStorageUrl ||
             sharedPreviewStorageUrl(safeSource.previewStorageUrl) ||
             null,
           creatorName: existing.creatorName || safeSource.creatorName || null,
-          creatorUsername: existing.creatorUsername || safeSource.creatorUsername || null,
+          creatorUsername: existing.creatorUsername ||
+            safeSource.creatorUsername || null,
         },
         reused: true,
       };
@@ -2968,6 +2998,116 @@ const shareExtensionPeriodKey = (period) => {
     return `w_${year}${month}_${week}`;
   }
   return "total";
+};
+
+const decodeHtmlEntities = (value) =>
+  (value || "")
+      .toString()
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&#(\d+);/g, (_, code) => {
+        try {
+          return String.fromCharCode(Number(code));
+        } catch (_) {
+          return "";
+        }
+      })
+      .trim();
+
+const extractMetaContent = (html, keys) => {
+  for (const key of keys) {
+    const patterns = [
+      new RegExp(
+          `<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,
+          "i"
+      ),
+      new RegExp(
+          `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["']`,
+          "i"
+      ),
+    ];
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        return decodeHtmlEntities(match[1]);
+      }
+    }
+  }
+  return "";
+};
+
+const absoluteShareUrl = (raw, baseUrl) => {
+  const value = (raw || "").toString().trim();
+  if (!value) return null;
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch (_) {
+    return null;
+  }
+};
+
+const fetchShareUrlMetadata = async (rawUrl) => {
+  const empty = {
+    title: "",
+    description: "",
+    imageUrl: null,
+    metadataProvider: "ios_share_extension",
+  };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(rawUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+      },
+    });
+    clearTimeout(timer);
+    if (!response.ok) return empty;
+    const html = (await response.text()).slice(0, 350000);
+    const title =
+      extractMetaContent(html, ["og:title", "twitter:title"]) ||
+      decodeHtmlEntities(
+          ((html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || "")
+      );
+    const description = extractMetaContent(html, [
+      "og:description",
+      "twitter:description",
+      "description",
+    ]);
+    const imageUrl = absoluteShareUrl(
+        extractMetaContent(html, ["og:image", "twitter:image", "og:image:url"]),
+        rawUrl
+    );
+    return {
+      title: title.substring(0, 300),
+      description: description.substring(0, 2000),
+      imageUrl,
+      metadataProvider: "ios_share_extension_og",
+    };
+  } catch (error) {
+    console.warn("fetchShareUrlMetadata failed", {
+      url: rawUrl,
+      message: error && error.message,
+    });
+    return empty;
+  }
+};
+
+const isThinShareTitle = (title, hostname) => {
+  const value = (title || "").toString().trim().toLowerCase();
+  if (!value) return true;
+  const host = (hostname || "").toString().replace(/^www\./, "").toLowerCase();
+  return value === host || value === "post salvato";
 };
 
 const assertShareExtensionRule = (rule, feature, count) => {
@@ -3727,18 +3867,68 @@ exports.savePostFromShare = onRequest(
         }
 
         const sharedText = (body.sharedText || "").toString().trim();
+        const hostname = parsedUrl.hostname.replace(/^www\./, "");
+        let title = (body.title || "").toString().trim();
+        let description = (body.description || "").toString().trim() ||
+          (sharedText === url ? "" : sharedText.substring(0, 2000));
+        let imageUrl = body.imageUrl || null;
+        let previewStorageUrl = body.previewStorageUrl || null;
+        let creatorName = body.creatorName || null;
+        let creatorUsername = body.creatorUsername || null;
+        let metadataProvider = "ios_share_extension";
+
+        const existingGlobal = await lookupGlobalPostByUrl(url);
+        if (existingGlobal.found && existingGlobal.canonical) {
+          const canonicalExisting = existingGlobal.canonical;
+          if (isThinShareTitle(title, hostname) && canonicalExisting.title) {
+            title = canonicalExisting.title;
+          }
+          if (!description && canonicalExisting.description) {
+            description = canonicalExisting.description;
+          }
+          if (!imageUrl && canonicalExisting.imageUrl) {
+            imageUrl = canonicalExisting.imageUrl;
+          }
+          if (!previewStorageUrl && canonicalExisting.previewStorageUrl) {
+            previewStorageUrl = canonicalExisting.previewStorageUrl;
+          }
+          if (!creatorName && canonicalExisting.creatorName) {
+            creatorName = canonicalExisting.creatorName;
+          }
+          if (!creatorUsername && canonicalExisting.creatorUsername) {
+            creatorUsername = canonicalExisting.creatorUsername;
+          }
+        }
+
+        if (isThinShareTitle(title, hostname) || !imageUrl || !description) {
+          const scraped = await fetchShareUrlMetadata(url);
+          if (isThinShareTitle(title, hostname) && scraped.title) {
+            title = scraped.title;
+          }
+          if (!description && scraped.description) {
+            description = scraped.description;
+          }
+          if (!imageUrl && scraped.imageUrl) {
+            imageUrl = scraped.imageUrl;
+          }
+          if (scraped.metadataProvider) {
+            metadataProvider = scraped.metadataProvider;
+          }
+        }
+
+        if (!title) {
+          title = hostname || "Post salvato";
+        }
+
         const source = {
           url,
-          title: (body.title || "").toString().trim() ||
-            parsedUrl.hostname.replace(/^www\./, "") ||
-            "Post salvato",
-          description: (body.description || "").toString().trim() ||
-            (sharedText === url ? "" : sharedText.substring(0, 2000)),
-          imageUrl: body.imageUrl || null,
-          previewStorageUrl: body.previewStorageUrl || null,
-          creatorName: body.creatorName || null,
-          creatorUsername: body.creatorUsername || null,
-          metadataProvider: "ios_share_extension",
+          title,
+          description,
+          imageUrl,
+          previewStorageUrl,
+          creatorName,
+          creatorUsername,
+          metadataProvider,
         };
         const global = await ensureGlobalPost({source, ownerId: uid});
         const canonical = global.canonical || source;
