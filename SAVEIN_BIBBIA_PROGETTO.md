@@ -1680,3 +1680,9 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
 - `notifyDataChanged` notifica anche i callback UI delle `FolderDetailPage`.
 - Ogni cartella ascolta i sync post-share; al resume ricarica i post.
 - Dopo il salvataggio diretto si forza anche il refresh della home.
+
+### Build `1.0.0+53` — anteprima cross-device iOS→Android
+
+- Al resume (dopo >2s in background) l'app invalida la cache e ricarica
+  post/cartelle da Firestore (`Source.server`), così un salvataggio iOS
+  mostra subito titolo/anteprima anche su Android senza pull-to-refresh.

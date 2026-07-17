@@ -473,6 +473,31 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
           print('DEBUG: App resumed - sincronizzo profilo utente da Firestore');
         }
         unawaited(AuthService().reloadCurrentUserFromFirestore());
+
+        // Cross-device: post/anteprime salvati da iOS devono apparire
+        // subito anche su Android (e viceversa) senza pull-to-refresh.
+        final backgroundedAt = _lastBackgroundTime;
+        final shouldRefreshPosts = backgroundedAt == null ||
+            DateTime.now().difference(backgroundedAt) >
+                const Duration(seconds: 2);
+        if (shouldRefreshPosts &&
+            firebase_auth.FirebaseAuth.instance.currentUser != null) {
+          unawaited(_refreshContentAfterResume());
+        }
+      }
+    }
+  }
+
+  Future<void> _refreshContentAfterResume() async {
+    try {
+      await FolderService().handleAppResumed();
+      SharingService.notifyDataChangedFromExternal();
+      if (kDebugMode) {
+        print('DEBUG: Resume sync post/cartelle completato');
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        print('DEBUG: Resume sync post/cartelle fallito: $error');
       }
     }
   }

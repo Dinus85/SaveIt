@@ -526,15 +526,10 @@ class FolderService extends FolderServiceBase
 
   Future<void> handleAppResumed() async {
     try {
-      final isConsistent = await _quickConsistencyCheck();
-
-      if (!isConsistent) {
-        await clearAllCache();
-        await forceReloadFromDatabase();
-        notifyDataChanged();
-      } else {
-        await _refreshDataFromDatabase();
-      }
+      // Cross-device: un post salvato da iOS Share Extension deve
+      // comparire subito anche su Android senza pull-to-refresh.
+      DataService.instance.invalidateCache(folders: true, posts: true);
+      await forceRefreshFromDataService();
     } catch (e) {
       print('DEBUG: Errore gestendo resume: $e');
     }
@@ -599,7 +594,17 @@ class FolderService extends FolderServiceBase
   // ============================================================================
 
   Future<void> forceRefreshFromDataService() async {
-    await syncWithDataService();
+    DataService.instance.invalidateCache(folders: true, posts: true);
+    final realPosts = await DataService.instance.getPosts(forceRefresh: true);
+    final realFolders =
+        await DataService.instance.getFolders(forceRefresh: true);
+    await syncFoldersFromDataServiceWithParentId(realFolders);
+    await syncPostsFromDataService(realPosts, realFolders);
+    updateTuttiCount();
+    if (currentUserId != null) {
+      cacheUserData(currentUserId!);
+    }
+    notifyDataChanged();
   }
 
   Future<void> initializeHybridData() async {

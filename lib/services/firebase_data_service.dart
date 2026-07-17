@@ -317,7 +317,7 @@ class FirebaseDataService {
       }
 
       // 2. Fetch da server
-      final result = await _fetchFoldersFromServer();
+      final result = await _fetchFoldersFromServer(forceRefresh: forceRefresh);
       if (kDebugMode)
         print(
             'DEBUG: Firebase - getFolders completato con successo (${result.length} items)');
@@ -351,12 +351,18 @@ class FirebaseDataService {
     }
   }
 
-  Future<List<Folder>> _fetchFoldersFromServer() async {
+  Future<List<Folder>> _fetchFoldersFromServer({
+    bool forceRefresh = false,
+  }) async {
     if (kDebugMode)
       print(
           'DEBUG: Firebase - Caricando folders da Firestore... via await _foldersCollection.get()');
 
-    final snapshot = await _foldersCollection.orderBy('createdAt').get();
+    final snapshot = await _foldersCollection.orderBy('createdAt').get(
+          forceRefresh
+              ? const GetOptions(source: Source.server)
+              : const GetOptions(source: Source.serverAndCache),
+        );
     if (kDebugMode)
       print(
           'DEBUG: Firebase - _foldersCollection.get() completato con ${snapshot.docs.length} documenti');
@@ -637,7 +643,13 @@ class FirebaseDataService {
         query = query.where('folderId', isEqualTo: folderId);
       }
 
-      final snapshot = await query.orderBy('createdAt', descending: true).get();
+      final snapshot = await query
+          .orderBy('createdAt', descending: true)
+          .get(
+            forceRefresh
+                ? const GetOptions(source: Source.server)
+                : const GetOptions(source: Source.serverAndCache),
+          );
       if (kDebugMode)
         print(
             'DEBUG: Firebase - query.get() completato con ${snapshot.docs.length} documenti');
