@@ -671,7 +671,7 @@ final class ShareViewController: UIViewController {
                     body["destinationFolderId"] = destinationFolderId
                 }
 
-                let result = try Self.postShareSave(
+                let createdFolderCount = try Self.postShareSave(
                     endpoint: session.saveEndpoint,
                     token: session.idToken,
                     body: body
@@ -680,7 +680,7 @@ final class ShareViewController: UIViewController {
                 DispatchQueue.main.async {
                     self?.finishSaveSuccess(
                         destination: selectedFolder.displayPath,
-                        createdFolders: result.createdFolderCount
+                        createdFolders: createdFolderCount
                     )
                 }
             } catch {
@@ -728,7 +728,7 @@ final class ShareViewController: UIViewController {
         endpoint: String,
         token: String,
         body: [String: Any]
-    ) throws -> (createdFolderCount: Int) {
+    ) throws -> Int {
         guard let url = URL(string: endpoint) else {
             throw SaveError.invalidEndpoint
         }
@@ -776,7 +776,7 @@ final class ShareViewController: UIViewController {
         }
         if statusCode >= 200 && statusCode < 300, json["ok"] as? Bool == true {
             let created = json["createdFolderIds"] as? [Any] ?? []
-            return (createdFolderCount: created.count)
+            return created.count
         }
         let message = (json["message"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
