@@ -416,7 +416,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.0.0+40`**. Prossima release prevista: **`1.0.0+41`** (fix import/cartelle/global_posts, lug 2026).
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.0.0+55`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -1693,3 +1693,39 @@ annullate. La nuova implementazione riparte dalla build stabile 42 senza
   locale (o senza `previewStorageUrl` stabile), le scarica e se serve le
   carica su Storage, poi aggiorna la UI — come un pull automatico solo per
   le immagini mancanti.
+
+### Build `1.0.0+55` — enrich Instagram/TikTok in `savePostFromShare` (17/07/2026)
+
+Problema: i salvataggi dalla Share Extension iOS avevano spesso solo URL/OG
+generici; titolo, cover e creator di Instagram/TikTok restavano deboli rispetto
+all'import Android via `UrlMetadataService`.
+
+Fix backend (`functions/index.js`, già deployato):
+- `fetchShareUrlMetadata` arricchito con:
+  - **TikTok**: resolve URL corti (`vm.tiktok.com` ecc.) + oEmbed pubblico
+    (`tiktok.com/oembed`) → titolo, thumbnail, `creatorName` / username
+  - **Instagram**: scrape pagina embed quando manca `og:image` / creator
+  - riuso di `global_posts` se il link è già noto
+- `savePostFromShare` applica `creatorName` / `creatorUsername` scrapati al post
+  creato (oltre a titolo/descrizione/immagine già presenti da +51)
+
+Deploy eseguito:
+```powershell
+firebase deploy --only functions:savePostFromShare
+```
+
+Commit repo: `4f4111a` su `main`. Versione app: **`1.0.0+55`**.
+Test: Condividi post IG/TikTok → SaveIn Share Extension → Salva → verificare
+titolo/cover/creator in cartella destinazione (anche cross-device).
+
+### Build `1.1.0+56` — App Store Connect versione 1.1 (20/07/2026)
+
+- Marketing version **1.1.0**, build **56** (dopo `1.0.0+54` approvata / Ready for distribution).
+- Scopo: nuova binary per App Store Connect **1.1** (age ratings social + eventuale update).
+- In ASC: seleziona build **56** sulla versione **1.1** → Invia per la verifica.
+
+### Build `1.1.0+56` — App Store Connect versione 1.1 (20/07/2026)
+
+- Marketing version **1.1.0**, build **56** (dopo `1.0.0+54` approvata / Ready for distribution).
+- Scopo: nuova binary per App Store Connect **1.1** (age ratings social + eventuale update).
+- In ASC: seleziona build **56** sulla versione **1.1** → Invia per la verifica.
