@@ -1289,8 +1289,18 @@ mixin FolderServiceCRUD on FolderServiceBase {
     List<MockPost> allPostsInHierarchy = [];
 
     void collectPostsRecursively(MockFolder currentFolder) {
-      allPostsInHierarchy
-          .addAll(allPosts.where((post) => post.sourceFolder == currentFolder));
+      final targetPath = buildFullPathForFolder(currentFolder);
+      allPostsInHierarchy.addAll(allPosts.where((post) {
+        if (post.sourceFolder == currentFolder) return true;
+        if (post.sourceFolder?.id != null && currentFolder.id != null) {
+          if (post.sourceFolder!.id == currentFolder.id) return true;
+        }
+        if (post.sourceFolder != null) {
+          final sourcePath = buildFullPathForFolder(post.sourceFolder!);
+          return sourcePath.toLowerCase() == targetPath.toLowerCase();
+        }
+        return false;
+      }));
 
       for (var child in currentFolder.children) {
         collectPostsRecursively(child);

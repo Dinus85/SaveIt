@@ -110,15 +110,8 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     _folderService.trackFolderOpened(_currentFolder);
 
     // Dopo import/share: aggiorna la lista quando cambiano post/metadati.
-    // Serve su Tutti e su ogni cartella, altrimenti l'anteprima resta
-    // invisibile finché non si fa pull-to-refresh.
+    // Un solo callback basta: i timer fissi causavano lampeggi inutili.
     _folderService.setOnDataChangedCallback(_updateUISafely);
-    _firstRefreshTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) _loadPosts();
-    });
-    _secondRefreshTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) _loadPosts();
-    });
 
     _loadPostsEnsuringSync();
 

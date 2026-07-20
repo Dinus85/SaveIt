@@ -9,9 +9,10 @@ import 'package:savein/models/folder.dart';
 
 import 'folder_service_models.dart';
 import 'folder_service_base.dart';
+import 'folder_service_crud.dart';
 
 /// Mixin per funzionalità di ricerca
-mixin FolderServiceSearch on FolderServiceBase {
+mixin FolderServiceSearch on FolderServiceCRUD {
   
   // ============================================================================
   // RICERCA UNIFICATA
@@ -351,14 +352,21 @@ mixin FolderServiceSearch on FolderServiceBase {
       );
     } else {
       void collectPostsRecursively(MockFolder currentFolder) {
+        final targetPath = buildFullPathForFolder(currentFolder);
         final directPosts = allPosts
             .where((post) {
               // 1) confronto referenziale
               if (post.sourceFolder == currentFolder) return true;
 
-              // 2) confronto ID (per gestire istanze rigenerate dopo sync)
+              // 2) confronto ID (istanze rigenerate dopo sync)
               if (post.sourceFolder?.id != null && currentFolder.id != null) {
-                return post.sourceFolder!.id == currentFolder.id;
+                if (post.sourceFolder!.id == currentFolder.id) return true;
+              }
+
+              // 3) path completo (stesso criterio di getPostsForFolder)
+              if (post.sourceFolder != null) {
+                final sourcePath = buildFullPathForFolder(post.sourceFolder!);
+                return sourcePath.toLowerCase() == targetPath.toLowerCase();
               }
 
               return false;

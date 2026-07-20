@@ -548,17 +548,38 @@ class FolderPreviewManager {
     List<MockPost> allPosts,
     List<MockPost> result,
   ) {
-    // Aggiungi post diretti di questa cartella
+    String buildPath(MockFolder f) {
+      // Allineato al matching usato in FolderService.getPostsForFolder
+      final parts = <String>[];
+      MockFolder? cur = f;
+      while (cur != null && !cur.isSpecial) {
+        parts.insert(0, cur.name);
+        cur = cur.parent;
+      }
+      return parts.join(' › ');
+    }
+
+    final targetPath = buildPath(folder).toLowerCase();
+
     final directPosts = allPosts
-        .where((post) =>
-            post.sourceFolder == folder &&
-            (post.imageUrl?.trim().isNotEmpty == true ||
-                post.previewStorageUrl?.trim().isNotEmpty == true))
+        .where((post) {
+          final hasImage = post.imageUrl?.trim().isNotEmpty == true ||
+              post.previewStorageUrl?.trim().isNotEmpty == true;
+          if (!hasImage) return false;
+
+          if (post.sourceFolder == folder) return true;
+          if (post.sourceFolder?.id != null && folder.id != null) {
+            if (post.sourceFolder!.id == folder.id) return true;
+          }
+          if (post.sourceFolder != null) {
+            return buildPath(post.sourceFolder!).toLowerCase() == targetPath;
+          }
+          return false;
+        })
         .toList();
 
     result.addAll(directPosts);
 
-    // Ricorsione sui children
     for (var child in folder.children) {
       _collectPostsRecursively(child, allPosts, result);
     }

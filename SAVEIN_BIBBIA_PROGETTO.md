@@ -1729,3 +1729,9 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Marketing version **1.1.0**, build **56** (dopo `1.0.0+54` approvata / Ready for distribution).
 - Scopo: nuova binary per App Store Connect **1.1** (age ratings social + eventuale update).
 - In ASC: seleziona build **56** sulla versione **1.1** → Invia per la verifica.
+
+### Build `1.1.0+57` — fix import social/web UI (20/07/2026)
+
+- Import URL social/web non marca più `isShared` → niente badge "post importato" né scheda blu (riservato a condivisioni tra utenti).
+- Anteprime cartella: matching post anche per path (come la lista in cartella), così la thumbnail compare in home.
+- Meno lampeggi dopo import: rimossi refresh timer fissi 2s/5s in `folder_detail_page`.

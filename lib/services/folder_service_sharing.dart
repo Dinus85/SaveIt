@@ -274,7 +274,8 @@ mixin FolderServiceSharing on FolderServiceBase {
     List<String> tags = const [],
     String? selectedFolderId,
     String? selectedFolderPath, // Path completo es. "A › B"
-    bool markAsImported = true,
+    // false = salvataggio normale (social/web/share). true solo per import da cartella/post condivisi.
+    bool markAsImported = false,
   }) async {
     startActionTiming('save_shared_post');
 

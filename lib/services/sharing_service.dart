@@ -1861,6 +1861,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
         selectedFolderId: actualFolderIdToUse ?? 'tutti',
         selectedFolderPath:
             _selectedFolderPath!.isEmpty ? null : _selectedFolderPath,
+        markAsImported: false,
       );
 
       final savedToFolder = saveResult.folderDisplayName;
