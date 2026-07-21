@@ -30,6 +30,19 @@
     ],
     "headers": [
       {
+        "source": "/app-ads.txt",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "text/plain; charset=utf-8"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-cache,no-store,must-revalidate"
+          }
+        ]
+      },
+      {
         "source": "**/*.@(css|png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|otf|wasm)",
         "headers": [
           {

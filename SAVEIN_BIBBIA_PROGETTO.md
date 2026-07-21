@@ -1735,3 +1735,10 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Import URL social/web non marca più `isShared` → niente badge "post importato" né scheda blu (riservato a condivisioni tra utenti).
 - Anteprime cartella: matching post anche per path (come la lista in cartella), così la thumbnail compare in home.
 - Meno lampeggi dopo import: rimossi refresh timer fissi 2s/5s in `folder_detail_page`.
+
+### AdMob app-ads.txt (21/07/2026)
+
+- File pubblicato: `https://savein.eu/app-ads.txt`
+- Contenuto: `google.com, pub-1397392558961350, DIRECT, f08c47fec0942fa0`
+- Sorgente repo: `web/app-ads.txt` + header in `firebase.json` (deploy Hosting).
+- Serve per collegare lo store iOS in AdMob e superare la verifica app.
