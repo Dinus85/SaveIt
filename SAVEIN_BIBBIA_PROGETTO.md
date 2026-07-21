@@ -416,7 +416,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.0+57`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.0+58`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -1742,3 +1742,10 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Contenuto: `google.com, pub-1397392558961350, DIRECT, f08c47fec0942fa0`
 - Sorgente repo: `web/app-ads.txt` + header in `firebase.json` (deploy Hosting).
 - Serve per collegare lo store iOS in AdMob e superare la verifica app.
+
+### Build `1.1.0+58` — riattivazione ads iOS (21/07/2026)
+
+- Rimosso blocco `TargetPlatform.iOS` in `InterstitialAdService._shouldUseAds` (era spento dopo rejection Apple su build +20).
+- Banner iOS già usava gli ID reali; ora anche interstitial Free su iOS.
+- AdMob: store iOS collegato (`id6785451010`); verifica/`app-ads.txt` in corso — ads possono restare limitati finché AdMob non approva.
+- Prossimo: Codemagic → TestFlight → submit App Store 1.1.x con note reviewer su ads Free/Premium.

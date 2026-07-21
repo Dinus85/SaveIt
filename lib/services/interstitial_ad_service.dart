@@ -136,9 +136,7 @@ class InterstitialAdService {
   }
 
   bool get _shouldUseAds =>
-      !kIsWeb &&
-      defaultTargetPlatform != TargetPlatform.iOS &&
-      _authService.currentUser?.effectiveRole == AppUserRole.free;
+      !kIsWeb && _authService.currentUser?.effectiveRole == AppUserRole.free;
 
   Future<bool> _featureRequiresAd(String feature) async {
     if (!_shouldUseAds) return false;
