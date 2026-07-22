@@ -416,7 +416,9 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.1+61`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.2+62`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
+- **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
+- **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -1333,6 +1335,7 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
 - **Premium Android / Google Play Billing**:
   - Product ID Google Play: `savein_premium_monthly`.
   - Base plan Google Play: `monthly`, tipo rinnovo automatico, periodo ogni mese, prezzo impostato (1,99 EUR base; prezzi locali generati da Play).
+  - **Play Billing Library ≥ 8.0.0 (obbligo Play Console dal 31 ago 2026)**: dal 22/07/2026 l'app usa `in_app_purchase: ^3.3.0` + `in_app_purchase_android: ^0.5.2` (BillingClient **8.0.0**). Prima era transitive `0.4.0+10` (Billing 7.x). Flusso app invariato (`queryProductDetails` / `buyNonConsumable` / `restorePurchases`); breaking change plugin (`queryPurchaseHistory`) non usata. Serve **nuova `.aab`** su tutti i canali Play per chiudere l'avviso Console.
   - Finche' il base plan non e' attivo e prezzato, `BillingService.loadProduct()` restituisce `null` e l'app mostra "Abbonamento non ancora disponibile su questo store".
   - Callable deployata: `verifyGooglePlayPurchase` in `functions/google_play_billing.js`.
   - Dipendenza backend: `googleapis`.
@@ -1755,6 +1758,7 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Apple rifiuta upload su train `1.1.0` già approvata (errori 90062 / 90186).
 - Nuova versione marketing **1.1.1**, build **59** → Codemagic → TestFlight / App Store Connect.
 
+
 ### Build `1.1.1+60` — niente badge/blu + dialog import senza flash (22/07/2026)
 
 - Rimosso badge "post importato" e bordo/sfondo blu dalle schede in `folder_detail_page` (anche se `isShared` resta nel modello per share tra utenti).
@@ -1766,3 +1770,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - In `FolderCardSelector`, tap su una cartella **entra sempre** (anche senza sottocartelle), così si può creare una nuova sottocartella se i limiti Free/Premium lo permettono.
 - Long-press resta per selezionare senza entrare.
 - Freccia di navigazione mostrata su tutte le cartelle entrabili.
+
+### Build `1.1.2+62` — Play Billing Library 8 + toolchain Android (22/07/2026)
+
+- Avviso Play Console: entro **31 ago 2026** tutte le app devono usare Google Play Billing Library **≥ 8.0.0** (consigliata v9; plugin Flutter ufficiale ferma a 8.0.0).
+- Dipendenze: `in_app_purchase: ^3.3.0`, `in_app_purchase_android: ^0.5.2` (prima transitive `0.4.0+10` / Billing 7.x).
+- Prerequisito SDK: Flutter **≥ 3.38** / Dart **≥ 3.10** (locale aggiornato a **3.44.7** / Dart 3.12). Su Codemagic allineare la versione Flutter.
+- Toolchain Android allineata ai minimi Flutter 3.44: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (+ flag migrator `android.builtInKotlin=false` / `android.newDsl=false` in `gradle.properties`).
+- Nessuna modifica al flusso `BillingService` (acquisto / restore / verify server-side invariati).
+- **Azione richiesta**: build release Android (`.aab`) + upload Play su canali interessati; smoke test acquisto/restore su device reale con account tester.
