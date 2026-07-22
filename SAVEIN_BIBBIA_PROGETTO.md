@@ -416,7 +416,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.1+59`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.1+60`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -1754,3 +1754,9 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 
 - Apple rifiuta upload su train `1.1.0` già approvata (errori 90062 / 90186).
 - Nuova versione marketing **1.1.1**, build **59** → Codemagic → TestFlight / App Store Connect.
+
+### Build `1.1.1+60` — niente badge/blu + dialog import senza flash (22/07/2026)
+
+- Rimosso badge "post importato" e bordo/sfondo blu dalle schede in `folder_detail_page` (anche se `isShared` resta nel modello per share tra utenti).
+- Dialog salvataggio: no sync forzato se cartelle già in memoria; preview a altezza fissa; `ValueKey` stabile sul dialog.
+- `updateTuttiCount(notify: false)` in upsert post → un solo refresh UI dopo save.

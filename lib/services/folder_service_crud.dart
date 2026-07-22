@@ -1314,6 +1314,6 @@ mixin FolderServiceCRUD on FolderServiceBase {
   }
 
   // Metodi astratti da sincronizzazione
-  void updateTuttiCount();
+  void updateTuttiCount({bool notify = true});
   Future<void> syncWithDataService();
 }

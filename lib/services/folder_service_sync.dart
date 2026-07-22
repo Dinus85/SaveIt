@@ -495,7 +495,7 @@ mixin FolderServiceSync on FolderServiceBase {
       allPosts.insert(0, mockPost);
     }
 
-    updateTuttiCount();
+    updateTuttiCount(notify: false);
     notifyDataChanged();
   }
 
@@ -658,7 +658,7 @@ mixin FolderServiceSync on FolderServiceBase {
     }
   }
 
-  void updateTuttiCount() {
+  void updateTuttiCount({bool notify = true}) {
     final specialIndex = folders.indexWhere((f) => f.isSpecial);
     if (specialIndex < 0) {
       folders.insert(0, MockFolder(
@@ -679,7 +679,9 @@ mixin FolderServiceSync on FolderServiceBase {
     tuttiFolder.count = totalPosts > 0 ? '$totalPosts Post' : 'Vuota';
 
     updateAllFolderCounts();
-    notifyDataChanged();
+    if (notify) {
+      notifyDataChanged();
+    }
   }
 
   void updateAllFolderCounts() {

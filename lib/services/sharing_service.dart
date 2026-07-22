@@ -537,6 +537,7 @@ class SharingService {
         UrlMetadataService.resolveImportMetadata(sharedContent.url);
 
     // STEP 3: Mostra dialog IMMEDIATAMENTE con dati di base
+    // Dialog stabile: non ricreare il widget ad ogni tick del FutureBuilder
     return showDialog<Map<String, String>?>(
       context: context,
       barrierDismissible: false, // Evita chiusura accidentale
@@ -564,6 +565,7 @@ class SharingService {
           }
 
           return SaveSharedContentDialog(
+            key: ValueKey('save_dialog_${sharedContent.url}'),
             sharedContent: sharedContent,
             metadata: metadata,
             isDarkTheme: isDarkTheme,
@@ -829,39 +831,42 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
     }
   }
 
-  // COMPLETAMENTE RISCRITTO: Caricamento dati con sincronizzazione FORZATA
+  // Caricamento cartelle per il dialog: evita sync forzato se i dati
+  // sono già in memoria (il sync completo fa lampeggiare la UI dietro).
   Future<void> _loadFolderDataWithForcedSync() async {
     print(
-        'DEBUG: ========== CARICAMENTO DATI CARTELLE CON SYNC FORZATA ==========');
+        'DEBUG: ========== CARICAMENTO DATI CARTELLE PER DIALOG SAVE ==========');
 
     try {
       final folderService = FolderService();
 
-      // STEP 1: FORZA SINCRONIZZAZIONE CON DATABASE PRIMA DI CARICARE
-      print(
-          'DEBUG: Forzando sincronizzazione con database prima del caricamento...');
-      await folderService.syncWithDataService();
-      print('DEBUG: Sincronizzazione completata');
+      final hasUserFolders =
+          folderService.folders.any((f) => !f.isSpecial);
+      if (!hasUserFolders) {
+        print('DEBUG: FolderService vuoto, sync una sola volta...');
+        await folderService.syncWithDataService();
+      } else {
+        print(
+            'DEBUG: Cartelle già in memoria (${folderService.folders.length}), skip sync forzato');
+      }
 
-      // STEP 2: ORA carica i dati sincronizzati
       _folderData = folderService.getCompleteDataForSharingPopupUltraFast();
 
-      print('DEBUG: Dati cartelle caricati dopo sincronizzazione');
+      print('DEBUG: Dati cartelle caricati');
       print(
           'DEBUG: Totale cartelle disponibili: ${_folderData!['folders']?.length ?? 0}');
 
-      // STEP 3: Verifica che i dati siano aggiornati
       final folderCount = _folderData!['folders']?.length ?? 0;
       if (folderCount <= 1) {
         print(
             'DEBUG: Attenzione: Solo ${folderCount} cartelle caricate (potrebbe indicare un problema)');
       }
 
+      if (!mounted) return;
       setState(() {
         _isFolderDataLoaded = true;
       });
 
-      // STEP 4: Debug: Lista le cartelle caricate
       final folders =
           _folderData!['folders'] as List<Map<String, dynamic>>? ?? [];
       print('DEBUG: Cartelle caricate nel popup:');
@@ -892,6 +897,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
           'isEmergency': true,
         };
 
+        if (!mounted) return;
         setState(() {
           _isFolderDataLoaded = true;
         });
@@ -1129,54 +1135,82 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (widget.metadata.displayImageUrl != null &&
-                        !widget.isLoadingMetadata) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Image.network(
-                          widget.metadata.displayImageUrl!,
-                          height: 120,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return Container(
-                              height: 120,
-                              color: Colors.grey[300],
-                              child: Center(
-                                child: CircularProgressIndicator(
-                                  color: Colors.green,
-                                  value: loadingProgress.expectedTotalBytes !=
-                                          null
-                                      ? loadingProgress.cumulativeBytesLoaded /
-                                          loadingProgress.expectedTotalBytes!
-                                      : null,
+                    // Slot immagine a altezza fissa: evita salti di layout mentre arrivano i metadati
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: SizedBox(
+                        height: 120,
+                        width: double.infinity,
+                        child: widget.metadata.displayImageUrl != null &&
+                                !widget.isLoadingMetadata
+                            ? Image.network(
+                                widget.metadata.displayImageUrl!,
+                                height: 120,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                loadingBuilder:
+                                    (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Container(
+                                    height: 120,
+                                    color: Colors.grey[300],
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        color: Colors.green,
+                                        value: loadingProgress
+                                                    .expectedTotalBytes !=
+                                                null
+                                            ? loadingProgress
+                                                    .cumulativeBytesLoaded /
+                                                loadingProgress
+                                                    .expectedTotalBytes!
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    height: 120,
+                                    color: Colors.grey[700],
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.image_not_supported,
+                                            color: Colors.grey[400], size: 32),
+                                        SizedBox(height: 4),
+                                        Text('Immagine non disponibile',
+                                            style: TextStyle(
+                                                color: Colors.grey[400],
+                                                fontSize: 12)),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              )
+                            : Container(
+                                height: 120,
+                                color: widget.isDarkTheme
+                                    ? Colors.grey[850]
+                                    : Colors.grey[200],
+                                child: Center(
+                                  child: widget.isLoadingMetadata
+                                      ? SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.green,
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Icon(Icons.link,
+                                          color: Colors.grey[500], size: 36),
                                 ),
                               ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              height: 120,
-                              color: Colors.grey[700],
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.image_not_supported,
-                                      color: Colors.grey[400], size: 32),
-                                  SizedBox(height: 4),
-                                  Text('Immagine non disponibile',
-                                      style: TextStyle(
-                                          color: Colors.grey[400],
-                                          fontSize: 12)),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
                       ),
-                      SizedBox(height: 8),
-                    ],
+                    ),
+                    SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(

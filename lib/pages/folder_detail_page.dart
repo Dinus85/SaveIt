@@ -1174,16 +1174,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                 ),
               ],
             )
-          : baseDecoration.copyWith(
-              color: post.isShared
-                  ? (widget.isDarkTheme
-                      ? Colors.blue.withOpacity(0.15)
-                      : Colors.blue.withOpacity(0.05))
-                  : null,
-              border: post.isShared
-                  ? Border.all(color: Colors.blue.withOpacity(0.5), width: 1.5)
-                  : null,
-            );
+          : baseDecoration;
       return Container(
         key: highlightPost ? _highlightedPostKey : null,
         margin: EdgeInsets.only(bottom: 12),
@@ -1281,41 +1272,8 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                         ],
                       ),
 
-                      // Badge "post importato"
-                      if (post.isShared) ...[
-                        SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Container(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade700.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                    color: Colors.blue.shade400, width: 1),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.download_rounded,
-                                      color: Colors.blue.shade600, size: 11),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'post importato',
-                                    style: TextStyle(
-                                      color: Colors.blue.shade600,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 0.2,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      // Niente badge "post importato": i salvataggi URL/social
+                      // devono sembrare post normali (isShared resta solo per share tra utenti).
                     ],
                   ),
                 ),
