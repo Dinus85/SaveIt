@@ -416,7 +416,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.1+60`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.1+61`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
 
 ## Condivisione link pubblici (share links)
@@ -1760,3 +1760,9 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Rimosso badge "post importato" e bordo/sfondo blu dalle schede in `folder_detail_page` (anche se `isShared` resta nel modello per share tra utenti).
 - Dialog salvataggio: no sync forzato se cartelle già in memoria; preview a altezza fissa; `ValueKey` stabile sul dialog.
 - `updateTuttiCount(notify: false)` in upsert post → un solo refresh UI dopo save.
+
+### Build `1.1.1+61` — selettore cartelle: entra anche se vuota (22/07/2026)
+
+- In `FolderCardSelector`, tap su una cartella **entra sempre** (anche senza sottocartelle), così si può creare una nuova sottocartella se i limiti Free/Premium lo permettono.
+- Long-press resta per selezionare senza entrare.
+- Freccia di navigazione mostrata su tutte le cartelle entrabili.

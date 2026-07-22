@@ -806,15 +806,10 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
           return;
         }
 
-        if (hasChildren) {
-          await _navigateToFolder(folder);
-          return;
-        }
-
-        final folderPath = _buildFolderPath(folder);
-        setState(() {
-          _selectedFolderPath = folderPath;
-        });
+        // Entra sempre nella cartella (anche se vuota): così si può creare
+        // una sottocartella se i limiti Free/Premium lo permettono.
+        // Long-press resta per selezionare senza entrare.
+        await _navigateToFolder(folder);
       },
       onLongPress: () {
         if (folder.isSpecial) {
@@ -931,7 +926,9 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
                     ),
                   ),
                 ),
-              if (hasChildren && !folder.isSpecial && !isLockedForFree)
+              // Freccia su tutte le cartelle entrabili (anche vuote):
+              // tap = entra, così si può creare una sottocartella.
+              if (!folder.isSpecial && !isLockedForFree)
                 Positioned(
                   bottom: 8,
                   right: 8,
