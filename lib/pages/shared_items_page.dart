@@ -4,6 +4,7 @@ import 'package:savein/data_service.dart';
 import 'package:savein/models.dart';
 import 'package:savein/models/folder.dart' show MockFolder;
 import 'package:savein/pages/folder_detail_page.dart';
+import 'package:savein/services/access_control_service.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/utils/theme_helpers.dart';
 
@@ -855,6 +856,13 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
       isDarkTheme: widget.isDarkTheme,
     );
     if (destination == null || !dialogContext.mounted) return;
+
+    final canImport = await AppAccessService().guardFeatureUse(
+      dialogContext,
+      'import_shared',
+      'Importazione Contenuti',
+    );
+    if (!canImport || !dialogContext.mounted) return;
 
     final itemId = widget.item['id']?.toString() ?? '';
     if (itemId.isNotEmpty) {

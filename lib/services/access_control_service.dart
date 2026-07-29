@@ -129,12 +129,27 @@ class AppAccessService {
 
   Future<void> showAdGateForFeature(BuildContext context, String feature) async {
     if (!context.mounted) return;
+    if (!isFree) return;
 
-    final usage = await PlanLimitsService.getUsage(forceRefresh: true);
-    final featUsage = usage[feature];
-    if (featUsage == null || !featUsage.requiresAd) return;
+    final requiresAd = await PlanLimitsService.featureRequiresAd(feature);
+    if (!requiresAd || !context.mounted) return;
 
     await InterstitialAdService.instance.showFeatureAdGate(context, feature);
+  }
+
+  /// Controlla limiti + eventuale pubblicità richiesta dalla dashboard.
+  /// Usare questo metodo su ogni entry-point di una feature soggetta a `requiresAd`.
+  Future<bool> guardFeatureUse(
+    BuildContext context,
+    String feature,
+    String featureName,
+  ) async {
+    final available =
+        await checkFeatureAvailable(context, feature, featureName);
+    if (!available || !context.mounted) return false;
+
+    await showAdGateForFeature(context, feature);
+    return context.mounted;
   }
 
   Future<bool> tryConsumeFeature(

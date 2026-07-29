@@ -12,8 +12,10 @@ import 'plan_limits_service.dart';
 class InterstitialAdService {
   InterstitialAdService._internal();
 
-  static final InterstitialAdService instance = InterstitialAdService._internal();
+  static final InterstitialAdService instance =
+      InterstitialAdService._internal();
 
+  /// Unità di produzione (usate in release/profile).
   static const String _androidInterstitialAdUnitId =
       'ca-app-pub-1397392558961350/5839880574';
   static const String _iosInterstitialAdUnitId =
@@ -24,15 +26,67 @@ class InterstitialAdService {
   static const String iosBannerAdUnitId =
       'ca-app-pub-1397392558961350/4315988838';
 
+  /// Unità di test ufficiali Google: in debug garantiscono fill su device/simulator.
+  static const String _androidTestInterstitialAdUnitId =
+      'ca-app-pub-3940256099942544/1033173712';
+  static const String _iosTestInterstitialAdUnitId =
+      'ca-app-pub-3940256099942544/4411468910';
+  static const String _androidTestBannerAdUnitId =
+      'ca-app-pub-3940256099942544/6300978111';
+  static const String _iosTestBannerAdUnitId =
+      'ca-app-pub-3940256099942544/2934735716';
+
   final AuthService _authService = AuthService();
 
   bool _isInitialized = false;
   bool _isShowingAd = false;
+  Future<void>? _initializing;
+
+  /// In debug usa le unit di test Google così le ads si vedono davvero in prova.
+  /// In release/profile usa le unit SaveIn (compariranno anche su AdMob).
+  static bool get useTestAds => kDebugMode;
+
+  static String get bannerAdUnitId {
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    if (useTestAds) {
+      return isIos ? _iosTestBannerAdUnitId : _androidTestBannerAdUnitId;
+    }
+    return isIos ? iosBannerAdUnitId : androidBannerAdUnitId;
+  }
 
   Future<void> initialize() async {
-    if (_isInitialized || kIsWeb) return;
-    await MobileAds.instance.initialize();
-    _isInitialized = true;
+    if (kIsWeb) return;
+    if (_isInitialized) return;
+    if (_initializing != null) return _initializing!;
+
+    _initializing = () async {
+      try {
+        await MobileAds.instance.initialize();
+        // In debug forza ads non personalizzate: evita blocchi ATT/privacy in test.
+        if (kDebugMode) {
+          await MobileAds.instance.updateRequestConfiguration(
+            RequestConfiguration(
+              tagForChildDirectedTreatment:
+                  TagForChildDirectedTreatment.unspecified,
+              tagForUnderAgeOfConsent: TagForUnderAgeOfConsent.unspecified,
+            ),
+          );
+        }
+        _isInitialized = true;
+        if (kDebugMode) {
+          debugPrint(
+            'AdMob inizializzato (testAds=$useTestAds, platform=$defaultTargetPlatform)',
+          );
+        }
+      } catch (e, st) {
+        debugPrint('AdMob initialize error: $e\n$st');
+        rethrow;
+      } finally {
+        _initializing = null;
+      }
+    }();
+
+    return _initializing!;
   }
 
   Future<bool> showDailyOpenAdIfNeeded() async {
@@ -140,9 +194,7 @@ class InterstitialAdService {
 
   Future<bool> _featureRequiresAd(String feature) async {
     if (!_shouldUseAds) return false;
-
-    final usage = await PlanLimitsService.getUsage(forceRefresh: true);
-    return usage[feature]?.requiresAd ?? false;
+    return PlanLimitsService.featureRequiresAd(feature);
   }
 
   String? get _currentUserId => _authService.currentUser?.id;
@@ -161,9 +213,13 @@ class InterstitialAdService {
   String? get _interstitialAdUnitId {
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return _androidInterstitialAdUnitId;
+        return useTestAds
+            ? _androidTestInterstitialAdUnitId
+            : _androidInterstitialAdUnitId;
       case TargetPlatform.iOS:
-        return _iosInterstitialAdUnitId;
+        return useTestAds
+            ? _iosTestInterstitialAdUnitId
+            : _iosInterstitialAdUnitId;
       default:
         return null;
     }
@@ -175,10 +231,19 @@ class InterstitialAdService {
     final adUnitId = _interstitialAdUnitId;
     if (adUnitId == null) return false;
 
-    await initialize();
+    try {
+      await initialize();
+    } catch (e) {
+      debugPrint('InterstitialAd skip: AdMob non inizializzato ($e)');
+      return false;
+    }
 
     final completer = Completer<bool>();
     _isShowingAd = true;
+
+    if (kDebugMode) {
+      debugPrint('InterstitialAd loading unit=$adUnitId');
+    }
 
     InterstitialAd.load(
       adUnitId: adUnitId,

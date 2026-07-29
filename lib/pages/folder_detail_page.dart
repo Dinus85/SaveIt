@@ -1446,15 +1446,12 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   }
 
   Future<void> _showReminderDialog(MockPost post) async {
-    final canUse = await _accessService.checkFeatureAvailable(
+    final allowed = await _accessService.guardFeatureUse(
       context,
       'reminders',
       'Reminder',
     );
-    if (!canUse || !mounted) return;
-
-    await _accessService.showAdGateForFeature(context, 'reminders');
-    if (!mounted) return;
+    if (!allowed || !mounted) return;
 
     showDialog(
       context: context,
@@ -2737,7 +2734,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         await DataService.instance.sharePost(postToShare, email);
       },
       canStartShare: () async {
-        return AppAccessService().checkFeatureAvailable(
+        return AppAccessService().guardFeatureUse(
           context,
           'share_post',
           'Condivisione Post',

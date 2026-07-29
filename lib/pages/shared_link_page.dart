@@ -63,9 +63,9 @@ class _SharedLinkPageState extends State<SharedLinkPage> {
     }
     setState(() => _working = true);
     try {
-      // Controllo limiti dinamici
+      // Controllo limiti dinamici + eventuale pubblicità (requiresAd dashboard)
       if (mounted) {
-        final canImport = await AppAccessService().checkFeatureAvailable(
+        final canImport = await AppAccessService().guardFeatureUse(
           context,
           'import_shared',
           'Importazione Contenuti',

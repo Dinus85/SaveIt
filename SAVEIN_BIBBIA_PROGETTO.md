@@ -1208,9 +1208,9 @@ Configurazione nei file:
 
 Logica ads:
 - Solo utenti Free (`AppAccessService().hasAds`)
-- **Interstitial**: mostrato prima di apertura post remindato e ogni 5 import
-- **Banner**: mostrato nella home ogni 4 cartelle (dopo la 4ª, 8ª, 12ª...) tramite `BannerAdWidget` in `lib/widgets/banner_ad_widget.dart`
-- **IMPORTANTE (verificato 03/07/2026)**: sia `InterstitialAdService._shouldUseAds` sia `BannerAdWidget` hanno un controllo esplicito `defaultTargetPlatform == TargetPlatform.iOS` che **disattiva completamente gli ads su iOS**, indipendentemente dagli ID configurati (vedi nota "App Store rejection fix" build `1.0.0+20`, introdotto perche' Apple review aveva contestato gli interstitial). Quindi ora che gli ID iOS reali sono stati creati e inseriti nel codice, gli ads su iOS **restano comunque disattivati** finche' questo blocco non viene rimosso deliberatamente — non e' un bug, e' una scelta di design da rivalutare in futuro se si vuole monetizzare anche su iOS.
+- **Interstitial**: mostrato prima di apertura post remindato e ogni 5 import; anche come gate se `requiresAd` e' true per reminder/share/import
+- **Banner**: mostrato nella home ogni **3 cartelle** (dopo la 3ª, 6ª, 9ª...) tramite `BannerAdWidget` in `lib/main.dart`
+- Blocco iOS di build `+20` rimosso in `1.1.0+58`; da `1.1.2+63` i cambi dashboard `requiresAd` arrivano subito via live sync `config/plan_limits`
 
 L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla pubblicazione su Play Store).
 
@@ -1779,3 +1779,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Toolchain Android allineata ai minimi Flutter 3.44: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (+ flag migrator `android.builtInKotlin=false` / `android.newDsl=false` in `gradle.properties`).
 - Nessuna modifica al flusso `BillingService` (acquisto / restore / verify server-side invariati).
 - **Azione richiesta**: build release Android (`.aab`) + upload Play su canali interessati; smoke test acquisto/restore su device reale con account tester.
+
+### Build `1.1.2+63` — ads iOS + requiresAd live + banner dalla 3ª cartella (29/07/2026)
+
+- Banner Home ogni **3 cartelle** (prima ogni 4/5).
+- `requiresAd` dalla dashboard `config/plan_limits`: sync live + `guardFeatureUse` su reminder, share cartella/post, import shared.
+- AdMob: init piu' robusta, log errori load, unit di test Google solo in `kDebugMode`; in release/Codemagic usano gli ID SaveIn reali.
+- Aggiunto `ios/Podfile` (platform iOS 13) per CocoaPods/`google_mobile_ads` su Codemagic.
+- **Azione richiesta**: Codemagic → TestFlight build **63** → test Free con ≥3 cartelle; verificare richieste > 0 su AdMob iOS.

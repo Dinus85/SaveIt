@@ -1261,6 +1261,7 @@ class _WebHomePageState extends State<WebHomePage>
     );
 
     homeHighlightFolderNotifier.addListener(_onHomeHighlightFolderChanged);
+    PlanLimitsService.rulesRevision.addListener(_onPlanLimitsChanged);
 
     _searchController.addListener(_onSearchChanged);
     AuthService().addListener(_schedulePromotionBannerRefresh);
@@ -1398,12 +1399,19 @@ class _WebHomePageState extends State<WebHomePage>
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     homeHighlightFolderNotifier.removeListener(_onHomeHighlightFolderChanged);
+    PlanLimitsService.rulesRevision.removeListener(_onPlanLimitsChanged);
     _highlightRootTimer?.cancel();
     _homeScrollTimer?.cancel();
     _homePulseController.dispose();
     _homeScrollController.dispose();
 
     super.dispose();
+  }
+
+  void _onPlanLimitsChanged() {
+    if (!mounted) return;
+    // Riflette subito requiresAd / limiti aggiornati dalla dashboard.
+    setState(() {});
   }
 
   void _onHomeHighlightFolderChanged() {
@@ -2558,9 +2566,16 @@ class _WebHomePageState extends State<WebHomePage>
         ],
       ));
 
-      // Banner dopo ogni 4 cartelle (ogni 2 righe), solo per utenti Free
-      if (showAds && (i + 2) % 4 == 0 && i + 2 < sortedFolders.length) {
-        rows.add(const BannerAdWidget());
+      // Banner ogni 3 cartelle (dopo la 3ª, 6ª, 9ª…), solo utenti Free.
+      if (showAds) {
+        final foldersShown = (i + 2).clamp(0, sortedFolders.length);
+        final prevShown = i;
+        for (var n = prevShown + 1; n <= foldersShown; n++) {
+          if (n % 3 == 0) {
+            rows.add(const BannerAdWidget());
+            break;
+          }
+        }
       }
     }
 
@@ -3183,7 +3198,7 @@ class _RemindersBannerSheet extends StatelessWidget {
                             subtitleColor: subtitleColor,
                             onTap: () async {
                               final canOpen = await AppAccessService()
-                                  .checkFeatureAvailable(
+                                  .guardFeatureUse(
                                 context,
                                 'reminders',
                                 'Reminder',
@@ -3191,8 +3206,6 @@ class _RemindersBannerSheet extends StatelessWidget {
                               if (!canOpen) return;
 
                               Navigator.pop(context);
-                              await InterstitialAdService.instance
-                                  .showReminderOpenGate(context);
                               await ReminderService.instance
                                   .markReminderOpened(reminder);
                               await openReminderTargetInApp(

@@ -559,15 +559,12 @@ class MockFolderCard extends StatelessWidget {
   }
 
   Future<void> _showFolderReminderDialog(BuildContext context) async {
-    final canUse = await AppAccessService().checkFeatureAvailable(
+    final allowed = await AppAccessService().guardFeatureUse(
       context,
       'reminders',
       'Reminder',
     );
-    if (!canUse || !context.mounted) return;
-
-    await AppAccessService().showAdGateForFeature(context, 'reminders');
-    if (!context.mounted) return;
+    if (!allowed || !context.mounted) return;
 
     showDialog(
       context: context,
@@ -636,7 +633,7 @@ class MockFolderCard extends StatelessWidget {
           await DataService.instance.shareFolder(folderToShare, email);
         },
         canStartShare: () async {
-          return AppAccessService().checkFeatureAvailable(
+          return AppAccessService().guardFeatureUse(
             context,
             'share_folder',
             'Condivisione Cartella',

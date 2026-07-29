@@ -92,6 +92,10 @@ class PlanLimitsService {
   static StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
       _rulesSubscription;
 
+  /// Incrementato a ogni aggiornamento live di `config/plan_limits`.
+  /// L'UI può ascoltarlo per riflettere subito `requiresAd` / limiti.
+  static final ValueNotifier<int> rulesRevision = ValueNotifier<int>(0);
+
   static Map<String, dynamic>? get cachedRules => _cachedRules;
 
   static Map<String, PlanFeatureUsage>? _cachedUsage;
@@ -221,8 +225,12 @@ class PlanLimitsService {
         snapshot.data()?['featureRules'] as Map<String, dynamic>? ?? {},
       );
       _lastRulesFetch = DateTime.now();
-      _cachedUsage = null;
-      _lastUsageFetch = null;
+      invalidateUsageCache();
+      rulesRevision.value++;
+      debugPrint(
+        'PlanLimits live update #${rulesRevision.value} '
+        '(features=${_cachedRules?.length ?? 0})',
+      );
     }, onError: (e) {
       debugPrint('Error listening plan limits: $e');
     });
@@ -303,16 +311,18 @@ class PlanLimitsService {
   static Future<Map<String, dynamic>> getFeatureRules({
     bool forceRefresh = false,
   }) async {
-    if (!forceRefresh &&
-        _cachedRules != null &&
-        _lastRulesFetch != null &&
-        DateTime.now().difference(_lastRulesFetch!) <
-            const Duration(minutes: 5)) {
+    // Con live sync attivo la cache è già aggiornata in tempo reale.
+    if (!forceRefresh && _cachedRules != null) {
       return _cachedRules!;
     }
 
     try {
-      final doc = await _db.doc('config/plan_limits').get();
+      // forceRefresh legge dal server per evitare regole stale dalla cache locale.
+      final doc = await _db.doc('config/plan_limits').get(
+            forceRefresh
+                ? const GetOptions(source: Source.server)
+                : const GetOptions(source: Source.serverAndCache),
+          );
       final rules = _mergeWithDefaultRules(
         doc.data()?['featureRules'] as Map<String, dynamic>? ?? {},
       );
@@ -322,6 +332,7 @@ class PlanLimitsService {
       return rules;
     } catch (e) {
       debugPrint('Error fetching plan limits: $e');
+      if (_cachedRules != null) return _cachedRules!;
     }
     return {};
   }
@@ -342,6 +353,25 @@ class PlanLimitsService {
     // Default fallback
     return PlanFeatureRule(
         enabled: true, limit: 0, period: 'total', requiresAd: false);
+  }
+
+  /// Legge `requiresAd` preferendo la cache live (dashboard → app immediato).
+  static Future<bool> featureRequiresAd(String feature) async {
+    final role = _auth.currentUser?.effectiveRole ?? AppUserRole.free;
+    if (role != AppUserRole.free) return false;
+
+    if (_cachedRules != null) {
+      final featureData = _cachedRules![feature];
+      if (featureData is Map) {
+        final freeRules = featureData['free'];
+        if (freeRules is Map) {
+          return freeRules['requiresAd'] == true;
+        }
+      }
+    }
+
+    final rule = await getRule(feature, forceRefresh: true);
+    return rule.requiresAd;
   }
 
   static Future<Map<String, PlanFeatureUsage>> getUsage({
