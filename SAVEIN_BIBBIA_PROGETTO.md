@@ -1791,6 +1791,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Aggiunto `ios/Podfile` (platform iOS 13) per CocoaPods/`google_mobile_ads` su Codemagic.
 - **Azione richiesta**: Codemagic → TestFlight build **63** → test Free con ≥3 cartelle; verificare richieste > 0 su AdMob iOS.
 
+### Build `1.1.3+66` — nuovo train App Store dopo chiusura 1.1.2 (29/07/2026)
+
+- Apple errori **90062** / **90186**: il train `1.1.2` e' chiuso (versione gia' approvata); non si possono caricare altri build su `1.1.2`.
+- Nuova marketing version **1.1.3**, build **66** → Codemagic → TestFlight / App Store Connect.
+- Contenuto: stesso codice di `1.1.2+65` (Free vs Premium dai limiti live, banner N cartelle, import post/cartelle).
+
 ### Build `1.1.2+65` — Free vs Premium dai limiti dashboard live (29/07/2026)
 
 - Il confronto Free/Premium (Account + dialog "Passa a Premium") elenca **tutte** le voci di Limiti Funzioni e mostra i valori Free/Premium letti da `config/plan_limits` (live sync).
