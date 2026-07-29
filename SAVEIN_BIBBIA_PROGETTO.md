@@ -157,7 +157,9 @@ Feature rule principali:
 - `manual_tags`: abilita/disabilita tag manuali.
 - `share_folder`: abilita e limita condivisione cartelle.
 - `share_post`: abilita e limita condivisione post.
-- `import_shared`: abilita e limita import di contenuti condivisi.
+- `import_shared_post`: ogni post importato conta 1 (singolo o dentro una cartella).
+- `import_shared_folder`: ogni cartella root importata conta 1. L'import cartella richiede anche slot `import_shared_post` sufficienti per i post contenuti (controllo incrociato).
+- Compatibilita': se in Firestore resta solo il vecchio `import_shared`, l'app/functions lo mappano su entrambe le nuove chiavi finche' non si salva dalla dashboard.
 
 Regole importanti:
 - `limit <= 0` significa illimitato per quel tier.
@@ -1787,3 +1789,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - AdMob: init piu' robusta, log errori load, unit di test Google solo in `kDebugMode`; in release/Codemagic usano gli ID SaveIn reali.
 - Aggiunto `ios/Podfile` (platform iOS 13) per CocoaPods/`google_mobile_ads` su Codemagic.
 - **Azione richiesta**: Codemagic → TestFlight build **63** → test Free con ≥3 cartelle; verificare richieste > 0 su AdMob iOS.
+
+### Limiti — label + import post/cartelle (29/07/2026)
+
+- Diciture dashboard: `child_folders` = "Numero di sottocartelle per ogni cartella"; `folder_levels` = "Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC".
+- Spezzato `import_shared` in `import_shared_post` (default Free 5/day) e `import_shared_folder` (default Free 1/day).
+- Import cartella richiede 1 slot cartella **e** N slot post (N = post nella cartella). Enforcement client + `importSharedResource`.
+- Dialog limite Free: mostra i limiti dashboard (post/cartelle) + CTA **Passa a Premium** (acquisto in-app).
+- **Build app**: `1.1.2+64`. Dopo deploy functions/hosting: in Limiti salvare una volta i nuovi valori cosi' Firestore ha le due chiavi esplicite.

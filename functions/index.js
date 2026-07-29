@@ -38,8 +38,12 @@ const DEFAULT_STORAGE_BUCKET = "saveit-app-1784d.firebasestorage.app";
     "free": {enabled: true, limit: 3, period: "day", requiresAd: true},
     "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
   },
-  "import_shared": {
+  "import_shared_post": {
     "free": {enabled: true, limit: 5, period: "day", requiresAd: true},
+    "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
+  },
+  "import_shared_folder": {
+    "free": {enabled: true, limit: 1, period: "day", requiresAd: true},
     "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
   },
   "reminders": {
@@ -2977,13 +2981,88 @@ const shareExtensionRulesForUser = async (userData) => {
     (!premiumUntil || premiumUntil.getTime() > Date.now());
   const isAdmin = role === "admin";
   const tier = isAdmin || premiumActive ? "premium" : "free";
-  const rule = (feature) => ({
-    ...(defaults[feature] && defaults[feature][tier] ?
-      defaults[feature][tier] : {}),
-    ...(configured[feature] && configured[feature][tier] ?
-      configured[feature][tier] : {}),
-  });
+  const rule = (feature) => {
+    let configuredFeature = configured[feature];
+    // Compatibilità: vecchio import_shared → post/cartelle se non ancora salvati.
+    if (!configuredFeature &&
+        (feature === "import_shared_post" || feature === "import_shared_folder") &&
+        configured.import_shared) {
+      configuredFeature = configured.import_shared;
+    }
+    return {
+      ...(defaults[feature] && defaults[feature][tier] ?
+        defaults[feature][tier] : {}),
+      ...(configuredFeature && configuredFeature[tier] ?
+        configuredFeature[tier] : {}),
+    };
+  };
   return {isAdmin, tier, rule};
+};
+
+const readFeatureUsageCount = (usageData, feature, periodKey) => {
+  const featureUsage = (usageData && usageData[feature]) || {};
+  return Number(featureUsage[periodKey] || 0);
+};
+
+const assertImportSharedLimits = async ({
+  uid,
+  isAdmin,
+  rule,
+  posts,
+  folders,
+}) => {
+  if (isAdmin) return;
+
+  const usageDoc = await db.collection("feature_usage").doc(uid).get();
+  const usageData = usageDoc.exists ? usageDoc.data() || {} : {};
+
+  if (posts > 0) {
+    const postRule = rule("import_shared_post");
+    const period = (postRule.period || "day").toString();
+    const periodKey = shareExtensionPeriodKey(period);
+    const count = readFeatureUsageCount(
+        usageData,
+        "import_shared_post",
+        periodKey,
+    );
+    if (postRule.enabled === false) {
+      throw new HttpsError(
+          "permission-denied",
+          "Importazione post disabilitata dal piano",
+      );
+    }
+    const limit = Number(postRule.limit || 0);
+    if (limit > 0 && count + posts > limit) {
+      throw new HttpsError(
+          "resource-exhausted",
+          "Limite importazione post raggiunto",
+      );
+    }
+  }
+
+  if (folders > 0) {
+    const folderRule = rule("import_shared_folder");
+    const period = (folderRule.period || "day").toString();
+    const periodKey = shareExtensionPeriodKey(period);
+    const count = readFeatureUsageCount(
+        usageData,
+        "import_shared_folder",
+        periodKey,
+    );
+    if (folderRule.enabled === false) {
+      throw new HttpsError(
+          "permission-denied",
+          "Importazione cartelle disabilitata dal piano",
+      );
+    }
+    const limit = Number(folderRule.limit || 0);
+    if (limit > 0 && count + folders > limit) {
+      throw new HttpsError(
+          "resource-exhausted",
+          "Limite importazione cartelle raggiunto",
+      );
+    }
+  }
 };
 
 const shareExtensionPeriodKey = (period) => {
@@ -4429,12 +4508,37 @@ exports.getShareLink = onCall(
         openCount: admin.firestore.FieldValue.increment(1),
         lastOpenedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
+
+      let postCount = data.type === "folder" ? 0 : 1;
+      let folderCount = data.type === "folder" ? 1 : 0;
+      try {
+        const ownerId = normalizeShareId(data.ownerId);
+        const type = normalizeShareId(data.type);
+        const resourceId = normalizeShareId(
+            data.resourceId ||
+            resolveShareResourceId(type, data.payload),
+        );
+        if (ownerId && resourceId && ["post", "folder"].includes(type)) {
+          const preview = await loadSharedResourcePreview({
+            ownerId,
+            resourceId,
+            type,
+          });
+          postCount = Number(preview.postCount || 0);
+          folderCount = type === "folder" ? 1 : 0;
+        }
+      } catch (previewError) {
+        console.warn("getShareLink preview count failed", previewError);
+      }
+
       return {
         token: doc.id,
         type: data.type,
         title: data.title,
         ownerName: data.ownerName || "Utente SaveIn",
         payload: data.payload || {},
+        postCount,
+        folderCount,
       };
     }
 );
@@ -4572,6 +4676,31 @@ exports.importSharedResource = onCall(
         throw new HttpsError("invalid-argument", "Condivisione mancante");
       }
 
+      const userDoc = await db.collection("users").doc(targetUserId).get();
+      const userData = userDoc.exists ? userDoc.data() || {} : {};
+      if (userData.isBlocked === true) {
+        throw new HttpsError("permission-denied", "Account bloccato");
+      }
+      const rules = await shareExtensionRulesForUser(userData);
+
+      const preview = await loadSharedResourcePreview({
+        ownerId: source.ownerId,
+        resourceId: source.resourceId,
+        type: source.type,
+      });
+      const postsToImport = source.type === "post" ?
+        1 :
+        Number(preview.postCount || 0);
+      const foldersToImport = source.type === "folder" ? 1 : 0;
+
+      await assertImportSharedLimits({
+        uid: targetUserId,
+        isAdmin: rules.isAdmin,
+        rule: rules.rule,
+        posts: postsToImport,
+        folders: foldersToImport,
+      });
+
       const result = await copySharedResourceFromSource({
         ...source,
         targetUserId,
@@ -4589,9 +4718,16 @@ exports.importSharedResource = onCall(
         }, {merge: true});
       }
 
+      const importedPostCount = Number(
+          result.postsCopied != null ? result.postsCopied : postsToImport,
+      );
+      const importedFolderCount = foldersToImport;
+
       return {
         ok: true,
         type: source.type,
+        importedPostCount,
+        importedFolderCount,
         ...result,
       };
     }
@@ -4818,11 +4954,12 @@ const dashPage = (user, stats, admins) => `${dashHtmlHead("SaveIn! Admin · Dash
 const dashLimitsPage = (user, featureRules) => {
   const features = [
     {id: "root_folders", name: "Cartelle nella Home"},
-    {id: "child_folders", name: "Sottocartelle per cartella"},
-    {id: "folder_levels", name: "Livelli di profondità"},
+    {id: "child_folders", name: "Numero di sottocartelle per ogni cartella"},
+    {id: "folder_levels", name: "Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC"},
     {id: "share_folder", name: "Condivisione Cartella"},
     {id: "share_post", name: "Condivisione Post"},
-    {id: "import_shared", name: "Importazione Contenuti"},
+    {id: "import_shared_post", name: "Importazione post"},
+    {id: "import_shared_folder", name: "Importazione cartelle"},
     {id: "reminders", name: "Reminder"},
   ];
 

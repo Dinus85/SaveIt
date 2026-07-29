@@ -2502,12 +2502,23 @@ class DataService {
     Map<String, dynamic> sharedItem, {
     String? targetFolderId,
     String? targetParentFolderId,
+    int? expectedPosts,
+    int? expectedFolders,
   }) async {
     return ScreenAwakeService.keepAwake(() async {
-      await PlanLimitsService.consumeOrThrow(
-        'import_shared',
-        featureName: 'Importazione Contenuti',
+      final type = (sharedItem['type'] ?? 'post').toString();
+      final isFolder = type == 'folder';
+      final posts = expectedPosts ??
+          (isFolder ? _sharedItemPostCount(sharedItem) : 1);
+      final folders = expectedFolders ?? (isFolder ? 1 : 0);
+
+      final limitError = await PlanLimitsService.validateSharedImport(
+        posts: posts,
+        folders: folders,
       );
+      if (limitError != null) {
+        throw Exception(limitError);
+      }
 
       final result = await _firebaseService.importSharedResource(
         shareId: sharedItem['id']?.toString(),
@@ -2517,7 +2528,15 @@ class DataService {
 
       invalidateCache(folders: true, posts: true);
       _notifyDataChange('cache_reloaded', {'userId': currentUserId});
-      await PlanLimitsService.recordFeatureSuccess('import_shared');
+      final importedPosts = _readInt(result['importedPostCount']) ??
+          _readInt(result['postsCopied']) ??
+          posts;
+      final importedFolders =
+          _readInt(result['importedFolderCount']) ?? folders;
+      await PlanLimitsService.recordSharedImportSuccess(
+        posts: importedPosts,
+        folders: importedFolders,
+      );
 
       return (result['importedRootId'] ??
               result['importedFolderId'] ??
@@ -2532,12 +2551,20 @@ class DataService {
     String token, {
     String? targetFolderId,
     String? targetParentFolderId,
+    int? expectedPosts,
+    int? expectedFolders,
   }) async {
     return ScreenAwakeService.keepAwake(() async {
-      await PlanLimitsService.consumeOrThrow(
-        'import_shared',
-        featureName: 'Importazione Contenuti',
+      final posts = expectedPosts ?? 1;
+      final folders = expectedFolders ?? 0;
+
+      final limitError = await PlanLimitsService.validateSharedImport(
+        posts: posts,
+        folders: folders,
       );
+      if (limitError != null) {
+        throw Exception(limitError);
+      }
 
       final result = await _firebaseService.importSharedResource(
         token: token,
@@ -2547,7 +2574,15 @@ class DataService {
 
       invalidateCache(folders: true, posts: true);
       _notifyDataChange('cache_reloaded', {'userId': currentUserId});
-      await PlanLimitsService.recordFeatureSuccess('import_shared');
+      final importedPosts = _readInt(result['importedPostCount']) ??
+          _readInt(result['postsCopied']) ??
+          posts;
+      final importedFolders =
+          _readInt(result['importedFolderCount']) ?? folders;
+      await PlanLimitsService.recordSharedImportSuccess(
+        posts: importedPosts,
+        folders: importedFolders,
+      );
 
       return (result['importedRootId'] ??
               result['importedFolderId'] ??
@@ -2555,6 +2590,33 @@ class DataService {
               targetParentFolderId)
           ?.toString();
     });
+  }
+
+  int _sharedItemPostCount(Map<String, dynamic> sharedItem) {
+    final original = sharedItem['originalData'];
+    Map<String, dynamic>? data;
+    if (original is Map) {
+      data = Map<String, dynamic>.from(original);
+    }
+    final preview = sharedItem['preview'];
+    if (preview is Map) {
+      data = {
+        ...?data,
+        ...Map<String, dynamic>.from(preview),
+      };
+    }
+    if (data == null) return 1;
+    final explicit = data['postCount'];
+    if (explicit is num) return explicit.toInt().clamp(0, 100000);
+    final posts = data['posts'];
+    if (posts is List) return posts.length;
+    return 1;
+  }
+
+  int? _readInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
   }
 
   /// Rifiuta un elemento condiviso

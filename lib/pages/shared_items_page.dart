@@ -7,6 +7,7 @@ import 'package:savein/pages/folder_detail_page.dart';
 import 'package:savein/services/access_control_service.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/utils/theme_helpers.dart';
+import 'package:savein/widgets/free_limit_dialog.dart';
 
 class SharedItemsPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -857,10 +858,14 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
     );
     if (destination == null || !dialogContext.mounted) return;
 
-    final canImport = await AppAccessService().guardFeatureUse(
+    final originalData =
+        _previewData ?? _mergeSharedPreviewData(widget.item, null);
+    final postCount = isFolder ? _sharedPreviewPostCount(originalData) : 1;
+    final folderCount = isFolder ? 1 : 0;
+    final canImport = await AppAccessService().guardSharedImport(
       dialogContext,
-      'import_shared',
-      'Importazione Contenuti',
+      posts: postCount,
+      folders: folderCount,
     );
     if (!canImport || !dialogContext.mounted) return;
 
@@ -878,11 +883,15 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
           targetParentFolderId: destination.folderId == _homeDestination
               ? null
               : destination.folderId,
+          expectedPosts: postCount,
+          expectedFolders: folderCount,
         );
       } else {
         importedFolderId = await DataService.instance.acceptSharedItem(
           widget.item,
           targetFolderId: destination.folderId,
+          expectedPosts: 1,
+          expectedFolders: 0,
         );
       }
       if (itemId.isNotEmpty) {
@@ -911,12 +920,29 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
       }
       if (!dialogContext.mounted) return;
       setState(() => _isImporting = false);
-      ScaffoldMessenger.of(dialogContext).showSnackBar(
-        SnackBar(
-          content: Text(_readableError(e)),
-          backgroundColor: Colors.red,
-        ),
-      );
+      final message = _readableError(e);
+      final lower = message.toLowerCase();
+      final isLimit = lower.contains('limite') ||
+          lower.contains('slot') ||
+          lower.contains('importazione post') ||
+          lower.contains('importazione cartell') ||
+          lower.contains('resource-exhausted') ||
+          lower.contains('passa a premium');
+      if (isLimit) {
+        FreeLimitDialog.show(
+          dialogContext,
+          feature: isFolder ? 'import_shared_folder' : 'import_shared_post',
+          featureName: 'Importazione contenuti',
+          limitText: message,
+        );
+      } else {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

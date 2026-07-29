@@ -11,6 +11,8 @@ class SaveInShareLink {
   final String title;
   final String ownerName;
   final Map<String, dynamic> payload;
+  final int postCount;
+  final int folderCount;
 
   const SaveInShareLink({
     required this.token,
@@ -18,18 +20,43 @@ class SaveInShareLink {
     required this.title,
     required this.ownerName,
     required this.payload,
+    this.postCount = 1,
+    this.folderCount = 0,
   });
 
   bool get isPost => type == 'post';
   bool get isFolder => type == 'folder';
 
   factory SaveInShareLink.fromMap(Map<String, dynamic> map) {
+    final type = (map['type'] as String?) ?? 'post';
+    final explicitPosts = map['postCount'];
+    final explicitFolders = map['folderCount'];
+    final payload = Map<String, dynamic>.from((map['payload'] as Map?) ?? const {});
+    int posts = 1;
+    int folders = 0;
+    if (type == 'folder') {
+      folders = 1;
+      if (explicitPosts is num) {
+        posts = explicitPosts.toInt();
+      } else if (payload['postCount'] is num) {
+        posts = (payload['postCount'] as num).toInt();
+      } else {
+        posts = 0;
+      }
+      if (explicitFolders is num) {
+        folders = explicitFolders.toInt().clamp(1, 100000);
+      }
+    } else {
+      posts = explicitPosts is num ? explicitPosts.toInt() : 1;
+    }
     return SaveInShareLink(
       token: (map['token'] as String?) ?? '',
-      type: (map['type'] as String?) ?? 'post',
+      type: type,
       title: (map['title'] as String?) ?? 'Contenuto SaveIn',
       ownerName: (map['ownerName'] as String?) ?? 'Utente SaveIn',
-      payload: Map<String, dynamic>.from((map['payload'] as Map?) ?? const {}),
+      payload: payload,
+      postCount: posts.clamp(0, 100000),
+      folderCount: folders.clamp(0, 100000),
     );
   }
 }
@@ -94,11 +121,17 @@ class ShareLinkService {
     await DataService.instance.importSharedLinkFromSource(
       link.token,
       targetFolderId: targetFolderId,
+      expectedPosts: 1,
+      expectedFolders: 0,
     );
   }
 
   Future<void> importFolder(SaveInShareLink link) async {
-    await DataService.instance.importSharedLinkFromSource(link.token);
+    await DataService.instance.importSharedLinkFromSource(
+      link.token,
+      expectedPosts: link.postCount,
+      expectedFolders: 1,
+    );
   }
 
   Future<void> openOriginalPost(SaveInShareLink link) async {

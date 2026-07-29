@@ -2915,10 +2915,24 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               'requiresAd': false
             },
           },
-          'import_shared': {
+          'import_shared_post': {
             'free': {
               'enabled': true,
               'limit': 5,
+              'period': 'day',
+              'requiresAd': true
+            },
+            'premium': {
+              'enabled': true,
+              'limit': 0,
+              'period': 'day',
+              'requiresAd': false
+            },
+          },
+          'import_shared_folder': {
+            'free': {
+              'enabled': true,
+              'limit': 1,
               'period': 'day',
               'requiresAd': true
             },
@@ -2975,13 +2989,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           },
           {
             'id': 'child_folders',
-            'name': 'Sottocartelle per cartella',
-            'desc': 'Numero massimo di sottocartelle per ogni cartella.'
+            'name': 'Numero di sottocartelle per ogni cartella',
+            'desc':
+                'Quante sottocartelle puoi creare dentro ciascuna cartella.'
           },
           {
             'id': 'folder_levels',
-            'name': 'Livelli di profondità',
-            'desc': 'Livelli massimi di annidamento (es. Home > L1 > L2...).'
+            'name':
+                'Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC',
+            'desc':
+                'Profondità massima dell\'albero: Home, poi L1, L2, L3, ecc.'
           },
           {
             'id': 'manual_tags',
@@ -2999,10 +3016,16 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             'desc': 'Limite creazione link pubblici per singoli post.'
           },
           {
-            'id': 'import_shared',
-            'name': 'Importazione Contenuti',
+            'id': 'import_shared_post',
+            'name': 'Importazione post',
             'desc':
-                'Limite importazione contenuti condivisi da altri tramite link.'
+                'Ogni post importato conta 1 (singolo o dentro una cartella). L\'import cartella richiede anche slot post sufficienti.'
+          },
+          {
+            'id': 'import_shared_folder',
+            'name': 'Importazione cartelle',
+            'desc':
+                'Ogni cartella root importata conta 1. Serve anche abbastanza limite post per i contenuti della cartella.'
           },
           {
             'id': 'reminders',
@@ -3191,6 +3214,22 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     Map<String, dynamic> defaults,
   ) {
     final rules = _deepCopyPlanLimitRules(source);
+
+    // Compatibilità vecchio import_shared → nuove chiavi se assenti.
+    final legacyImport = rules['import_shared'];
+    if (legacyImport is Map) {
+      if (rules['import_shared_post'] is! Map) {
+        rules['import_shared_post'] = _deepCopyPlanLimitRules(
+          Map<String, dynamic>.from(legacyImport),
+        );
+      }
+      if (rules['import_shared_folder'] is! Map) {
+        rules['import_shared_folder'] = _deepCopyPlanLimitRules(
+          Map<String, dynamic>.from(legacyImport),
+        );
+      }
+    }
+
     defaults.forEach((key, value) {
       final defaultFeature = Map<String, dynamic>.from(value as Map);
       if (!rules.containsKey(key) || rules[key] is! Map) {

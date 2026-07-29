@@ -152,6 +152,40 @@ class AppAccessService {
     return context.mounted;
   }
 
+  /// Gate per import shared: post e cartelle si controllano a vicenda.
+  /// [posts] = post da importare; [folders] = 1 se cartella root, altrimenti 0.
+  Future<bool> guardSharedImport(
+    BuildContext context, {
+    required int posts,
+    required int folders,
+  }) async {
+    final error = await PlanLimitsService.validateSharedImport(
+      posts: posts,
+      folders: folders,
+    );
+    if (error != null) {
+      if (!context.mounted) return false;
+      _showFreeLimitDialog(
+        context,
+        feature: folders > 0 ? 'import_shared_folder' : 'import_shared_post',
+        featureName: 'Importazione contenuti',
+        limitText: error,
+      );
+      return false;
+    }
+    if (!context.mounted) return false;
+
+    if (posts > 0) {
+      await showAdGateForFeature(context, 'import_shared_post');
+      if (!context.mounted) return false;
+    }
+    if (folders > 0) {
+      await showAdGateForFeature(context, 'import_shared_folder');
+      if (!context.mounted) return false;
+    }
+    return true;
+  }
+
   Future<bool> tryConsumeFeature(
       BuildContext context, String feature, String featureName) async {
     final usage = await PlanLimitsService.getUsage(forceRefresh: true);

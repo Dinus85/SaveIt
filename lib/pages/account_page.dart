@@ -353,6 +353,16 @@ class AccountPage extends StatelessWidget {
     required this.folders,
   }) : super(key: key);
 
+  /// Apre il flusso di upgrade Premium (acquisto in-app).
+  static void showPremiumPurchaseDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => const _PlanComparisonSlidesDialog(
+        purchaseOnly: true,
+      ),
+    );
+  }
+
   int _getTotalPosts() {
     return FolderService().getAccountStats()['totalPosts'] ?? 0;
   }
@@ -2267,12 +2277,7 @@ class AccountPage extends StatelessWidget {
   }
 
   void _showPremiumPurchaseDialog(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (_) => const _PlanComparisonSlidesDialog(
-        purchaseOnly: true,
-      ),
-    );
+    AccountPage.showPremiumPurchaseDialog(context);
   }
 
   Widget _buildNewSignupPromoAccountNotice(BuildContext context) {

@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/access_control_service.dart';
 import '../services/share_link_service.dart';
 import '../utils/theme_helpers.dart';
+import '../widgets/free_limit_dialog.dart';
 
 class SharedLinkPage extends StatefulWidget {
   final String token;
@@ -65,10 +66,10 @@ class _SharedLinkPageState extends State<SharedLinkPage> {
     try {
       // Controllo limiti dinamici + eventuale pubblicità (requiresAd dashboard)
       if (mounted) {
-        final canImport = await AppAccessService().guardFeatureUse(
+        final canImport = await AppAccessService().guardSharedImport(
           context,
-          'import_shared',
-          'Importazione Contenuti',
+          posts: link.isFolder ? link.postCount : 1,
+          folders: link.isFolder ? 1 : 0,
         );
         if (!canImport) return;
       }
@@ -84,8 +85,20 @@ class _SharedLinkPageState extends State<SharedLinkPage> {
           : 'Contenuto salvato nella tua raccolta.');
       Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) {
-        _showMessage('Errore durante l’importazione: $e');
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Exception: ', '');
+      if (_looksLikeImportLimitError(message)) {
+        FreeLimitDialog.show(
+          context,
+          feature: link.isFolder
+              ? 'import_shared_folder'
+              : 'import_shared_post',
+          featureName: 'Importazione contenuti',
+          limitText: message,
+          isPremium: AuthService().currentUser?.isPremium == true,
+        );
+      } else {
+        _showMessage('Errore durante l’importazione: $message');
       }
     } finally {
       if (mounted) setState(() => _working = false);
@@ -102,6 +115,16 @@ class _SharedLinkPageState extends State<SharedLinkPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
+  }
+
+  bool _looksLikeImportLimitError(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('limite') ||
+        lower.contains('slot') ||
+        lower.contains('importazione post') ||
+        lower.contains('importazione cartell') ||
+        lower.contains('resource-exhausted') ||
+        lower.contains('passa a premium');
   }
 
   @override

@@ -29,8 +29,12 @@ const seed = async () => {
       "free": {enabled: true, limit: 3, period: "day", requiresAd: true},
       "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
     },
-    "import_shared": {
+    "import_shared_post": {
       "free": {enabled: true, limit: 5, period: "day", requiresAd: true},
+      "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
+    },
+    "import_shared_folder": {
+      "free": {enabled: true, limit: 1, period: "day", requiresAd: true},
       "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
     },
     "reminders": {

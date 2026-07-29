@@ -188,10 +188,24 @@ class PlanLimitsService {
         'requiresAd': false
       },
     },
-    'import_shared': {
+    'import_shared_post': {
       'free': {
         'enabled': true,
         'limit': 5,
+        'period': 'day',
+        'requiresAd': true
+      },
+      'premium': {
+        'enabled': true,
+        'limit': 0,
+        'period': 'day',
+        'requiresAd': false
+      },
+    },
+    'import_shared_folder': {
+      'free': {
+        'enabled': true,
+        'limit': 1,
         'period': 'day',
         'requiresAd': true
       },
@@ -278,6 +292,18 @@ class PlanLimitsService {
     Map<String, dynamic> source,
   ) {
     final rules = _copyMap(source);
+
+    // Compatibilità: vecchio `import_shared` → nuove chiavi se assenti.
+    final legacyImport = rules['import_shared'];
+    if (legacyImport is Map) {
+      if (rules['import_shared_post'] is! Map) {
+        rules['import_shared_post'] = _copyMap(legacyImport);
+      }
+      if (rules['import_shared_folder'] is! Map) {
+        rules['import_shared_folder'] = _copyMap(legacyImport);
+      }
+    }
+
     defaultRules.forEach((key, value) {
       final defaultsForFeature = _copyMap(Map<dynamic, dynamic>.from(value));
       if (rules[key] is! Map) {
@@ -460,6 +486,100 @@ class PlanLimitsService {
     return !featUsage.isReached;
   }
 
+  /// Controlla se un import shared (post e/o cartella) rientra nei limiti.
+  /// [posts] = post da importare (1 per post singolo, N per cartella).
+  /// [folders] = 1 se importi una cartella root, altrimenti 0.
+  /// Restituisce un messaggio utente-friendly con i limiti Free configurati.
+  static Future<String?> validateSharedImport({
+    required int posts,
+    required int folders,
+  }) async {
+    final usage = await getUsage(forceRefresh: true);
+    final postUsage = usage['import_shared_post'];
+    final folderUsage = usage['import_shared_folder'];
+
+    String? blockReason;
+    if (posts > 0 && postUsage != null) {
+      if (!postUsage.enabled) {
+        blockReason =
+            'L\'importazione post non è disponibile nel piano Free.';
+      } else if (!postUsage.isUnlimited &&
+          postUsage.count + posts > postUsage.limit) {
+        final remaining = postUsage.remaining;
+        blockReason = remaining <= 0
+            ? 'Hai esaurito gli slot di importazione post.'
+            : 'Questa importazione richiede $posts post, ma ti restano solo $remaining slot post.';
+      }
+    }
+
+    if (blockReason == null && folders > 0 && folderUsage != null) {
+      if (!folderUsage.enabled) {
+        blockReason =
+            'L\'importazione cartelle non è disponibile nel piano Free.';
+      } else if (!folderUsage.isUnlimited &&
+          folderUsage.count + folders > folderUsage.limit) {
+        blockReason = 'Hai esaurito gli slot di importazione cartelle.';
+      }
+    }
+
+    if (blockReason == null) return null;
+
+    final postLimitLabel = _formatImportLimitLabel(postUsage);
+    final folderLimitLabel = _formatImportLimitLabel(folderUsage);
+    final needed = StringBuffer();
+    if (folders > 0) {
+      final folderWord = folders == 1 ? 'cartella' : 'cartelle';
+      final postWord = posts == 1 ? 'post' : 'post';
+      needed.write(
+        'Questa operazione richiede $folders $folderWord e $posts $postWord.',
+      );
+    } else {
+      final postWord = posts == 1 ? 'post' : 'post';
+      needed.write('Questa operazione richiede $posts $postWord.');
+    }
+
+    return '$blockReason\n\n'
+        'Nella versione Free i limiti di importazione sono:\n'
+        '• Post: $postLimitLabel\n'
+        '• Cartelle: $folderLimitLabel\n\n'
+        '$needed\n\n'
+        'Passa a Premium per togliere questi limiti.';
+  }
+
+  static String _formatImportLimitLabel(PlanFeatureUsage? usage) {
+    if (usage == null) return 'non configurato';
+    if (!usage.enabled) return 'disabilitata';
+    if (usage.isUnlimited) return 'illimitati';
+    final period = _periodHumanLabel(usage.period);
+    final remaining = usage.remaining;
+    return '${usage.limit} $period (ne restano $remaining)';
+  }
+
+  static String _periodHumanLabel(String period) {
+    switch (period) {
+      case 'day':
+        return 'al giorno';
+      case 'week':
+        return 'a settimana';
+      case 'month':
+        return 'al mese';
+      default:
+        return 'in totale';
+    }
+  }
+
+  static Future<void> recordSharedImportSuccess({
+    required int posts,
+    required int folders,
+  }) async {
+    if (posts > 0) {
+      await incrementUsage('import_shared_post', amount: posts);
+    }
+    if (folders > 0) {
+      await incrementUsage('import_shared_folder', amount: folders);
+    }
+  }
+
   static Future<void> consumeOrThrow(
     String feature, {
     required String featureName,
@@ -480,7 +600,12 @@ class PlanLimitsService {
     await incrementUsage(feature);
   }
 
-  static Future<void> incrementUsage(String feature) async {
+  static Future<void> incrementUsage(
+    String feature, {
+    int amount = 1,
+  }) async {
+    if (amount <= 0) return;
+
     final user = _auth.currentUser;
     if (user == null) return;
 
@@ -500,7 +625,7 @@ class PlanLimitsService {
       if (!doc.exists) {
         transaction.set(ref, {
           feature: {
-            periodKey: 1,
+            periodKey: amount,
             'last_update': FieldValue.serverTimestamp(),
           }
         });
@@ -508,7 +633,7 @@ class PlanLimitsService {
         final data = doc.data()!;
         final featData = Map<String, dynamic>.from(data[feature] ?? {});
         final currentCount = featData[periodKey] ?? 0;
-        featData[periodKey] = currentCount + 1;
+        featData[periodKey] = currentCount + amount;
         featData['last_update'] = FieldValue.serverTimestamp();
         transaction.update(ref, {feature: featData});
       }
