@@ -2566,12 +2566,13 @@ class _WebHomePageState extends State<WebHomePage>
         ],
       ));
 
-      // Banner ogni 3 cartelle (dopo la 3ª, 6ª, 9ª…), solo utenti Free.
-      if (showAds) {
+      // Banner Home: frequenza da dashboard `home_banner_every_n_folders` (Free).
+      final bannerEveryN = PlanLimitsService.homeBannerEveryNFolders();
+      if (showAds && bannerEveryN != null) {
         final foldersShown = (i + 2).clamp(0, sortedFolders.length);
         final prevShown = i;
         for (var n = prevShown + 1; n <= foldersShown; n++) {
-          if (n % 3 == 0) {
+          if (n % bannerEveryN == 0) {
             rows.add(const BannerAdWidget());
             break;
           }

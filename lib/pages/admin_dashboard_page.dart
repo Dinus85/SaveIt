@@ -2943,6 +2943,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               'requiresAd': false
             },
           },
+          'home_banner_every_n_folders': {
+            'free': {
+              'enabled': true,
+              'limit': 3,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': false,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
           'reminders': {
             'free': {
               'enabled': true,
@@ -3026,6 +3040,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             'name': 'Importazione cartelle',
             'desc':
                 'Ogni cartella root importata conta 1. Serve anche abbastanza limite post per i contenuti della cartella.'
+          },
+          {
+            'id': 'home_banner_every_n_folders',
+            'name': 'Banner pubblicitari ogni N cartelle (Home)',
+            'desc':
+                'Solo Free. Il campo Limite indica ogni quante cartelle in Home inserire un banner (es. 2, 3, 4, 6). Disabilita per nascondere i banner. Premium non vede pubblicità.'
           },
           {
             'id': 'reminders',

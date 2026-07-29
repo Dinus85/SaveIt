@@ -24,6 +24,7 @@ import 'package:savein/widgets/first_launch_tutorial_dialog.dart';
 import 'package:savein/widgets/new_signup_premium_promo_dialog.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/services/folder_service.dart';
+import 'package:savein/services/plan_limits_service.dart';
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -2448,49 +2449,100 @@ class _PlanComparisonSlidesDialogState
   static final Uri _privacyPolicyUri = Uri.parse('https://savein.eu/privacy');
   static final Uri _termsUri = Uri.parse('https://savein.eu/terms');
 
+  static const _slideColors = <Color>[
+    Color(0xFF2C7A7B),
+    Color(0xFF2563EB),
+    Color(0xFF7C3AED),
+    Color(0xFFEA580C),
+    Color(0xFF0F766E),
+    Color(0xFFBE185D),
+    Color(0xFF1D4ED8),
+    Color(0xFFB45309),
+    Color(0xFF047857),
+    Color(0xFF4F46E5),
+  ];
+
   late final PageController _controller;
   late int _index;
   ProductDetails? _product;
   bool _loadingProduct = true;
   bool _purchasing = false;
   bool _restoring = false;
+  bool _loadingRules = true;
+  List<_PlanSlideData> _slides = const [];
+  List<({String id, String name, String free, String premium})> _comparisonRows =
+      const [];
 
-  static const _slides = [
-    _PlanSlideData(
-      icon: Icons.folder_copy_outlined,
-      title: '📁 Cartelle e sottocartelle',
-      freeText:
-          'Con Free puoi creare fino a 10 cartelle nella home, con profondità home + 1 livello e massimo 4 sottocartelle per cartella.',
-      premiumText:
-          'Con Premium superi i limiti Free: più cartelle, più livelli e più libertà per organizzare tutti i contenuti.',
-      color: Color(0xFF2C7A7B),
-    ),
-    _PlanSlideData(
-      icon: Icons.tag_outlined,
-      title: '🏷️ Tag e ricerca',
-      freeText:
-          'Con Free puoi cercare nei contenuti salvati e usare gli hashtag automatici quando vengono estratti dal contenuto.',
-      premiumText:
-          'Con Premium puoi aggiungere anche tag manuali, così rendi ogni salvataggio più facile da ritrovare.',
-      color: Color(0xFF2563EB),
-    ),
-    _PlanSlideData(
-      icon: Icons.block_outlined,
-      title: '🚀 Pubblicità',
-      freeText:
-          'Con Free possono essere mostrati annunci durante l’uso dell’app.',
-      premiumText:
-          'Con Premium usi SaveIn senza annunci e con un’esperienza più fluida ✨',
-      color: Color(0xFFEA580C),
-    ),
-  ];
+  IconData _iconForFeature(String featureId) {
+    switch (featureId) {
+      case 'root_folders':
+        return Icons.folder_copy_outlined;
+      case 'child_folders':
+        return Icons.account_tree_outlined;
+      case 'folder_levels':
+        return Icons.layers_outlined;
+      case 'manual_tags':
+        return Icons.tag_outlined;
+      case 'share_folder':
+        return Icons.folder_shared_outlined;
+      case 'share_post':
+        return Icons.ios_share_outlined;
+      case 'import_shared_post':
+        return Icons.download_outlined;
+      case 'import_shared_folder':
+        return Icons.create_new_folder_outlined;
+      case 'home_banner_every_n_folders':
+        return Icons.view_agenda_outlined;
+      case 'reminders':
+        return Icons.alarm_outlined;
+      default:
+        return Icons.tune_outlined;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _index = widget.initialPage.clamp(0, _slides.length - 1).toInt();
-    _controller = PageController(initialPage: _index);
+    _index = 0;
+    _controller = PageController(initialPage: 0);
+    PlanLimitsService.rulesRevision.addListener(_onPlanLimitsChanged);
     _loadProduct();
+    _loadPlanComparison();
+  }
+
+  void _onPlanLimitsChanged() {
+    unawaited(_loadPlanComparison(forceRefresh: false));
+  }
+
+  Future<void> _loadPlanComparison({bool forceRefresh = true}) async {
+    try {
+      final rows = await PlanLimitsService.buildPlanComparisonRows(
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted) return;
+      final slides = <_PlanSlideData>[
+        for (var i = 0; i < rows.length; i++)
+          _PlanSlideData(
+            icon: _iconForFeature(rows[i].id),
+            title: rows[i].name,
+            freeText: rows[i].free,
+            premiumText: rows[i].premium,
+            color: _slideColors[i % _slideColors.length],
+          ),
+      ];
+      final safeIndex = slides.isEmpty
+          ? 0
+          : _index.clamp(0, slides.length - 1).toInt();
+      setState(() {
+        _comparisonRows = rows;
+        _slides = slides;
+        _loadingRules = false;
+        _index = safeIndex;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingRules = false);
+    }
   }
 
   Future<void> _loadProduct() async {
@@ -2585,6 +2637,7 @@ class _PlanComparisonSlidesDialogState
 
   @override
   void dispose() {
+    PlanLimitsService.rulesRevision.removeListener(_onPlanLimitsChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -2598,6 +2651,69 @@ class _PlanComparisonSlidesDialogState
     );
   }
 
+  Widget _buildDynamicComparisonList() {
+    if (_loadingRules) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 18),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (_comparisonRows.isEmpty) {
+      return Text(
+        'Limiti non disponibili al momento.',
+        style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+      );
+    }
+    return Column(
+      children: [
+        for (final row in _comparisonRows) ...[
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  row.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Free: ${row.free}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.35,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Premium: ${row.premium}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.35,
+                    color: Color(0xFF1D4ED8),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
@@ -2606,6 +2722,42 @@ class _PlanComparisonSlidesDialogState
 
     if (widget.purchaseOnly) {
       return _buildPurchaseOnlyDialog(context, width);
+    }
+
+    if (_loadingRules) {
+      return Dialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: SizedBox(
+          width: width,
+          height: 220,
+          child: const Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    if (_slides.isEmpty) {
+      return Dialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: SizedBox(
+          width: width,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Impossibile caricare i limiti dei piani.'),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Chiudi'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     return Dialog(
@@ -2877,7 +3029,7 @@ class _PlanComparisonSlidesDialogState
                   const SizedBox(height: 12),
                   const Text(
                     'Grazie per voler sostenere SaveIn! 💙\n'
-                    'Con Premium sblocchi un’esperienza più libera, ordinata e senza annunci.',
+                    'Con Premium sblocchi i limiti Free impostati dalla dashboard e usi SaveIn! senza annunci.',
                     style: TextStyle(
                       color: Color(0xFF4B5563),
                       fontSize: 14,
@@ -2885,18 +3037,17 @@ class _PlanComparisonSlidesDialogState
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const _PremiumBenefitRow(
-                    icon: Icons.folder_copy_outlined,
-                    text: '📁 Più libertà con cartelle e organizzazione.',
+                  const Text(
+                    'Differenze Free vs Premium (dal vivo)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                      color: Color(0xFF111827),
+                    ),
                   ),
-                  const _PremiumBenefitRow(
-                    icon: Icons.tag_outlined,
-                    text: '🏷️ Tag manuali per ritrovare prima i contenuti.',
-                  ),
-                  const _PremiumBenefitRow(
-                    icon: Icons.block_outlined,
-                    text: '🚫 Esperienza senza annunci.',
-                  ),
+                  const SizedBox(height: 10),
+                  _buildDynamicComparisonList(),
+                  const SizedBox(height: 8),
                   const _PremiumBenefitRow(
                     icon: Icons.favorite_rounded,
                     text: '🙏 Aiuti a migliorare SaveIn! giorno dopo giorno.',

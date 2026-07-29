@@ -98,6 +98,29 @@ class PlanLimitsService {
 
   static Map<String, dynamic>? get cachedRules => _cachedRules;
 
+  /// Catalogo voci allineato alla pagina Limiti della dashboard.
+  static const List<({String id, String name})> dashboardFeatureCatalog = [
+    (id: 'root_folders', name: 'Cartelle nella Home'),
+    (
+      id: 'child_folders',
+      name: 'Numero di sottocartelle per ogni cartella',
+    ),
+    (
+      id: 'folder_levels',
+      name: 'Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC',
+    ),
+    (id: 'manual_tags', name: 'Tag manuali'),
+    (id: 'share_folder', name: 'Condivisione Cartella'),
+    (id: 'share_post', name: 'Condivisione Post'),
+    (id: 'import_shared_post', name: 'Importazione post'),
+    (id: 'import_shared_folder', name: 'Importazione cartelle'),
+    (
+      id: 'home_banner_every_n_folders',
+      name: 'Banner pubblicitari ogni N cartelle (Home)',
+    ),
+    (id: 'reminders', name: 'Reminder'),
+  ];
+
   static Map<String, PlanFeatureUsage>? _cachedUsage;
   static DateTime? _lastUsageFetch;
   static String? _cachedUsageUserId;
@@ -213,6 +236,20 @@ class PlanLimitsService {
         'enabled': true,
         'limit': 0,
         'period': 'day',
+        'requiresAd': false
+      },
+    },
+    'home_banner_every_n_folders': {
+      'free': {
+        'enabled': true,
+        'limit': 3,
+        'period': 'total',
+        'requiresAd': false
+      },
+      'premium': {
+        'enabled': false,
+        'limit': 0,
+        'period': 'total',
         'requiresAd': false
       },
     },
@@ -548,14 +585,59 @@ class PlanLimitsService {
 
   static String _formatImportLimitLabel(PlanFeatureUsage? usage) {
     if (usage == null) return 'non configurato';
-    if (!usage.enabled) return 'disabilitata';
-    if (usage.isUnlimited) return 'illimitati';
-    final period = _periodHumanLabel(usage.period);
-    final remaining = usage.remaining;
-    return '${usage.limit} $period (ne restano $remaining)';
+    final quota = formatFeatureQuota(
+      usage,
+      unitSingular:
+          usage.feature == 'import_shared_folder' ? 'cartella' : 'post',
+      unitPlural:
+          usage.feature == 'import_shared_folder' ? 'cartelle' : 'post',
+    );
+    if (!usage.enabled || usage.isUnlimited) return quota;
+    return '$quota (ne restano ${usage.remaining})';
   }
 
-  static String _periodHumanLabel(String period) {
+  /// Es. "3 post a settimana", "1 cartella al mese", "illimitati".
+  static String formatFeatureQuota(
+    PlanFeatureUsage usage, {
+    String? unitSingular,
+    String? unitPlural,
+  }) {
+    if (!usage.enabled) return 'disabilitata';
+    if (usage.isUnlimited) return 'illimitati';
+
+    final units = _unitsForFeature(usage.feature);
+    final singular = unitSingular ?? units.$1;
+    final plural = unitPlural ?? units.$2;
+    final unit = usage.limit == 1 ? singular : plural;
+    final period = periodHumanLabel(usage.period);
+    return '${usage.limit} $unit $period';
+  }
+
+  static (String, String) _unitsForFeature(String feature) {
+    switch (feature) {
+      case 'import_shared_post':
+      case 'share_post':
+        return ('post', 'post');
+      case 'import_shared_folder':
+      case 'share_folder':
+      case 'root_folders':
+        return ('cartella', 'cartelle');
+      case 'child_folders':
+        return ('sottocartella', 'sottocartelle');
+      case 'folder_levels':
+        return ('livello', 'livelli');
+      case 'reminders':
+        return ('reminder', 'reminder');
+      case 'manual_tags':
+        return ('tag', 'tag');
+      case 'home_banner_every_n_folders':
+        return ('cartella', 'cartelle');
+      default:
+        return ('utilizzo', 'utilizzi');
+    }
+  }
+
+  static String periodHumanLabel(String period) {
     switch (period) {
       case 'day':
         return 'al giorno';
@@ -566,6 +648,127 @@ class PlanLimitsService {
       default:
         return 'in totale';
     }
+  }
+
+  static String resetHint(PlanFeatureUsage usage) {
+    switch (usage.period) {
+      case 'day':
+        return 'Il limite si resetta domani.';
+      case 'week':
+        return 'Il limite si resetta lunedì prossimo.';
+      case 'month':
+        return 'Il limite si resetta il primo del mese prossimo.';
+      default:
+        return 'Hai raggiunto il limite massimo consentito.';
+    }
+  }
+
+  /// Frequenza banner Home: ogni N cartelle (da dashboard `home_banner_every_n_folders`).
+  /// Ritorna `null` se i banner sono disabilitati; altrimenti N >= 1.
+  static int? homeBannerEveryNFolders() {
+    final role = _auth.currentUser?.effectiveRole ?? AppUserRole.free;
+    if (role != AppUserRole.free) return null;
+
+    Map<String, dynamic>? freeRules;
+    final cached = _cachedRules?['home_banner_every_n_folders'];
+    if (cached is Map) {
+      final free = cached['free'];
+      if (free is Map) {
+        freeRules = Map<String, dynamic>.from(free);
+      }
+    }
+    freeRules ??= Map<String, dynamic>.from(
+      (defaultRules['home_banner_every_n_folders']
+          as Map<String, dynamic>)['free'] as Map,
+    );
+
+    if (freeRules['enabled'] == false) return null;
+    final raw = freeRules['limit'];
+    final n = raw is int
+        ? raw
+        : raw is num
+            ? raw.toInt()
+            : int.tryParse(raw?.toString() ?? '') ?? 3;
+    if (n <= 0) return null;
+    return n;
+  }
+
+  /// Testo leggibile di una regola tier (Free/Premium) per UI confronto piani.
+  static String describeTierRule(String featureId, Map<String, dynamic>? rule) {
+    if (rule == null) return 'Non configurato';
+    final enabled = rule['enabled'] == true;
+    if (!enabled) return 'Non disponibile';
+
+    final rawLimit = rule['limit'];
+    final limit = rawLimit is int
+        ? rawLimit
+        : rawLimit is num
+            ? rawLimit.toInt()
+            : int.tryParse(rawLimit?.toString() ?? '') ?? 0;
+    final period = (rule['period'] ?? 'total').toString();
+    final requiresAd = rule['requiresAd'] == true;
+
+    if (featureId == 'home_banner_every_n_folders') {
+      if (limit <= 0) return 'Nessun banner in Home';
+      final base = 'Banner ogni $limit cartelle in Home';
+      return requiresAd ? '$base · richiede pubblicità' : base;
+    }
+
+    if (featureId == 'manual_tags') {
+      final base = 'Disponibile';
+      return requiresAd ? '$base · richiede pubblicità' : base;
+    }
+
+    String quota;
+    if (limit <= 0) {
+      quota = 'Illimitato';
+    } else {
+      final units = _unitsForFeature(featureId);
+      final unit = limit == 1 ? units.$1 : units.$2;
+      quota = '$limit $unit ${periodHumanLabel(period)}';
+    }
+    if (requiresAd) {
+      quota = '$quota · richiede pubblicità';
+    }
+    return quota;
+  }
+
+  /// Confronti Free/Premium per tutte le voci dashboard, dalle regole live.
+  static Future<List<({String id, String name, String free, String premium})>>
+      buildPlanComparisonRows({bool forceRefresh = true}) async {
+    final rules = await getFeatureRules(forceRefresh: forceRefresh);
+    return dashboardFeatureCatalog.map((feature) {
+      final featureData = rules[feature.id];
+      Map<String, dynamic>? free;
+      Map<String, dynamic>? premium;
+      if (featureData is Map) {
+        final freeRaw = featureData['free'];
+        final premiumRaw = featureData['premium'];
+        if (freeRaw is Map) {
+          free = Map<String, dynamic>.from(freeRaw);
+        }
+        if (premiumRaw is Map) {
+          premium = Map<String, dynamic>.from(premiumRaw);
+        }
+      }
+      return (
+        id: feature.id,
+        name: feature.name,
+        free: describeTierRule(feature.id, free),
+        premium: describeTierRule(feature.id, premium),
+      );
+    }).toList();
+  }
+
+  /// Testo completo per dialog Free quando una feature ha raggiunto il limite.
+  static String reachedLimitMessage({
+    required PlanFeatureUsage usage,
+    required String featureName,
+  }) {
+    final quota = formatFeatureQuota(usage);
+    return 'Nella versione Free il limite per $featureName è: $quota.\n'
+        '${resetHint(usage)}\n\n'
+        'Passa a Premium per togliere questo limite.';
   }
 
   static Future<void> recordSharedImportSuccess({

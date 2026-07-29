@@ -46,6 +46,10 @@ const DEFAULT_STORAGE_BUCKET = "saveit-app-1784d.firebasestorage.app";
     "free": {enabled: true, limit: 1, period: "day", requiresAd: true},
     "premium": {enabled: true, limit: 0, period: "day", requiresAd: false},
   },
+  "home_banner_every_n_folders": {
+    "free": {enabled: true, limit: 3, period: "total", requiresAd: false},
+    "premium": {enabled: false, limit: 0, period: "total", requiresAd: false},
+  },
   "reminders": {
     "free": {enabled: true, limit: 0, period: "total", requiresAd: true},
     "premium": {enabled: true, limit: 0, period: "total", requiresAd: false},
@@ -4960,6 +4964,7 @@ const dashLimitsPage = (user, featureRules) => {
     {id: "share_post", name: "Condivisione Post"},
     {id: "import_shared_post", name: "Importazione post"},
     {id: "import_shared_folder", name: "Importazione cartelle"},
+    {id: "home_banner_every_n_folders", name: "Banner pubblicitari ogni N cartelle (Home)"},
     {id: "reminders", name: "Reminder"},
   ];
 

@@ -159,6 +159,7 @@ Feature rule principali:
 - `share_post`: abilita e limita condivisione post.
 - `import_shared_post`: ogni post importato conta 1 (singolo o dentro una cartella).
 - `import_shared_folder`: ogni cartella root importata conta 1. L'import cartella richiede anche slot `import_shared_post` sufficienti per i post contenuti (controllo incrociato).
+- `home_banner_every_n_folders`: solo Free; il campo `limit` indica ogni quante cartelle in Home inserire un banner (es. 2/3/4/6). `enabled=false` nasconde i banner.
 - Compatibilita': se in Firestore resta solo il vecchio `import_shared`, l'app/functions lo mappano su entrambe le nuove chiavi finche' non si salva dalla dashboard.
 
 Regole importanti:
@@ -1211,7 +1212,7 @@ Configurazione nei file:
 Logica ads:
 - Solo utenti Free (`AppAccessService().hasAds`)
 - **Interstitial**: mostrato prima di apertura post remindato e ogni 5 import; anche come gate se `requiresAd` e' true per reminder/share/import
-- **Banner**: mostrato nella home ogni **3 cartelle** (dopo la 3ª, 6ª, 9ª...) tramite `BannerAdWidget` in `lib/main.dart`
+- **Banner**: in Home ogni N cartelle, con N da dashboard `home_banner_every_n_folders.limit` (default Free 3); `enabled=false` nasconde i banner
 - Blocco iOS di build `+20` rimosso in `1.1.0+58`; da `1.1.2+63` i cambi dashboard `requiresAd` arrivano subito via live sync `config/plan_limits`
 
 L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla pubblicazione su Play Store).
@@ -1790,10 +1791,16 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Aggiunto `ios/Podfile` (platform iOS 13) per CocoaPods/`google_mobile_ads` su Codemagic.
 - **Azione richiesta**: Codemagic → TestFlight build **63** → test Free con ≥3 cartelle; verificare richieste > 0 su AdMob iOS.
 
-### Limiti — label + import post/cartelle (29/07/2026)
+### Build `1.1.2+65` — Free vs Premium dai limiti dashboard live (29/07/2026)
+
+- Il confronto Free/Premium (Account + dialog "Passa a Premium") elenca **tutte** le voci di Limiti Funzioni e mostra i valori Free/Premium letti da `config/plan_limits` (live sync).
+- Inclusi: cartelle home, sottocartelle, livelli, tag, share, import post/cartelle, banner ogni N cartelle, reminder (`requiresAd` incluso nel testo quando attivo).
+- Frequenza banner Home configurabile da `home_banner_every_n_folders`.
+- **Azione**: Codemagic/TestFlight + Play build **65**; per dashboard hosting/functions solo se non gia' deployati i limiti recenti.
 
 - Diciture dashboard: `child_folders` = "Numero di sottocartelle per ogni cartella"; `folder_levels` = "Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC".
 - Spezzato `import_shared` in `import_shared_post` (default Free 5/day) e `import_shared_folder` (default Free 1/day).
 - Import cartella richiede 1 slot cartella **e** N slot post (N = post nella cartella). Enforcement client + `importSharedResource`.
 - Dialog limite Free: mostra i limiti dashboard (post/cartelle) + CTA **Passa a Premium** (acquisto in-app).
+- `home_banner_every_n_folders`: frequenza banner Home configurabile da Limiti (default Free ogni 3).
 - **Build app**: `1.1.2+64`. Dopo deploy functions/hosting: in Limiti salvare una volta i nuovi valori cosi' Firestore ha le due chiavi esplicite.

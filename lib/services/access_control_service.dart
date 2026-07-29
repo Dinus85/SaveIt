@@ -69,15 +69,11 @@ class AppAccessService {
     return rule.enabled;
   }
 
-  String _limitResetText(PlanFeatureUsage featUsage) {
-    if (featUsage.period == 'day') return 'Il limite si resetta domani.';
-    if (featUsage.period == 'week') {
-      return 'Il limite si resetta lunedì prossimo.';
-    }
-    if (featUsage.period == 'month') {
-      return 'Il limite si resetta il primo del mese prossimo.';
-    }
-    return 'Hai raggiunto il limite massimo consentito.';
+  String _reachedLimitText(PlanFeatureUsage featUsage, String featureName) {
+    return PlanLimitsService.reachedLimitMessage(
+      usage: featUsage,
+      featureName: featureName,
+    );
   }
 
   void _showFreeLimitDialog(
@@ -111,7 +107,7 @@ class AppAccessService {
         feature: feature,
         featureName: featureName,
         limitText:
-            'Questa funzione non è disponibile nel tuo piano attuale. Passa a Premium per sbloccarla.',
+            'Questa funzione non è disponibile nel piano Free.\n\nPassa a Premium per sbloccarla.',
       );
       return false;
     }
@@ -120,7 +116,7 @@ class AppAccessService {
         context,
         feature: feature,
         featureName: featureName,
-        limitText: _limitResetText(featUsage),
+        limitText: _reachedLimitText(featUsage, featureName),
       );
       return false;
     }
@@ -198,7 +194,7 @@ class AppAccessService {
         feature: feature,
         featureName: featureName,
         limitText:
-            'Questa funzione non è disponibile nel tuo piano attuale. Passa a Premium per sbloccarla.',
+            'Questa funzione non è disponibile nel piano Free.\n\nPassa a Premium per sbloccarla.',
       );
       return false;
     }
@@ -212,7 +208,7 @@ class AppAccessService {
       context,
       feature: feature,
       featureName: featureName,
-      limitText: _limitResetText(featUsage),
+      limitText: _reachedLimitText(featUsage, featureName),
     );
     return false;
   }
