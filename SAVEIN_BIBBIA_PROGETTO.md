@@ -1137,14 +1137,21 @@ flutter build appbundle --release
 ```
 Output: `build\app\outputs\bundle\release\app-release.aab`
 
-### Play Store — stato attuale (giugno 2026)
+### Play Store — stato attuale (aggiornato 29/07/2026)
+
+> **PROMEMORIA IMPORTANTE (29/07/2026): SaveIn! Android e' ancora in test chiuso / non in produzione pubblica su Play Store.**  
+> Finche' non e' in produzione: Google Ads campagne tipo **App** (installazioni Android) sono limitate o non usabili a pieno; AdMob puo' ancora avere "Pubblicazione annunci limitata"; i link store pubblici (`play.google.com/.../eu.savein.app`) non raggiungono tutti gli utenti.  
+> **Prima di lanciare Google Ads Android**: completare test chiuso (12 tester × 14 giorni) → richiedere produzione → poi riprendere campagne App.
 
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
-- Release di test interno: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
+- Canali attivi: **test interno** e/o **test chiuso** (non produzione)
+- Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
+- Versione app corrente (repo): **`1.1.3+67`** — da pubblicare sui canali di test Play quando serve
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
-- Test chiuso: da completare (richiede 12 tester per 14 giorni)
-- Produzione: da richiedere dopo test chiuso
+- **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
+- **Produzione: NON ancora richiesta** — solo dopo test chiuso
+- **Google Ads**: account nuovo in setup (lug 2026); per campagne installazione app preferire **iOS** finche' Android non e' in produzione, oppure campagne verso sito `https://savein.eu` / marketing page
 
 #### Quando serve una nuova release app vs solo deploy server
 
@@ -1215,9 +1222,13 @@ Logica ads:
 - **Banner**: in Home ogni N cartelle, con N da dashboard `home_banner_every_n_folders.limit` (default Free 3); `enabled=false` nasconde i banner
 - Blocco iOS di build `+20` rimosso in `1.1.0+58`; da `1.1.2+63` i cambi dashboard `requiresAd` arrivano subito via live sync `config/plan_limits`
 
-L'account AdMob è in attesa di approvazione Google (fino a 24h, dipende dalla pubblicazione su Play Store).
-
-**Stato collegamento store in AdMob (03/07/2026)**: tentativo di collegare l'app Android SaveIn in AdMob non riuscito — AdMob non trova app che non siano ancora pubblicate pubblicamente su Play Store (SaveIn Android e' ancora in test chiuso). Da riprovare dopo la pubblicazione in produzione. Stesso discorso per iOS, disponibile solo dopo pubblicazione live su App Store. Finche' il collegamento store non e' fatto, AdMob applica il limite "Pubblicazione annunci limitata".
+**Stato AdMob / Firebase / Google Ads (29/07/2026)**:
+- **Google Analytics** abilitato sul progetto Firebase `saveit-app-1784d` (account Analytics `otf_dino`).
+- **AdMob ↔ Firebase**: app SaveIn! Android e iOS collegate (Servizi collegati); entrate a livello di impressione da attivare/attivate nel wizard.
+- **SDK Analytics app**: aggiunto `firebase_analytics` in Flutter; `FirebaseAnalyticsObserver` + `logAppOpen` in `main.dart`; Android `firebase_options.dart` allineato ad appId `eu.savein.app` (`…:android:ca3fd03c8ccebd3d9e7d5a`).
+- **Google Ads**: collegamento/account nuovo in corso (non confondere con AdMob). Account legacy Twynga (`713-303-5924`) da non riusare (pagamento bloccato).
+- **Limite Android**: SaveIn! e' **ancora in test chiuso Play**, non in produzione — le campagne Google Ads "Pagina di download dell'app" su Android restano incomplete finche' l'app non e' pubblica. Vedi promemoria in sezione Play Store sopra.
+- **Collegamento store AdMob**: iOS collegato (`id6785451010` / `app-ads.txt`); Android store listing pieno tipicamente solo dopo produzione Play. Finche' Android non e' pubblico AdMob puo' applicare "Pubblicazione annunci limitata".
 
 ---
 
@@ -1796,6 +1807,18 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Apple errori **90062** / **90186**: il train `1.1.2` e' chiuso (versione gia' approvata); non si possono caricare altri build su `1.1.2`.
 - Nuova marketing version **1.1.3**, build **66** → Codemagic → TestFlight / App Store Connect.
 - Contenuto: stesso codice di `1.1.2+65` (Free vs Premium dai limiti live, banner N cartelle, import post/cartelle).
+
+### Build `1.1.3+67` — CFBundleVersion dopo upload 66 (29/07/2026)
+
+- Codemagic publish fallito: Apple **ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE** — `previousBundleVersion = 66` gia' caricato.
+- Bump build **67** (marketing resta **1.1.3**).
+- Include anche `firebase_analytics` + link AdMob/Firebase se non gia' in train precedente.
+
+### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
+
+- Abilitato Google Analytics su Firebase; collegato AdMob SaveIn! (e SmartChef su progetto proprio) a Firebase.
+- App: `firebase_analytics` + observer; fix Android `FirebaseOptions` verso `eu.savein.app`.
+- **PROMEMORIA**: Android SaveIn! ancora **test chiuso** Play — non lanciare campagne Google Ads installazione Android finche' non e' in produzione; iOS / sito ok da valutare subito.
 
 ### Build `1.1.2+65` — Free vs Premium dai limiti dashboard live (29/07/2026)
 

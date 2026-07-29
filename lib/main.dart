@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:app_links/app_links.dart';
@@ -216,6 +217,8 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(true);
+  unawaited(FirebaseAnalytics.instance.logAppOpen());
   AppNotificationService.registerBackgroundHandler();
 
   FirebaseFirestore.instance.settings = const Settings(
@@ -681,6 +684,9 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
       darkTheme: ThemeHelpers.createDarkTheme(),
       themeMode: _themeMode,
       navigatorKey: navigatorKey,
+      navigatorObservers: [
+        FirebaseAnalyticsObserver(analytics: FirebaseAnalytics.instance),
+      ],
       locale: const Locale('it', 'IT'),
       supportedLocales: const [
         Locale('it', 'IT'),
