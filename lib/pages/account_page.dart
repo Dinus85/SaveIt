@@ -25,6 +25,7 @@ import 'package:savein/widgets/new_signup_premium_promo_dialog.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
+import 'package:savein/services/ads_consent_service.dart';
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -437,6 +438,28 @@ class AccountPage extends StatelessWidget {
       context,
       MaterialPageRoute(
         builder: (context) => PrivacyPolicyPage(isDarkTheme: isDarkTheme),
+      ),
+    );
+  }
+
+  Future<void> _openAdsPrivacyOptions(BuildContext context) async {
+    final error = await AdsConsentService.instance.showPrivacyOptionsForm();
+    if (!context.mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Consenso non disponibile ora: ${error.message}',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Preferenze pubblicità aggiornate'),
+        backgroundColor: Colors.green,
       ),
     );
   }
@@ -1243,6 +1266,16 @@ class AccountPage extends StatelessWidget {
                           cardTextColor,
                           cardSubtitleColor,
                           () => _openPrivacyPolicyPage(context),
+                        ),
+
+                        _buildOptionCard(
+                          'Gestisci consenso pubblicità',
+                          'Modifica o revoca il consenso ads (GDPR)',
+                          Icons.ads_click,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => _openAdsPrivacyOptions(context),
                         ),
 
                         _buildOptionCard(

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth_service.dart';
 import 'access_control_service.dart';
+import 'ads_consent_service.dart';
 import 'plan_limits_service.dart';
 
 class InterstitialAdService {
@@ -61,6 +62,8 @@ class InterstitialAdService {
 
     _initializing = () async {
       try {
+        // Consenso UMP prima di MobileAds (obbligatorio in UE).
+        await AdsConsentService.instance.gatherConsent();
         await MobileAds.instance.initialize();
         // In debug forza ads non personalizzate: evita blocchi ATT/privacy in test.
         if (kDebugMode) {
@@ -230,6 +233,12 @@ class InterstitialAdService {
       await initialize();
     } catch (e) {
       debugPrint('InterstitialAd skip: AdMob non inizializzato ($e)');
+      return false;
+    }
+
+    final canRequest = await AdsConsentService.instance.canRequestAds();
+    if (!canRequest) {
+      debugPrint('InterstitialAd skip: UMP canRequestAds=false');
       return false;
     }
 

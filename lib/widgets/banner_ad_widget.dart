@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../services/interstitial_ad_service.dart';
 import '../services/access_control_service.dart';
+import '../services/ads_consent_service.dart';
 import '../services/plan_limits_service.dart';
 
 /// Banner pubblicitario orizzontale mostrato solo agli utenti Free.
@@ -48,6 +49,12 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
       await InterstitialAdService.instance.initialize();
     } catch (e) {
       debugPrint('BannerAd skip: AdMob non inizializzato ($e)');
+      return;
+    }
+
+    final canRequest = await AdsConsentService.instance.canRequestAds();
+    if (!canRequest) {
+      debugPrint('BannerAd skip: UMP canRequestAds=false');
       return;
     }
 
