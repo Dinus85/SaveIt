@@ -1151,7 +1151,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
 - **Produzione: NON ancora richiesta** — solo dopo test chiuso
-- **Google Ads**: account nuovo in setup (lug 2026); per campagne installazione app preferire **iOS** finche' Android non e' in produzione, oppure campagne verso sito `https://savein.eu` / marketing page
+- **Google Ads**: account nuovo in setup (lug 2026) — **settaggio campagna ancora da completare** (vedi sezione "Google Ads — DA COMPLETARE"); per installazioni preferire **iOS** finche' Android non e' in produzione, oppure sito `https://savein.eu/marketing.html`
 
 #### Quando serve una nuova release app vs solo deploy server
 
@@ -1226,9 +1226,33 @@ Logica ads:
 - **Google Analytics** abilitato sul progetto Firebase `saveit-app-1784d` (account Analytics `otf_dino`).
 - **AdMob ↔ Firebase**: app SaveIn! Android e iOS collegate (Servizi collegati); entrate a livello di impressione da attivare/attivate nel wizard.
 - **SDK Analytics app**: aggiunto `firebase_analytics` in Flutter; `FirebaseAnalyticsObserver` + `logAppOpen` in `main.dart`; Android `firebase_options.dart` allineato ad appId `eu.savein.app` (`…:android:ca3fd03c8ccebd3d9e7d5a`).
-- **Google Ads**: collegamento/account nuovo in corso (non confondere con AdMob). Account legacy Twynga (`713-303-5924`) da non riusare (pagamento bloccato).
+- **Google Ads**: account nuovo `844-261-4968` creato (lug 2026) — **settaggio campagna NON completato** (vedi sezione Google Ads sotto). Account legacy Twynga (`713-303-5924`) da non riusare (pagamento bloccato).
 - **Limite Android**: SaveIn! e' **ancora in test chiuso Play**, non in produzione — le campagne Google Ads "Pagina di download dell'app" su Android restano incomplete finche' l'app non e' pubblica. Vedi promemoria in sezione Play Store sopra.
 - **Collegamento store AdMob**: iOS collegato (`id6785451010` / `app-ads.txt`); Android store listing pieno tipicamente solo dopo produzione Play. Finche' Android non e' pubblico AdMob puo' applicare "Pubblicazione annunci limitata".
+
+### Google Ads — DA COMPLETARE (promemoria 29/07/2026)
+
+> **TODO operativo**: il settaggio Google Ads e' stato solo iniziato. Non e' ancora una campagna live/pronta. Riprendere da [ads.google.com](https://ads.google.com) con l'account nuovo (**non** Twynga).
+
+Stato:
+- Account nuovo creato (ID circa `844-261-4968`, email `pasldino@gmail.com`) — wizard prima campagna in corso
+- Collegamento AdMob ↔ Google Ads: verificare in AdMob → **Impostazioni → Servizi collegati** che Google Ads non resti "Non collegata" dopo aver finito l'account
+- Campagna App SaveIn! iOS: asset titoli/descrizioni/immagini iniziati ma **non pubblicati**
+- Pagamento / billing sul nuovo account: da confermare
+- Budget e pubblicazione: da fare
+
+Checklist rimanente:
+1. Completare **asset annunci** (titoli, descrizioni, screenshot/immagini; video opzionale)
+2. Impostare **offerte e budget** (es. €5–10/giorno per test)
+3. Completare **dati di pagamento** sul nuovo account
+4. Pubblicare la campagna **App → SaveIn! iOS** (o sito `https://savein.eu/marketing.html` se preferisci acquisizione web)
+5. Collegare l'account Google Ads in AdMob (**Servizi collegati**) se ancora "Non collegata"
+6. **NON** lanciare campagna installazione **Android** finche' SaveIn! non e' in **produzione** Play (ancora test chiuso)
+7. Dopo produzione Android: creare campagna App Android dedicata
+
+Differenza rapida (non confondere):
+- **AdMob** = ads *dentro* l'app (ricavi Free)
+- **Google Ads** = ads *per* promuovere l'app (tu paghi per installazioni)
 
 ---
 
@@ -1257,6 +1281,8 @@ Logica ads:
 - La promo benvenuto nuovi iscritti deve passare sempre dalle Cloud Functions `getNewSignupPremiumPromoEligibility` e `activateNewSignupPremiumPromo`. Non riattivarla con scritture dirette client su `users/{uid}`: serve lo storico permanente per email in `new_signup_premium_promo_claims`.
 - Quando si modifica la promo benvenuto deployare sia Functions sia regole Firestore: `firebase deploy --only functions,firestore:rules`. Per la dashboard web serve anche build/deploy hosting.
 - Dopo eliminazione account, `AuthService.deleteAccount()` deve pulire subito sessione locale e impedire che `_loadUserData` ricrei un profilo fallback mentre Firebase Auth notifica il logout.
+- **Google Ads settaggio incompleto (29/07/2026)**: riprendere checklist in sezione "Google Ads — DA COMPLETARE"; non confondere con AdMob; niente campagna Android finche' Play non e' in produzione.
+- **Controllo versione app (30/07/2026)**: dashboard `Versione app` scrive su `app_config/version_control` (`minBuildIos`/`minBuildAndroid`/`iosStoreUrl`/messaggio). Dopo ogni Salva registra storico in `app_config/version_control/history` (visibile sotto il form). Bug pagina bianca post-save: `jsonEncode` su Timestamp `updatedAt` — fix deployato su Hosting.
 
 ## Aggiornamenti 15/06/2026
 
@@ -1819,6 +1845,7 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Abilitato Google Analytics su Firebase; collegato AdMob SaveIn! (e SmartChef su progetto proprio) a Firebase.
 - App: `firebase_analytics` + observer; fix Android `FirebaseOptions` verso `eu.savein.app`.
 - **PROMEMORIA**: Android SaveIn! ancora **test chiuso** Play — non lanciare campagne Google Ads installazione Android finche' non e' in produzione; iOS / sito ok da valutare subito.
+- **TODO Google Ads**: settaggio campagna **non completato** (account nuovo creato, asset/budget/pagamento/pubblicazione da finire). Vedi sezione dedicata "Google Ads — DA COMPLETARE".
 
 ### Build `1.1.2+65` — Free vs Premium dai limiti dashboard live (29/07/2026)
 

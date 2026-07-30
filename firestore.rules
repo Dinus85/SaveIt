@@ -175,6 +175,12 @@ service cloud.firestore {
     match /app_config/version_control {
       allow read: if true;
       allow write: if isDashboardAdmin();
+
+      match /history/{entryId} {
+        allow read: if isDashboardViewer();
+        allow create: if isDashboardAdmin();
+        allow update, delete: if false;
+      }
     }
 
     match /app_config/{configId} {

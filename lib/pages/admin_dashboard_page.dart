@@ -3425,21 +3425,60 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _firestore.doc('app_config/version_control').snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Errore caricamento controllo versione: ${snapshot.error}',
+                style: const TextStyle(color: Colors.red),
+              ),
+            ),
+          );
+        }
         if (snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final data = snapshot.data?.data() ?? {};
+        final data = snapshot.data?.data() ?? <String, dynamic>{};
         return _VersionControlEditor(
-          key: ValueKey(jsonEncode(data)),
+          key: ValueKey(_versionControlEditorKey(data)),
           initialData: data,
           onSave: (payload) async {
-            await _firestore.doc('app_config/version_control').set({
+            final previous = Map<String, dynamic>.from(data);
+            final email = AuthService().currentUser?.email ?? 'unknown';
+            final batch = _firestore.batch();
+            final configRef = _firestore.doc('app_config/version_control');
+            batch.set(
+              configRef,
+              {
+                ...payload,
+                'updatedAt': FieldValue.serverTimestamp(),
+                'updatedBy': email,
+              },
+              SetOptions(merge: true),
+            );
+            batch.set(configRef.collection('history').doc(), {
               ...payload,
-              'updatedAt': FieldValue.serverTimestamp(),
-              'updatedBy': AuthService().currentUser?.email,
-            }, SetOptions(merge: true));
+              'action': 'version_control_update',
+              'summary': _versionControlChangeSummary(previous, payload),
+              'previous': {
+                'maintenance': previous['maintenance'] == true,
+                'message': (previous['message'] ?? '').toString(),
+                'minBuildAndroid': previous['minBuildAndroid'] ??
+                    previous['minBuild'] ??
+                    0,
+                'minBuildIos':
+                    previous['minBuildIos'] ?? previous['minBuild'] ?? 0,
+                'androidStoreUrl':
+                    (previous['androidStoreUrl'] ?? '').toString(),
+                'iosStoreUrl': (previous['iosStoreUrl'] ?? '').toString(),
+              },
+              'createdAt': FieldValue.serverTimestamp(),
+              'updatedBy': email,
+            });
+            await batch.commit();
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -3452,6 +3491,78 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         );
       },
     );
+  }
+
+  /// Key stabile per ricreare l'editor dopo save.
+  /// Non usare jsonEncode diretto sul doc: `updatedAt` e' un Timestamp Firestore.
+  String _versionControlEditorKey(Map<String, dynamic> data) {
+    final safe = <String, dynamic>{};
+    data.forEach((key, value) {
+      if (value is Timestamp) {
+        safe[key] = value.millisecondsSinceEpoch;
+      } else if (value == null ||
+          value is num ||
+          value is bool ||
+          value is String) {
+        safe[key] = value;
+      } else {
+        safe[key] = value.toString();
+      }
+    });
+    return jsonEncode(safe);
+  }
+
+  String _versionControlChangeSummary(
+    Map<String, dynamic> previous,
+    Map<String, dynamic> next,
+  ) {
+    final changes = <String>[];
+    final prevMaint = previous['maintenance'] == true;
+    final nextMaint = next['maintenance'] == true;
+    if (prevMaint != nextMaint) {
+      changes.add(nextMaint ? 'Manutenzione ON' : 'Manutenzione OFF');
+    }
+
+    int readBuild(Map<String, dynamic> m, String key) {
+      final v = m[key] ?? m['minBuild'] ?? 0;
+      if (v is int) return v;
+      return int.tryParse(v.toString()) ?? 0;
+    }
+
+    final prevAndroid = readBuild(previous, 'minBuildAndroid');
+    final nextAndroid = readBuild(next, 'minBuildAndroid');
+    if (prevAndroid != nextAndroid) {
+      changes.add('Android min $prevAndroid → $nextAndroid');
+    }
+
+    final prevIos = readBuild(previous, 'minBuildIos');
+    final nextIos = readBuild(next, 'minBuildIos');
+    if (prevIos != nextIos) {
+      changes.add('iOS min $prevIos → $nextIos');
+    }
+
+    final prevMsg = (previous['message'] ?? '').toString().trim();
+    final nextMsg = (next['message'] ?? '').toString().trim();
+    if (prevMsg != nextMsg) {
+      changes.add('Messaggio aggiornato');
+    }
+
+    final prevIosUrl = (previous['iosStoreUrl'] ?? '').toString().trim();
+    final nextIosUrl = (next['iosStoreUrl'] ?? '').toString().trim();
+    if (prevIosUrl != nextIosUrl) {
+      changes.add('Link App Store aggiornato');
+    }
+
+    final prevAndroidUrl =
+        (previous['androidStoreUrl'] ?? '').toString().trim();
+    final nextAndroidUrl =
+        (next['androidStoreUrl'] ?? '').toString().trim();
+    if (prevAndroidUrl != nextAndroidUrl) {
+      changes.add('Link Play Store aggiornato');
+    }
+
+    if (changes.isEmpty) return 'Salvataggio senza modifiche rilevanti';
+    return changes.join(' · ');
   }
 
   Widget _buildPlansInfoPage() {
@@ -10556,10 +10667,200 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
                   ),
                 ),
               ),
+              const SizedBox(height: 28),
+              const Text(
+                'Storico azioni aggiornamenti',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Ogni salvataggio viene registrato qui (chi, quando, cosa è cambiato).',
+                style: TextStyle(color: Color(0xFF718096)),
+              ),
+              const SizedBox(height: 12),
+              _VersionControlHistoryList(
+                currentConfig: widget.initialData,
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _VersionControlHistoryList extends StatelessWidget {
+  final Map<String, dynamic> currentConfig;
+
+  const _VersionControlHistoryList({required this.currentConfig});
+
+  String _formatWhen(dynamic value) {
+    DateTime? dt;
+    if (value is Timestamp) {
+      dt = value.toDate();
+    } else if (value is DateTime) {
+      dt = value;
+    }
+    if (dt == null) return 'Data non disponibile';
+    final local = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(local.day)}/${two(local.month)}/${local.year} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
+
+  String _fallbackSummaryFromCurrent() {
+    final maint = currentConfig['maintenance'] == true;
+    final android =
+        currentConfig['minBuildAndroid'] ?? currentConfig['minBuild'] ?? 0;
+    final ios = currentConfig['minBuildIos'] ?? currentConfig['minBuild'] ?? 0;
+    final parts = <String>[
+      if (maint) 'Manutenzione ON',
+      'Android min $android',
+      'iOS min $ios',
+    ];
+    return parts.join(' · ');
+  }
+
+  Widget _historyTile({
+    required String summary,
+    required String by,
+    required String when,
+    required Map<String, dynamic> details,
+  }) {
+    final maint = details['maintenance'] == true;
+    final android = details['minBuildAndroid'] ?? 0;
+    final ios = details['minBuildIos'] ?? 0;
+    final message = (details['message'] ?? '').toString().trim();
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              summary,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '$when · $by',
+              style: const TextStyle(
+                color: Color(0xFF718096),
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                Chip(
+                  label: Text(maint ? 'Manutenzione ON' : 'Manutenzione OFF'),
+                  visualDensity: VisualDensity.compact,
+                ),
+                Chip(
+                  label: Text('Android ≥ $android'),
+                  visualDensity: VisualDensity.compact,
+                ),
+                Chip(
+                  label: Text('iOS ≥ $ios'),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: const TextStyle(color: Color(0xFF4A5568)),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('app_config')
+          .doc('version_control')
+          .collection('history')
+          .orderBy('createdAt', descending: true)
+          .limit(30)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Text(
+            'Errore storico: ${snapshot.error}',
+            style: const TextStyle(color: Colors.red),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) {
+          final hasCurrent = currentConfig.isNotEmpty &&
+              (currentConfig['updatedAt'] != null ||
+                  currentConfig['minBuildIos'] != null ||
+                  currentConfig['minBuildAndroid'] != null ||
+                  currentConfig['maintenance'] == true);
+          if (!hasCurrent) {
+            return const Card(
+              child: ListTile(
+                title: Text('Nessuna azione registrata'),
+                subtitle: Text(
+                  'Dopo il prossimo salvataggio comparirà qui lo storico.',
+                ),
+              ),
+            );
+          }
+          return _historyTile(
+            summary:
+                'Configurazione attuale (prima dello storico dettagliato)',
+            by: (currentConfig['updatedBy'] ?? 'sconosciuto').toString(),
+            when: _formatWhen(currentConfig['updatedAt']),
+            details: {
+              'maintenance': currentConfig['maintenance'] == true,
+              'message': currentConfig['message'],
+              'minBuildAndroid': currentConfig['minBuildAndroid'] ??
+                  currentConfig['minBuild'] ??
+                  0,
+              'minBuildIos':
+                  currentConfig['minBuildIos'] ?? currentConfig['minBuild'] ?? 0,
+            },
+          );
+        }
+
+        return Column(
+          children: [
+            for (final doc in docs)
+              _historyTile(
+                summary: (doc.data()['summary'] ?? _fallbackSummaryFromCurrent())
+                    .toString(),
+                by: (doc.data()['updatedBy'] ?? 'sconosciuto').toString(),
+                when: _formatWhen(doc.data()['createdAt']),
+                details: doc.data(),
+              ),
+          ],
+        );
+      },
     );
   }
 }
