@@ -1853,6 +1853,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Account: voce **Gestisci consenso pubblicità** (`showPrivacyOptionsForm`).
 - **Azione**: Codemagic → TestFlight **69**; dopo release impostare `minBuildIos=69` se si vuole forzare update. Verificare in AdMob che "Messaggi mostrati" salga e partano richieste ads.
 
+### Build `1.1.4+70` — nuovo train App Store dopo chiusura 1.1.3 (30/07/2026)
+
+- Codemagic publish fallito su build **69**: Apple **90186** / **90062** — train `1.1.3` chiuso (gia' approvato); non si possono caricare altri build su `1.1.3`.
+- Nuova marketing version **1.1.4**, build **70** (stesso contenuto UMP + fix ads/spacing di +68/+69).
+- **Azione**: Codemagic → TestFlight **70**; in dashboard `minBuildIos=70` dopo release se serve force update.
+
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 
 - Abilitato Google Analytics su Firebase; collegato AdMob SaveIn! (e SmartChef su progetto proprio) a Firebase.
