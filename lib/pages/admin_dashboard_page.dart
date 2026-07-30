@@ -10735,55 +10735,58 @@ class _VersionControlHistoryList extends StatelessWidget {
     final ios = details['minBuildIos'] ?? 0;
     final message = (details['message'] ?? '').toString().trim();
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              summary,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '$when · $by',
-              style: const TextStyle(
-                color: Color(0xFF718096),
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                Chip(
-                  label: Text(maint ? 'Manutenzione ON' : 'Manutenzione OFF'),
-                  visualDensity: VisualDensity.compact,
+    return SizedBox(
+      width: double.infinity,
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 10),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                summary,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
                 ),
-                Chip(
-                  label: Text('Android ≥ $android'),
-                  visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '$when · $by',
+                style: const TextStyle(
+                  color: Color(0xFF718096),
+                  fontSize: 13,
                 ),
-                Chip(
-                  label: Text('iOS ≥ $ios'),
-                  visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  Chip(
+                    label: Text(maint ? 'Manutenzione ON' : 'Manutenzione OFF'),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  Chip(
+                    label: Text('Android ≥ $android'),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  Chip(
+                    label: Text('iOS ≥ $ios'),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              if (message.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  style: const TextStyle(color: Color(0xFF4A5568)),
                 ),
               ],
-            ),
-            if (message.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                message,
-                style: const TextStyle(color: Color(0xFF4A5568)),
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -10822,11 +10825,14 @@ class _VersionControlHistoryList extends StatelessWidget {
                   currentConfig['minBuildAndroid'] != null ||
                   currentConfig['maintenance'] == true);
           if (!hasCurrent) {
-            return const Card(
-              child: ListTile(
-                title: Text('Nessuna azione registrata'),
-                subtitle: Text(
-                  'Dopo il prossimo salvataggio comparirà qui lo storico.',
+            return const SizedBox(
+              width: double.infinity,
+              child: Card(
+                child: ListTile(
+                  title: Text('Nessuna azione registrata'),
+                  subtitle: Text(
+                    'Dopo il prossimo salvataggio comparirà qui lo storico.',
+                  ),
                 ),
               ),
             );
@@ -10848,17 +10854,22 @@ class _VersionControlHistoryList extends StatelessWidget {
           );
         }
 
-        return Column(
-          children: [
-            for (final doc in docs)
-              _historyTile(
-                summary: (doc.data()['summary'] ?? _fallbackSummaryFromCurrent())
-                    .toString(),
-                by: (doc.data()['updatedBy'] ?? 'sconosciuto').toString(),
-                when: _formatWhen(doc.data()['createdAt']),
-                details: doc.data(),
-              ),
-          ],
+        return SizedBox(
+          width: double.infinity,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final doc in docs)
+                _historyTile(
+                  summary:
+                      (doc.data()['summary'] ?? _fallbackSummaryFromCurrent())
+                          .toString(),
+                  by: (doc.data()['updatedBy'] ?? 'sconosciuto').toString(),
+                  when: _formatWhen(doc.data()['createdAt']),
+                  details: doc.data(),
+                ),
+            ],
+          ),
         );
       },
     );
