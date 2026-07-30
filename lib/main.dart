@@ -2599,12 +2599,11 @@ class _WebHomePageState extends State<WebHomePage>
           _buildPromotionBanner(themeColors),
           if (_activeBanner != null) const SizedBox(height: 12),
           if (sortedFolders.isEmpty) _buildEmptyFoldersState(themeColors),
+          // Sempre spazio tra le righe: i BannerAdWidget non caricati sono
+          // SizedBox.shrink() e prima saltavano il gap → cartelle appiccicate.
           for (int i = 0; i < rows.length; i++) ...[
             rows[i],
-            if (i < rows.length - 1 &&
-                rows[i + 1] is! BannerAdWidget &&
-                rows[i] is! BannerAdWidget)
-              const SizedBox(height: 12),
+            if (i < rows.length - 1) const SizedBox(height: 12),
           ],
         ],
       ),

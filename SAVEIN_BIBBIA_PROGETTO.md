@@ -1146,7 +1146,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.3+67`** — da pubblicare sui canali di test Play quando serve
+- Versione app corrente (repo): **`1.1.3+68`** — da pubblicare sui canali di test Play quando serve
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1839,6 +1839,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Codemagic publish fallito: Apple **ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE** — `previousBundleVersion = 66` gia' caricato.
 - Bump build **67** (marketing resta **1.1.3**).
 - Include anche `firebase_analytics` + link AdMob/Firebase se non gia' in train precedente.
+
+### Build `1.1.3+68` — gap cartelle Home + fallback ads reminder (30/07/2026)
+
+- Home: le `BannerAdWidget` non caricate erano `SizedBox.shrink()` e saltavano lo spazio verticale → cartelle appiccicate; ora gap sempre tra le righe.
+- Ads gate reminder: retry load interstitial; se AdMob non consegna, dialog fallback con attesa 4s prima di Continua (non piu' skip immediato).
+- **Azione**: Codemagic → TestFlight build **68**; aggiornare `minBuildIos` in dashboard a **68** dopo release se si vuole forzare l'update.
 
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 

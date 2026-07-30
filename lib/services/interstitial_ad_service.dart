@@ -150,24 +150,19 @@ class InterstitialAdService {
   Future<void> showFeatureAdGate(BuildContext context, String feature) async {
     if (!await _featureRequiresAd(feature)) return;
 
-    final shown = await _showInterstitial();
+    // Due tentativi: a volte il primo load AdMob fallisce (no-fill / cold start).
+    var shown = await _showInterstitial();
+    if (!shown) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      shown = await _showInterstitial();
+    }
     if (shown || !context.mounted) return;
 
+    // Fallback obbligatorio se AdMob non ha inventario: attesa minima prima di Continua.
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Annuncio'),
-        content: const Text(
-          'Per usare questa funzione con un account Free devi prima visualizzare una pubblicità.',
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Continua'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) => const _AdFallbackDialog(),
     );
   }
 
@@ -286,6 +281,61 @@ class InterstitialAdService {
         _isShowingAd = false;
         return false;
       },
+    );
+  }
+}
+
+/// Dialog obbligatorio quando AdMob non consegna l'interstitial.
+class _AdFallbackDialog extends StatefulWidget {
+  const _AdFallbackDialog();
+
+  @override
+  State<_AdFallbackDialog> createState() => _AdFallbackDialogState();
+}
+
+class _AdFallbackDialogState extends State<_AdFallbackDialog> {
+  static const int _waitSeconds = 4;
+  int _remaining = _waitSeconds;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      if (_remaining <= 1) {
+        timer.cancel();
+        setState(() => _remaining = 0);
+        return;
+      }
+      setState(() => _remaining -= 1);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canContinue = _remaining <= 0;
+    return AlertDialog(
+      title: const Text('Annuncio'),
+      content: Text(
+        canContinue
+            ? 'Grazie. Ora puoi continuare.'
+            : 'La pubblicità non è disponibile in questo momento.\n'
+                'Attendi $_remaining secondi prima di continuare.',
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed:
+              canContinue ? () => Navigator.of(context).pop() : null,
+          child: Text(canContinue ? 'Continua' : 'Attendi ($_remaining)'),
+        ),
+      ],
     );
   }
 }
