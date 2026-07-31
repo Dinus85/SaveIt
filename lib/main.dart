@@ -315,6 +315,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
   bool _wasInBackground = false;
   DateTime? _lastBackgroundTime;
   Widget? _forcedGate;
+  Timer? _forceUpdateScheduleTimer;
 
   @override
   void initState() {
@@ -334,6 +335,8 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     final minBuild = cfg.minBuildForCurrentPlatform();
     final storeUrl = cfg.storeUrlForCurrentPlatform();
 
+    _scheduleForceUpdateRecheck(cfg);
+
     if (cfg.maintenance) {
       return ForceUpdatePage(
         title: 'Manutenzione in corso',
@@ -345,7 +348,10 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
       );
     }
 
-    if (minBuild > 0 && build > 0 && build < minBuild) {
+    if (cfg.isForceUpdateEffective &&
+        minBuild > 0 &&
+        build > 0 &&
+        build < minBuild) {
       return ForceUpdatePage(
         title: 'Aggiornamento richiesto',
         message: cfg.message.isNotEmpty
@@ -358,9 +364,22 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     return null;
   }
 
+  void _scheduleForceUpdateRecheck(VersionControlConfig cfg) {
+    _forceUpdateScheduleTimer?.cancel();
+    _forceUpdateScheduleTimer = null;
+    final delay = cfg.forceUpdateDelayRemaining;
+    if (delay == null) return;
+    // +1s per evitare race sul confronto Timestamp.
+    final wait = delay + const Duration(seconds: 1);
+    _forceUpdateScheduleTimer = Timer(wait, () {
+      if (!mounted) return;
+      unawaited(_checkForcedGateInBackground());
+    });
+  }
+
   Future<void> _checkForcedGateInBackground() async {
     final forced = await _maybeBuildForcedGate();
-    if (!mounted || forced == null) return;
+    if (!mounted) return;
     setState(() => _forcedGate = forced);
   }
 
@@ -453,6 +472,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
 
     _sharingService.dispose();
     _appLinkSubscription?.cancel();
+    _forceUpdateScheduleTimer?.cancel();
     super.dispose();
   }
 
@@ -469,6 +489,9 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
       unawaited(
         ShareExtensionService.instance.refreshCatalogAndImport(),
       );
+      if (!kIsWeb) {
+        unawaited(_checkForcedGateInBackground());
+      }
 
       if (_wasInBackground) {
         _wasInBackground = false;

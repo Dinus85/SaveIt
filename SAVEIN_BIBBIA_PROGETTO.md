@@ -1146,7 +1146,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.4+70`** — da pubblicare sui canali di test Play quando serve
+- Versione app corrente (repo): **`1.1.4+71`** — da pubblicare sui canali di test Play quando serve
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1283,6 +1283,7 @@ Differenza rapida (non confondere):
 - Dopo eliminazione account, `AuthService.deleteAccount()` deve pulire subito sessione locale e impedire che `_loadUserData` ricrei un profilo fallback mentre Firebase Auth notifica il logout.
 - **Google Ads settaggio incompleto (29/07/2026)**: riprendere checklist in sezione "Google Ads — DA COMPLETARE"; non confondere con AdMob; niente campagna Android finche' Play non e' in produzione.
 - **Controllo versione app (30/07/2026)**: dashboard `Versione app` scrive su `app_config/version_control` (`minBuildIos`/`minBuildAndroid`/`iosStoreUrl`/messaggio). Dopo ogni Salva registra storico in `app_config/version_control/history` (visibile sotto il form). Bug pagina bianca post-save: `jsonEncode` su Timestamp `updatedAt` — fix deployato su Hosting.
+- **Programmazione avviso update (31/07/2026)**: in `app_config/version_control` campo opzionale `forceUpdateEffectiveFrom` (Timestamp). Se assente → force update attivo subito (comportamento legacy). Se presente → l'app mostra "Aggiornamento richiesto" solo da quella data/ora in poi (ora locale dispositivo / Timestamp assoluto). Dashboard: toggle "Programma attivazione" + date/time picker. Client: `AppConfigService` + ricontrollo a resume. Serve build app che include questa logica (da `1.1.4+71`).
 
 ## Aggiornamenti 15/06/2026
 
@@ -1858,6 +1859,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Codemagic publish fallito su build **69**: Apple **90186** / **90062** — train `1.1.3` chiuso (gia' approvato); non si possono caricare altri build su `1.1.3`.
 - Nuova marketing version **1.1.4**, build **70** (stesso contenuto UMP + fix ads/spacing di +68/+69).
 - **Azione**: Codemagic → TestFlight **70**; in dashboard `minBuildIos=70` dopo release se serve force update.
+
+### Build `1.1.4+71` — schedule force-update da dashboard (31/07/2026)
+
+- Campo `forceUpdateEffectiveFrom` su `app_config/version_control` + UI data/ora in **Versione app**.
+- Client applica minBuild solo dopo la data/ora (ricontrollo a resume + timer).
+- **Nota**: le app vecchie ignorano lo schedule e bloccano subito se minBuild e' settato; usare lo schedule solo dopo che gli utenti hanno build ≥71, oppure alzare minBuild in coppia con la programmazione.
 
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 

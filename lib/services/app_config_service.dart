@@ -12,6 +12,10 @@ class VersionControlConfig {
   final String androidStoreUrl;
   final String iosStoreUrl;
 
+  /// Se null, il force-update (minBuild) e' attivo subito.
+  /// Se valorizzato, il blocco parte solo da questo istante in poi.
+  final DateTime? forceUpdateEffectiveFrom;
+
   const VersionControlConfig({
     this.maintenance = false,
     this.message = '',
@@ -20,6 +24,7 @@ class VersionControlConfig {
     this.androidStoreUrl =
         'https://play.google.com/store/apps/details?id=eu.savein.app',
     this.iosStoreUrl = '',
+    this.forceUpdateEffectiveFrom,
   });
 
   factory VersionControlConfig.fromMap(Map<String, dynamic>? data) {
@@ -28,6 +33,13 @@ class VersionControlConfig {
     int readInt(dynamic value, {int fallback = 0}) {
       if (value == null) return fallback;
       return int.tryParse(value.toString()) ?? fallback;
+    }
+
+    DateTime? readDate(dynamic value) {
+      if (value == null) return null;
+      if (value is Timestamp) return value.toDate();
+      if (value is DateTime) return value;
+      return DateTime.tryParse(value.toString());
     }
 
     final legacyMinBuild = readInt(data['minBuild']);
@@ -50,7 +62,24 @@ class VersionControlConfig {
           .toString()
           .trim(),
       iosStoreUrl: (data['iosStoreUrl'] ?? '').toString().trim(),
+      forceUpdateEffectiveFrom: readDate(data['forceUpdateEffectiveFrom']),
     );
+  }
+
+  /// True se il blocco minBuild deve essere applicato ora.
+  bool get isForceUpdateEffective {
+    final from = forceUpdateEffectiveFrom;
+    if (from == null) return true;
+    return !DateTime.now().toUtc().isBefore(from.toUtc());
+  }
+
+  /// Tempo rimanente prima dell'attivazione (null se gia' attivo / non programmato).
+  Duration? get forceUpdateDelayRemaining {
+    final from = forceUpdateEffectiveFrom;
+    if (from == null) return null;
+    final remaining = from.toUtc().difference(DateTime.now().toUtc());
+    if (remaining.isNegative || remaining == Duration.zero) return null;
+    return remaining;
   }
 
   int minBuildForCurrentPlatform() {

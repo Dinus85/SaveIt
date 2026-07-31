@@ -3459,10 +3459,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               },
               SetOptions(merge: true),
             );
+
+            // Storico: niente FieldValue.delete / serverTimestamp nel payload grezzo.
+            final historyPayload = <String, dynamic>{};
+            payload.forEach((key, value) {
+              if (value is FieldValue) return;
+              historyPayload[key] = value;
+            });
+            final scheduled = historyPayload['forceUpdateEffectiveFrom'];
+            historyPayload['forceUpdateScheduled'] = scheduled is Timestamp;
+
             batch.set(configRef.collection('history').doc(), {
-              ...payload,
+              ...historyPayload,
               'action': 'version_control_update',
-              'summary': _versionControlChangeSummary(previous, payload),
+              'summary': _versionControlChangeSummary(previous, historyPayload),
               'previous': {
                 'maintenance': previous['maintenance'] == true,
                 'message': (previous['message'] ?? '').toString(),
@@ -3474,6 +3484,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 'androidStoreUrl':
                     (previous['androidStoreUrl'] ?? '').toString(),
                 'iosStoreUrl': (previous['iosStoreUrl'] ?? '').toString(),
+                'forceUpdateEffectiveFrom':
+                    previous['forceUpdateEffectiveFrom'],
               },
               'createdAt': FieldValue.serverTimestamp(),
               'updatedBy': email,
@@ -3559,6 +3571,32 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         (next['androidStoreUrl'] ?? '').toString().trim();
     if (prevAndroidUrl != nextAndroidUrl) {
       changes.add('Link Play Store aggiornato');
+    }
+
+    String fmtSchedule(dynamic value) {
+      if (value == null) return 'immediato';
+      DateTime? dt;
+      if (value is Timestamp) dt = value.toDate();
+      if (value is DateTime) dt = value;
+      if (dt == null) return value.toString();
+      final local = dt.toLocal();
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${two(local.day)}/${two(local.month)}/${local.year} '
+          '${two(local.hour)}:${two(local.minute)}';
+    }
+
+    final prevSchedule = previous['forceUpdateEffectiveFrom'];
+    final nextSchedule = next['forceUpdateEffectiveFrom'];
+    final prevKey = prevSchedule is Timestamp
+        ? prevSchedule.millisecondsSinceEpoch
+        : prevSchedule?.toString();
+    final nextKey = nextSchedule is Timestamp
+        ? nextSchedule.millisecondsSinceEpoch
+        : nextSchedule?.toString();
+    if (prevKey != nextKey) {
+      changes.add(
+        'Attivazione update: ${fmtSchedule(prevSchedule)} → ${fmtSchedule(nextSchedule)}',
+      );
     }
 
     if (changes.isEmpty) return 'Salvataggio senza modifiche rilevanti';
@@ -10498,6 +10536,8 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
   late final TextEditingController _minIosController;
   late final TextEditingController _androidUrlController;
   late final TextEditingController _iosUrlController;
+  late bool _scheduleForceUpdate;
+  DateTime? _forceUpdateAt;
   bool _saving = false;
 
   @override
@@ -10522,6 +10562,49 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
     _iosUrlController = TextEditingController(
       text: (data['iosStoreUrl'] ?? '').toString(),
     );
+    final scheduled = _readDateTime(data['forceUpdateEffectiveFrom']);
+    _scheduleForceUpdate = scheduled != null;
+    _forceUpdateAt = scheduled ?? DateTime.now().add(const Duration(hours: 1));
+  }
+
+  DateTime? _readDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate().toLocal();
+    if (value is DateTime) return value.toLocal();
+    return DateTime.tryParse(value.toString())?.toLocal();
+  }
+
+  String _formatScheduleLabel(DateTime dt) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final local = dt.toLocal();
+    return '${two(local.day)}/${two(local.month)}/${local.year} '
+        '${two(local.hour)}:${two(local.minute)} (ora locale)';
+  }
+
+  Future<void> _pickForceUpdateDateTime() async {
+    final initial = _forceUpdateAt ?? DateTime.now().add(const Duration(hours: 1));
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      _forceUpdateAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      _scheduleForceUpdate = true;
+    });
   }
 
   @override
@@ -10537,7 +10620,7 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await widget.onSave({
+      final payload = <String, dynamic>{
         'maintenance': _maintenance,
         'message': _messageController.text.trim(),
         'minBuildAndroid':
@@ -10545,7 +10628,11 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
         'minBuildIos': int.tryParse(_minIosController.text.trim()) ?? 0,
         'androidStoreUrl': _androidUrlController.text.trim(),
         'iosStoreUrl': _iosUrlController.text.trim(),
-      });
+        'forceUpdateEffectiveFrom': _scheduleForceUpdate && _forceUpdateAt != null
+            ? Timestamp.fromDate(_forceUpdateAt!.toUtc())
+            : FieldValue.delete(),
+      };
+      await widget.onSave(payload);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -10553,6 +10640,13 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final scheduleLabel = _forceUpdateAt == null
+        ? 'Scegli data e ora'
+        : _formatScheduleLabel(_forceUpdateAt!);
+    final nowActive = !_scheduleForceUpdate ||
+        (_forceUpdateAt != null &&
+            !DateTime.now().isBefore(_forceUpdateAt!));
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Center(
@@ -10647,6 +10741,47 @@ class _VersionControlEditorState extends State<_VersionControlEditor> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 20),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Programmazione avviso aggiornamento',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Se attivo, l’avviso “Aggiornamento richiesto” parte solo dalla data/ora impostata. '
+                        'Altrimenti il blocco minBuild è immediato. Ora del dispositivo di chi salva (poi Timestamp assoluto).',
+                        style: TextStyle(color: Color(0xFF718096), fontSize: 13),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Programma attivazione'),
+                        subtitle: Text(
+                          _scheduleForceUpdate
+                              ? (nowActive
+                                  ? 'Programmata ed già trascorsa → attiva ora'
+                                  : 'In attesa: $scheduleLabel')
+                              : 'Disattivata → force update immediato (se minBuild > 0)',
+                        ),
+                        value: _scheduleForceUpdate,
+                        onChanged: (v) => setState(() {
+                          _scheduleForceUpdate = v;
+                          _forceUpdateAt ??=
+                              DateTime.now().add(const Duration(hours: 1));
+                        }),
+                      ),
+                      if (_scheduleForceUpdate) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _pickForceUpdateDateTime,
+                          icon: const Icon(Icons.schedule),
+                          label: Text('Data e ora: $scheduleLabel'),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       TextField(
                         controller: _androidUrlController,
@@ -10734,6 +10869,15 @@ class _VersionControlHistoryList extends StatelessWidget {
     final android = details['minBuildAndroid'] ?? 0;
     final ios = details['minBuildIos'] ?? 0;
     final message = (details['message'] ?? '').toString().trim();
+    final scheduleRaw = details['forceUpdateEffectiveFrom'];
+    String? scheduleLabel;
+    if (scheduleRaw is Timestamp) {
+      scheduleLabel = _formatWhen(scheduleRaw);
+    } else if (scheduleRaw is DateTime) {
+      scheduleLabel = _formatWhen(scheduleRaw);
+    } else if (details['forceUpdateScheduled'] == false) {
+      scheduleLabel = 'immediato';
+    }
 
     return SizedBox(
       width: double.infinity,
@@ -10776,6 +10920,11 @@ class _VersionControlHistoryList extends StatelessWidget {
                     label: Text('iOS ≥ $ios'),
                     visualDensity: VisualDensity.compact,
                   ),
+                  if (scheduleLabel != null)
+                    Chip(
+                      label: Text('Attivazione: $scheduleLabel'),
+                      visualDensity: VisualDensity.compact,
+                    ),
                 ],
               ),
               if (message.isNotEmpty) ...[
