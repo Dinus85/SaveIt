@@ -123,14 +123,15 @@ class AppAccessService {
     return true;
   }
 
-  Future<void> showAdGateForFeature(BuildContext context, String feature) async {
-    if (!context.mounted) return;
-    if (!isFree) return;
+  /// Restituisce true se l'ads e' stata vista, non richiesta, o utente non Free.
+  Future<bool> showAdGateForFeature(BuildContext context, String feature) async {
+    if (!context.mounted) return false;
+    if (!isFree) return true;
 
     final requiresAd = await PlanLimitsService.featureRequiresAd(feature);
-    if (!requiresAd || !context.mounted) return;
+    if (!requiresAd || !context.mounted) return true;
 
-    await InterstitialAdService.instance.showFeatureAdGate(context, feature);
+    return InterstitialAdService.instance.showFeatureAdGate(context, feature);
   }
 
   /// Controlla limiti + eventuale pubblicità richiesta dalla dashboard.
@@ -144,8 +145,7 @@ class AppAccessService {
         await checkFeatureAvailable(context, feature, featureName);
     if (!available || !context.mounted) return false;
 
-    await showAdGateForFeature(context, feature);
-    return context.mounted;
+    return showAdGateForFeature(context, feature);
   }
 
   /// Gate per import shared: post e cartelle si controllano a vicenda.
@@ -172,12 +172,12 @@ class AppAccessService {
     if (!context.mounted) return false;
 
     if (posts > 0) {
-      await showAdGateForFeature(context, 'import_shared_post');
-      if (!context.mounted) return false;
+      final ok = await showAdGateForFeature(context, 'import_shared_post');
+      if (!ok || !context.mounted) return false;
     }
     if (folders > 0) {
-      await showAdGateForFeature(context, 'import_shared_folder');
-      if (!context.mounted) return false;
+      final ok = await showAdGateForFeature(context, 'import_shared_folder');
+      if (!ok || !context.mounted) return false;
     }
     return true;
   }

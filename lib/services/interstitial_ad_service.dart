@@ -43,6 +43,9 @@ class InterstitialAdService {
   bool _isShowingAd = false;
   Future<void>? _initializing;
 
+  /// Ultimo motivo per cui l'interstitial non e' partita (diagnostica UI).
+  String? lastFailureReason;
+
   /// In debug usa le unit di test Google così le ads si vedono davvero in prova.
   /// In release/profile usa le unit SaveIn (compariranno anche su AdMob).
   static bool get useTestAds => kDebugMode;
@@ -137,8 +140,9 @@ class InterstitialAdService {
   }
 
   /// Mostra un passaggio pubblicitario prima di aprire un reminder salvato.
-  Future<void> showReminderOpenGate(BuildContext context) async {
-    await showFeatureAdGate(context, 'reminders');
+  /// Restituisce true solo se l'ads e' stata vista (o non richiesta).
+  Future<bool> showReminderOpenGate(BuildContext context) async {
+    return showFeatureAdGate(context, 'reminders');
   }
 
   /// Richiede una interstitial prima di impostare un reminder per utenti Free.
@@ -150,30 +154,52 @@ class InterstitialAdService {
 
   /// Mostra un passaggio pubblicitario prima di usare una funzione configurata
   /// con `requiresAd` nella dashboard limiti piani.
-  Future<void> showFeatureAdGate(BuildContext context, String feature) async {
-    if (!await _featureRequiresAd(feature)) return;
+  ///
+  /// Restituisce `true` solo se l'utente ha visto l'ads (o non e' richiesta).
+  /// Se AdMob non consegna: dialog con Riprova / consenso / Annulla — **niente
+  /// sblocco automatico**.
+  Future<bool> showFeatureAdGate(BuildContext context, String feature) async {
+    if (!await _featureRequiresAd(feature)) return true;
+    if (!context.mounted) return false;
 
-    // Due tentativi: a volte il primo load AdMob fallisce (no-fill / cold start).
-    var shown = await _showInterstitial();
-    if (!shown) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      shown = await _showInterstitial();
+    while (context.mounted) {
+      var shown = await _showInterstitial();
+      if (!shown) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (!context.mounted) return false;
+        shown = await _showInterstitial();
+      }
+      if (shown) return true;
+      if (!context.mounted) return false;
+
+      final action = await showDialog<_AdGateAction>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => _AdRetryDialog(
+          reason: lastFailureReason ?? 'unknown',
+        ),
+      );
+
+      if (!context.mounted) return false;
+      switch (action) {
+        case _AdGateAction.retry:
+          continue;
+        case _AdGateAction.consent:
+          await AdsConsentService.instance.showPrivacyOptionsForm();
+          // Nuova raccolta dopo modifica consenso.
+          await AdsConsentService.instance.gatherConsent();
+          continue;
+        case _AdGateAction.cancel:
+        case null:
+          return false;
+      }
     }
-    if (shown || !context.mounted) return;
-
-    // Fallback obbligatorio se AdMob non ha inventario: attesa minima prima di Continua.
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => const _AdFallbackDialog(),
-    );
+    return false;
   }
 
   /// Mostra sempre un passaggio pubblicitario prima di impostare un reminder.
-  /// Usa AdMob se disponibile, altrimenti mostra un popup fallback così il tap
-  /// non passa direttamente alla funzione per gli utenti Free.
-  Future<void> showReminderSetupGate(BuildContext context) async {
-    await showFeatureAdGate(context, 'reminders');
+  Future<bool> showReminderSetupGate(BuildContext context) async {
+    return showFeatureAdGate(context, 'reminders');
   }
 
   Future<void> recordSuccessfulImport() async {
@@ -224,21 +250,29 @@ class InterstitialAdService {
   }
 
   Future<bool> _showInterstitial() async {
-    if (!_shouldUseAds || _isShowingAd) return false;
+    if (!_shouldUseAds || _isShowingAd) {
+      lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
+      return false;
+    }
 
     final adUnitId = _interstitialAdUnitId;
-    if (adUnitId == null) return false;
+    if (adUnitId == null) {
+      lastFailureReason = 'unsupported_platform';
+      return false;
+    }
 
     try {
       await initialize();
     } catch (e) {
       debugPrint('InterstitialAd skip: AdMob non inizializzato ($e)');
+      lastFailureReason = 'init_error';
       return false;
     }
 
     final canRequest = await AdsConsentService.instance.canRequestAds();
     if (!canRequest) {
       debugPrint('InterstitialAd skip: UMP canRequestAds=false');
+      lastFailureReason = 'consent';
       return false;
     }
 
@@ -254,6 +288,7 @@ class InterstitialAdService {
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
+          lastFailureReason = null;
           ad.fullScreenContentCallback = FullScreenContentCallback(
             onAdDismissedFullScreenContent: (ad) {
               ad.dispose();
@@ -264,6 +299,7 @@ class InterstitialAdService {
             },
             onAdFailedToShowFullScreenContent: (ad, error) {
               debugPrint('InterstitialAd show error: $error');
+              lastFailureReason = 'show_error';
               ad.dispose();
               _isShowingAd = false;
               if (!completer.isCompleted) {
@@ -275,7 +311,10 @@ class InterstitialAdService {
           ad.show();
         },
         onAdFailedToLoad: (error) {
-          debugPrint('InterstitialAd load error: $error');
+          debugPrint(
+            'InterstitialAd load error: code=${error.code} domain=${error.domain} message=${error.message}',
+          );
+          lastFailureReason = 'no_fill';
           _isShowingAd = false;
           if (!completer.isCompleted) {
             completer.complete(false);
@@ -287,6 +326,7 @@ class InterstitialAdService {
     return completer.future.timeout(
       const Duration(seconds: 20),
       onTimeout: () {
+        lastFailureReason = 'timeout';
         _isShowingAd = false;
         return false;
       },
@@ -294,55 +334,54 @@ class InterstitialAdService {
   }
 }
 
-/// Dialog obbligatorio quando AdMob non consegna l'interstitial.
-class _AdFallbackDialog extends StatefulWidget {
-  const _AdFallbackDialog();
+enum _AdGateAction { retry, consent, cancel }
 
-  @override
-  State<_AdFallbackDialog> createState() => _AdFallbackDialogState();
-}
+/// Dialog quando AdMob non consegna: Riprova / consenso / Annulla (niente sblocco).
+class _AdRetryDialog extends StatelessWidget {
+  const _AdRetryDialog({required this.reason});
 
-class _AdFallbackDialogState extends State<_AdFallbackDialog> {
-  static const int _waitSeconds = 4;
-  int _remaining = _waitSeconds;
-  Timer? _timer;
+  final String reason;
 
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-      if (_remaining <= 1) {
-        timer.cancel();
-        setState(() => _remaining = 0);
-        return;
-      }
-      setState(() => _remaining -= 1);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
+  String get _message {
+    switch (reason) {
+      case 'consent':
+        return 'Per usare questa funzione serve una pubblicità, ma il consenso '
+            'attuale non permette di richiederla.\n\n'
+            'Tocca “Gestisci consenso” e consenti le ads (anche non personalizzate), '
+            'poi Riprova. Oppure passa a Premium.';
+      case 'no_fill':
+      case 'timeout':
+      case 'show_error':
+        return 'La pubblicità non è disponibile in questo momento '
+            '(AdMob non ha consegnato un annuncio).\n\n'
+            'Tocca Riprova. Se continua, riprova più tardi o passa a Premium.';
+      case 'init_error':
+        return 'Non è stato possibile avviare il sistema pubblicitario.\n\n'
+            'Controlla la connessione e tocca Riprova.';
+      default:
+        return 'La pubblicità non è disponibile.\n\n'
+            'Tocca Riprova, oppure Gestisci consenso. Senza annuncio '
+            'la funzione Free resta bloccata.';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final canContinue = _remaining <= 0;
     return AlertDialog(
-      title: const Text('Annuncio'),
-      content: Text(
-        canContinue
-            ? 'Grazie. Ora puoi continuare.'
-            : 'La pubblicità non è disponibile in questo momento.\n'
-                'Attendi $_remaining secondi prima di continuare.',
-      ),
+      title: const Text('Pubblicità richiesta'),
+      content: Text(_message),
       actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_AdGateAction.cancel),
+          child: const Text('Annulla'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_AdGateAction.consent),
+          child: const Text('Gestisci consenso'),
+        ),
         ElevatedButton(
-          onPressed:
-              canContinue ? () => Navigator.of(context).pop() : null,
-          child: Text(canContinue ? 'Continua' : 'Attendi ($_remaining)'),
+          onPressed: () => Navigator.of(context).pop(_AdGateAction.retry),
+          child: const Text('Riprova'),
         ),
       ],
     );

@@ -217,7 +217,7 @@ SaveIn! consente di impostare reminder su post e cartelle.
 ### Regole prodotto
 
 - I reminder sono disponibili anche agli utenti Free.
-- Utenti Free: prima di impostare o aprire un reminder deve comparire un passaggio pubblicitario. Se AdMob non carica, viene mostrato un popup fallback obbligatorio `Annuncio` con pulsante `Continua`.
+- Utenti Free: prima di impostare o aprire un reminder deve comparire un passaggio pubblicitario reale. Se AdMob non carica: dialog con **Riprova** / **Gestisci consenso** / **Annulla** — **niente sblocco automatico** (da `1.1.4+72`).
 - Utenti Premium/Admin: nessuna pubblicita sui reminder.
 - L'apertura di una notifica reminder non apre direttamente l'URL del post: entra in SaveIn! e naviga al target.
 - Reminder non annuali: dopo tap/apertura vengono eliminati e spariscono dalla UI.
@@ -736,7 +736,7 @@ Logica:
 - Annuncio ogni 5 import post.
 - Gate ADV prima di impostare un reminder (`showReminderSetupGate`).
 - Gate ADV prima di aprire un reminder da notifica o popup interno (`showReminderOpenGate`).
-- Se AdMob non carica, i gate reminder mostrano un popup fallback obbligatorio `Annuncio` per non saltare il passaggio pubblicitario.
+- Se AdMob non carica, i gate Free mostrano Riprova/consenso/Annulla senza sbloccare la funzione (da `1.1.4+72`).
 - Premium/Admin non devono vedere annunci.
 
 Config native:
@@ -1146,7 +1146,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.4+71`** — da pubblicare sui canali di test Play quando serve
+- Versione app corrente (repo): **`1.1.4+72`** — da pubblicare sui canali di test Play quando serve
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1865,6 +1865,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Campo `forceUpdateEffectiveFrom` su `app_config/version_control` + UI data/ora in **Versione app**.
 - Client applica minBuild solo dopo la data/ora (ricontrollo a resume + timer).
 - **Nota**: le app vecchie ignorano lo schedule e bloccano subito se minBuild e' settato; usare lo schedule solo dopo che gli utenti hanno build ≥71, oppure alzare minBuild in coppia con la programmazione.
+
+### Build `1.1.4+72` — ads gate senza sblocco gratis (01/08/2026)
+
+- Tolto il countdown "Continua" che sbloccava reminder/funzioni Free senza ads.
+- Se AdMob non consegna: **Riprova** / **Gestisci consenso** / **Annulla**; la funzione resta bloccata finche' non parte un interstitial reale.
+- `guardFeatureUse` e tap notification reminder rispettano il risultato del gate.
 
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 

@@ -231,7 +231,9 @@ void main() async {
   ReminderService.onNotificationTapped = (postId, postTitle, folderId) async {
     final context = navigatorKey.currentContext;
     if (context != null && context.mounted) {
-      await InterstitialAdService.instance.showReminderOpenGate(context);
+      final allowed =
+          await InterstitialAdService.instance.showReminderOpenGate(context);
+      if (!allowed) return;
     }
     await openReminderTargetInApp(postId: postId, folderId: folderId);
   };
@@ -239,7 +241,9 @@ void main() async {
   ReminderService.onFolderNotificationTapped = (folderId, folderName) async {
     final context = navigatorKey.currentContext;
     if (context != null && context.mounted) {
-      await InterstitialAdService.instance.showReminderOpenGate(context);
+      final allowed =
+          await InterstitialAdService.instance.showReminderOpenGate(context);
+      if (!allowed) return;
     }
     await openReminderTargetInApp(folderId: folderId);
   };
