@@ -1890,6 +1890,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 
 - Aggiunta lista `SKAdNetworkItems` ufficiale Google AdMob in `ios/Runner/Info.plist` (fill/attribution iOS).
 
+### Build `1.1.4+76` — Consent Mode Analytics (02/08/2026)
+
+- `FirebaseAnalytics.setConsent` default granted in `main.dart` (fuori UE); in UE UMP aggiorna i flag se Consent Mode e' ON in AdMob.
+- Firebase init resta **prima** di UMP/AdMob (requisito Google).
+- **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
+
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 
 - Abilitato Google Analytics su Firebase; collegato AdMob SaveIn! (e SmartChef su progetto proprio) a Firebase.
