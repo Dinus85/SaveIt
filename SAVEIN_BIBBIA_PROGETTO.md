@@ -1896,6 +1896,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.5+77` — nuovo train App Store (02/08/2026)
+
+- Marketing **1.1.5**, build **77**: evita upload su train `1.1.4` gia' "Pronta per la distribuzione" (build 70) / rischio 90186-90062.
+- Contiene SKAdNetwork, Consent Mode, ads gate, filtro Ads AdMob dashboard (lato app).
+- **Azione**: Codemagic → TestFlight **77**; in App Store Connect crea versione **1.1.5** e collega la build.
+
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 
 - Abilitato Google Analytics su Firebase; collegato AdMob SaveIn! (e SmartChef su progetto proprio) a Firebase.
