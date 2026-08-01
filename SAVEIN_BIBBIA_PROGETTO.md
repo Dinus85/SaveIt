@@ -1146,7 +1146,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.4+75`** — da pubblicare sui canali di test Play quando serve
+- Versione app corrente (repo): **`1.1.4+76`** — da pubblicare sui canali di test Play quando serve
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1885,6 +1885,10 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Dashboard utenti: colonna **Ads AdMob**, filtro (OK / NO / non scelto), card conteggi.
 - Marketing Apple/Google resta `acceptedMarketing=true` alla prima registrazione (indipendente da AdMob).
 - AdMob Privacy: partner comuni OK; CSV ATP non serve nel repo app.
+
+### Build `1.1.4+75` — SKAdNetworkItems in Info.plist (02/08/2026)
+
+- Aggiunta lista `SKAdNetworkItems` ufficiale Google AdMob in `ios/Runner/Info.plist` (fill/attribution iOS).
 
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 

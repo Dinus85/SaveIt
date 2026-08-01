@@ -217,6 +217,15 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // Consent Mode (Analytics/Ads): default "granted" per utenti fuori UE.
+  // In UE, con "Modalità di consenso" ON in AdMob, UMP aggiorna questi flag
+  // in base al form GDPR (prima di / insieme alle ads).
+  await FirebaseAnalytics.instance.setConsent(
+    analyticsStorageConsentGranted: true,
+    adStorageConsentGranted: true,
+    adUserDataConsentGranted: true,
+    adPersonalizationSignalsConsentGranted: true,
+  );
   await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(true);
   unawaited(FirebaseAnalytics.instance.logAppOpen());
   AppNotificationService.registerBackgroundHandler();
