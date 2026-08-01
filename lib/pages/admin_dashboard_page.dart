@@ -1458,36 +1458,29 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   }
 
   Widget _buildStatCardsRow({required List<Widget> cards}) {
-    const spacing = 12.0;
+    const spacing = 8.0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final minCardWidth = constraints.maxWidth < 760 ? 180.0 : 150.0;
-        final canFitSingleRow = constraints.maxWidth >=
-            cards.length * minCardWidth + (cards.length - 1) * spacing;
+        // Chip compatte: piu' colonne, meno altezza.
+        final width = constraints.maxWidth;
+        final columns = width >= 1100
+            ? 5
+            : width >= 820
+                ? 4
+                : width >= 560
+                    ? 3
+                    : 2;
+        final cardWidth =
+            (width - spacing * (columns - 1)).clamp(0.0, width) / columns;
 
-        if (!canFitSingleRow) {
-          final cardWidth = constraints.maxWidth >= 520
-              ? (constraints.maxWidth - spacing) / 2
-              : constraints.maxWidth;
-
-          return Wrap(
-            alignment: WrapAlignment.center,
-            spacing: spacing,
-            runSpacing: spacing,
-            children: cards
-                .map((card) => SizedBox(width: cardWidth, child: card))
-                .toList(),
-          );
-        }
-
-        return Row(
-          children: [
-            for (var i = 0; i < cards.length; i++) ...[
-              if (i > 0) const SizedBox(width: spacing),
-              Expanded(child: cards[i]),
-            ],
-          ],
+        return Wrap(
+          alignment: WrapAlignment.start,
+          spacing: spacing,
+          runSpacing: spacing,
+          children: cards
+              .map((card) => SizedBox(width: cardWidth, child: card))
+              .toList(),
         );
       },
     );
@@ -8558,31 +8551,35 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black, width: 1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Row(
         children: [
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.grey.shade700,
-              fontWeight: FontWeight.w600,
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                height: 1.2,
+              ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(width: 8),
           Text(
             value,
-            textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
               color: color,
+              height: 1,
             ),
           ),
         ],
