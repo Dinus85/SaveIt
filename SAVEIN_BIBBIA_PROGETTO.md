@@ -1146,7 +1146,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.4+72`** — da pubblicare sui canali di test Play quando serve
+- Versione app corrente (repo): **`1.1.4+74`** — da pubblicare sui canali di test Play quando serve
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1871,6 +1871,19 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Tolto il countdown "Continua" che sbloccava reminder/funzioni Free senza ads.
 - Se AdMob non consegna: **Riprova** / **Gestisci consenso** / **Annulla**; la funzione resta bloccata finche' non parte un interstitial reale.
 - `guardFeatureUse` e tap notification reminder rispettano il risultato del gate.
+
+### Build `1.1.4+73` — Attiva pubblicita' nel popup + NPA fallback (02/08/2026)
+
+- Popup gate: **Attiva pubblicita'** apre il form UMP in-app (senza Account); anche **Premium** / Riprova / Annulla.
+- Dopo no-fill: retry con `AdRequest(nonPersonalizedAds: true)` per massimizzare fill se il consenso consente NPA.
+- **Nota**: consenso marketing dashboard SaveIn! ≠ consenso ads AdMob/UMP (metriche diverse).
+
+### Build `1.1.4+74` — UMP differito + filtro Ads AdMob in dashboard (02/08/2026)
+
+- Form UMP **non** all'apertura a freddo: spiegazione + consenso al **primo bisogno** di ads (banner/gate).
+- Sync Firestore `users/{uid}.consents.admob` (`canRequestAds`, `status`, `lastModified`).
+- Dashboard utenti: colonna **Ads AdMob**, filtro (OK / NO / non scelto), card conteggi.
+- Marketing Apple/Google resta `acceptedMarketing=true` alla prima registrazione (indipendente da AdMob).
 
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 

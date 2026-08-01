@@ -52,7 +52,11 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
       return;
     }
 
-    final canRequest = await AdsConsentService.instance.canRequestAds();
+    if (!mounted) return;
+    // Spiega + form solo al primo bisogno (non all'avvio app).
+    final canRequest = await AdsConsentService.instance.ensureConsentForAds(
+      context,
+    );
     if (!canRequest) {
       debugPrint('BannerAd skip: UMP canRequestAds=false');
       return;
@@ -68,7 +72,8 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
     final banner = BannerAd(
       adUnitId: adUnitId,
       size: AdSize.banner,
-      request: const AdRequest(),
+      // UMP/TCF decide personalizzate vs NPA; non forzare sempre NPA.
+      request: AdsConsentService.instance.buildAdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
           if (!mounted) {

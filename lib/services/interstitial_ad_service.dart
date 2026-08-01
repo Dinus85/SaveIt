@@ -16,6 +16,9 @@ class InterstitialAdService {
   static final InterstitialAdService instance =
       InterstitialAdService._internal();
 
+  /// Registrato da `main.dart` per aprire Premium senza import circolari.
+  static void Function(BuildContext context)? openPremiumPurchase;
+
   /// Unità di produzione (usate in release/profile).
   static const String _androidInterstitialAdUnitId =
       'ca-app-pub-1397392558961350/5839880574';
@@ -65,8 +68,9 @@ class InterstitialAdService {
 
     _initializing = () async {
       try {
-        // Consenso UMP prima di MobileAds (obbligatorio in UE).
-        await AdsConsentService.instance.gatherConsent();
+        // All'avvio: solo refresh info UMP, senza form a freddo.
+        // Il form (con spiegazione) parte al primo bisogno di ads.
+        await AdsConsentService.instance.refreshConsentInfoOnly();
         await MobileAds.instance.initialize();
         // In debug forza ads non personalizzate: evita blocchi ATT/privacy in test.
         if (kDebugMode) {
@@ -162,12 +166,31 @@ class InterstitialAdService {
     if (!await _featureRequiresAd(feature)) return true;
     if (!context.mounted) return false;
 
+    // Spiega + form UMP solo al bisogno (non all'apertura app).
+    await AdsConsentService.instance.ensureConsentForAds(context);
+    if (!context.mounted) return false;
+
     while (context.mounted) {
-      var shown = await _showInterstitial();
+      var shown = await _showInterstitial(
+        context: context,
+        requestConsentIfNeeded: false,
+      );
       if (!shown) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
         if (!context.mounted) return false;
-        shown = await _showInterstitial();
+        shown = await _showInterstitial(
+          context: context,
+          requestConsentIfNeeded: false,
+        );
+      }
+      // Fallback fill: se consenso ok ma no inventory personalizzato, riprova NPA.
+      if (!shown &&
+          (lastFailureReason == 'no_fill' || lastFailureReason == 'timeout')) {
+        shown = await _showInterstitial(
+          context: context,
+          forceNonPersonalized: true,
+          requestConsentIfNeeded: false,
+        );
       }
       if (shown) return true;
       if (!context.mounted) return false;
@@ -185,10 +208,15 @@ class InterstitialAdService {
         case _AdGateAction.retry:
           continue;
         case _AdGateAction.consent:
-          await AdsConsentService.instance.showPrivacyOptionsForm();
-          // Nuova raccolta dopo modifica consenso.
-          await AdsConsentService.instance.gatherConsent();
+          // Form consenso direttamente qui (niente Account).
+          await AdsConsentService.instance.openAdsConsentUi();
           continue;
+        case _AdGateAction.premium:
+          final openPremium = openPremiumPurchase;
+          if (openPremium != null && context.mounted) {
+            openPremium(context);
+          }
+          return false;
         case _AdGateAction.cancel:
         case null:
           return false;
@@ -249,7 +277,11 @@ class InterstitialAdService {
     }
   }
 
-  Future<bool> _showInterstitial() async {
+  Future<bool> _showInterstitial({
+    BuildContext? context,
+    bool forceNonPersonalized = false,
+    bool requestConsentIfNeeded = true,
+  }) async {
     if (!_shouldUseAds || _isShowingAd) {
       lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
       return false;
@@ -269,6 +301,13 @@ class InterstitialAdService {
       return false;
     }
 
+    if (requestConsentIfNeeded) {
+      await AdsConsentService.instance.ensureConsentForAds(
+        context,
+        showExplainer: context != null,
+      );
+    }
+
     final canRequest = await AdsConsentService.instance.canRequestAds();
     if (!canRequest) {
       debugPrint('InterstitialAd skip: UMP canRequestAds=false');
@@ -278,14 +317,19 @@ class InterstitialAdService {
 
     final completer = Completer<bool>();
     _isShowingAd = true;
+    final request = AdsConsentService.instance.buildAdRequest(
+      forceNonPersonalized: forceNonPersonalized,
+    );
 
     if (kDebugMode) {
-      debugPrint('InterstitialAd loading unit=$adUnitId');
+      debugPrint(
+        'InterstitialAd loading unit=$adUnitId npa=$forceNonPersonalized',
+      );
     }
 
     InterstitialAd.load(
       adUnitId: adUnitId,
-      request: const AdRequest(),
+      request: request,
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
           lastFailureReason = null;
@@ -334,9 +378,9 @@ class InterstitialAdService {
   }
 }
 
-enum _AdGateAction { retry, consent, cancel }
+enum _AdGateAction { retry, consent, premium, cancel }
 
-/// Dialog quando AdMob non consegna: Riprova / consenso / Annulla (niente sblocco).
+/// Dialog quando AdMob non consegna: Attiva ads / Riprova / Premium / Annulla.
 class _AdRetryDialog extends StatelessWidget {
   const _AdRetryDialog({required this.reason});
 
@@ -345,23 +389,23 @@ class _AdRetryDialog extends StatelessWidget {
   String get _message {
     switch (reason) {
       case 'consent':
-        return 'Per usare questa funzione serve una pubblicità, ma il consenso '
-            'attuale non permette di richiederla.\n\n'
-            'Tocca “Gestisci consenso” e consenti le ads (anche non personalizzate), '
-            'poi Riprova. Oppure passa a Premium.';
+        return 'Questa funzione Free richiede una pubblicità.\n\n'
+            'Tocca “Attiva pubblicità” per aprire qui il consenso '
+            '(bastano anche le ads non personalizzate). '
+            'Oppure passa a Premium per usarla senza ads.';
       case 'no_fill':
       case 'timeout':
       case 'show_error':
-        return 'La pubblicità non è disponibile in questo momento '
-            '(AdMob non ha consegnato un annuncio).\n\n'
-            'Tocca Riprova. Se continua, riprova più tardi o passa a Premium.';
+        return 'La pubblicità non è disponibile in questo momento.\n\n'
+            'Tocca Riprova, oppure “Attiva pubblicità” per aggiornare il consenso. '
+            'In alternativa passa a Premium.';
       case 'init_error':
         return 'Non è stato possibile avviare il sistema pubblicitario.\n\n'
             'Controlla la connessione e tocca Riprova.';
       default:
-        return 'La pubblicità non è disponibile.\n\n'
-            'Tocca Riprova, oppure Gestisci consenso. Senza annuncio '
-            'la funzione Free resta bloccata.';
+        return 'Questa funzione Free richiede una pubblicità.\n\n'
+            'Tocca “Attiva pubblicità” o Riprova. Senza annuncio '
+            'la funzione resta bloccata (oppure passa a Premium).';
     }
   }
 
@@ -369,15 +413,20 @@ class _AdRetryDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Pubblicità richiesta'),
-      content: Text(_message),
+      content: SingleChildScrollView(child: Text(_message)),
+      actionsAlignment: MainAxisAlignment.end,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(_AdGateAction.cancel),
           child: const Text('Annulla'),
         ),
         TextButton(
+          onPressed: () => Navigator.of(context).pop(_AdGateAction.premium),
+          child: const Text('Premium'),
+        ),
+        TextButton(
           onPressed: () => Navigator.of(context).pop(_AdGateAction.consent),
-          child: const Text('Gestisci consenso'),
+          child: const Text('Attiva pubblicità'),
         ),
         ElevatedButton(
           onPressed: () => Navigator.of(context).pop(_AdGateAction.retry),

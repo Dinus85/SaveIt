@@ -228,6 +228,10 @@ void main() async {
 
   await AuthService().initialize();
 
+  InterstitialAdService.openPremiumPurchase = (context) {
+    AccountPage.showPremiumPurchaseDialog(context);
+  };
+
   ReminderService.onNotificationTapped = (postId, postTitle, folderId) async {
     final context = navigatorKey.currentContext;
     if (context != null && context.mounted) {

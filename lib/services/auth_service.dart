@@ -1888,6 +1888,37 @@ class AuthService extends ChangeNotifier {
     return consent;
   }
 
+  /// Sincronizza consenso ads AdMob/UMP su Firestore (filtro dashboard).
+  Future<void> syncAdmobConsentToFirestore({
+    required bool canRequestAds,
+    required String status,
+  }) async {
+    final uid = _firebaseAuth.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      final now = FieldValue.serverTimestamp();
+      await _firestore.collection('users').doc(uid).set({
+        'consents': {
+          'admob': {
+            'canRequestAds': canRequestAds,
+            'status': status,
+            'lastModified': now,
+            'modifiedBy': 'user',
+            'version': '1.0',
+          },
+        },
+      }, SetOptions(merge: true));
+      if (kDebugMode) {
+        print(
+          'DEBUG: Consenso AdMob sync canRequestAds=$canRequestAds status=$status',
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) print('ERRORE sync consenso AdMob: $e');
+    }
+  }
+
   // ========================================
   // ✅ METODI PRIVATI FIRESTORE
   // ========================================

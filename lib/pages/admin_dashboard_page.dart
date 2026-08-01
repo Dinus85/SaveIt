@@ -53,6 +53,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   String _searchQuery = '';
   AppUserRole? _roleFilter;
   bool? _marketingFilter;
+  /// null=tutti, 'ok'=canRequestAds, 'no'=bloccato, 'unknown'=mai sincronizzato
+  String? _admobConsentFilter;
   bool _birthdayThisWeekFilter = false;
   _AdminStatsPeriod _statsPeriod = _AdminStatsPeriod.all;
   _AdminDashboardSection _activeSection = _AdminDashboardSection.users;
@@ -357,6 +359,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     final matchesMarketing =
         _marketingFilter == null || user.acceptedMarketing == _marketingFilter;
     if (!matchesMarketing) return false;
+
+    // Filtro consenso ads AdMob (UMP) — diverso dal marketing.
+    if (_admobConsentFilter != null) {
+      final key = user.admobConsentFilterKey;
+      if (key != _admobConsentFilter) return false;
+    }
 
     // ✅ NUOVO: Filtro compleanni della settimana
     if (_birthdayThisWeekFilter) {
@@ -1765,6 +1773,19 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                           .length;
                                       final marketingRejectedUsers =
                                           totalUsers - marketingAcceptedUsers;
+                                      final admobOkUsers = users
+                                          .where((u) =>
+                                              u.admobConsentFilterKey == 'ok')
+                                          .length;
+                                      final admobNoUsers = users
+                                          .where((u) =>
+                                              u.admobConsentFilterKey == 'no')
+                                          .length;
+                                      final admobUnknownUsers = users
+                                          .where((u) =>
+                                              u.admobConsentFilterKey ==
+                                              'unknown')
+                                          .length;
 
                                       if (_activeSection ==
                                           _AdminDashboardSection.userDetail) {
@@ -1836,6 +1857,24 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                                           '$marketingRejectedUsers',
                                                       color: Colors
                                                           .orange.shade800,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Ads AdMob OK',
+                                                      value: '$admobOkUsers',
+                                                      color:
+                                                          Colors.teal.shade700,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Ads AdMob NO',
+                                                      value: '$admobNoUsers',
+                                                      color: Colors.red.shade400,
+                                                    ),
+                                                    _StatCard(
+                                                      label: 'Ads AdMob ?',
+                                                      value:
+                                                          '$admobUnknownUsers',
+                                                      color: Colors
+                                                          .blueGrey.shade600,
                                                     ),
                                                   ],
                                                 ),
@@ -1935,8 +1974,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               width: double.infinity,
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final tableWidth = constraints.maxWidth < 1180
-                      ? 1180.0
+                  final tableWidth = constraints.maxWidth < 1280
+                      ? 1280.0
                       : constraints.maxWidth;
 
                   return SingleChildScrollView(
@@ -1957,6 +1996,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           DataColumn(label: Text('Nome')),
                           DataColumn(label: Text('Email')),
                           DataColumn(label: Text('Marketing')),
+                          DataColumn(label: Text('Ads AdMob')),
                           DataColumn(label: Text('Ruolo')),
                           DataColumn(label: Text('Piano Premium')),
                           DataColumn(label: Text('Stato')),
@@ -2096,6 +2136,33 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                       color: user.acceptedMarketing
                                           ? Colors.green.shade700
                                           : Colors.red.shade700,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: user.admobConsentFilterKey == 'ok'
+                                        ? Colors.green.withValues(alpha: 0.1)
+                                        : user.admobConsentFilterKey == 'no'
+                                            ? Colors.red.withValues(alpha: 0.1)
+                                            : Colors.orange
+                                                .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    user.admobConsentLabel,
+                                    style: TextStyle(
+                                      color: user.admobConsentFilterKey == 'ok'
+                                          ? Colors.green.shade700
+                                          : user.admobConsentFilterKey == 'no'
+                                              ? Colors.red.shade700
+                                              : Colors.orange.shade800,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
                                     ),
@@ -2737,6 +2804,37 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               });
             },
           );
+          final admobFilter = DropdownButtonFormField<String?>(
+            initialValue: _admobConsentFilter,
+            decoration: const InputDecoration(
+              labelText: 'Filtro Ads AdMob',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Tutti (Ads AdMob)'),
+              ),
+              DropdownMenuItem<String?>(
+                value: 'ok',
+                child: Text('Ads consentite (OK)'),
+              ),
+              DropdownMenuItem<String?>(
+                value: 'no',
+                child: Text('Ads bloccate (NO)'),
+              ),
+              DropdownMenuItem<String?>(
+                value: 'unknown',
+                child: Text('Ads non ancora scelto'),
+              ),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _admobConsentFilter = value;
+                _usersPage = 0;
+              });
+            },
+          );
           final adminBadge = Container(
             width: compact ? double.infinity : null,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -2788,6 +2886,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 const SizedBox(height: 12),
                 marketingFilter,
                 const SizedBox(height: 12),
+                admobFilter,
+                const SizedBox(height: 12),
                 birthdayFilter,
                 const SizedBox(height: 12),
                 adminBadge,
@@ -2795,18 +2895,29 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             );
           }
 
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(flex: 3, child: search),
-              const SizedBox(width: 12),
-              Expanded(flex: 2, child: roleFilter),
-              const SizedBox(width: 12),
-              Expanded(flex: 2, child: marketingFilter),
-              const SizedBox(width: 12),
-              birthdayFilter,
-              const SizedBox(width: 12),
-              Expanded(flex: 2, child: adminBadge),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 3, child: search),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 2, child: roleFilter),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 2, child: marketingFilter),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 2, child: admobFilter),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  birthdayFilter,
+                  const SizedBox(width: 12),
+                  Expanded(child: adminBadge),
+                ],
+              ),
             ],
           );
         },
@@ -7094,6 +7205,27 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   label: 'Data conferma/disdetta',
                   value: _formatDate(user.marketingConsentDate),
                 ),
+                _InfoRow(
+                  label: 'Consenso ads AdMob',
+                  value: user.admobConsentFilterKey == 'ok'
+                      ? 'CONSENTITO (canRequestAds)'
+                      : user.admobConsentFilterKey == 'no'
+                          ? 'BLOCCATO'
+                          : 'NON ANCORA SINCRONIZZATO',
+                  valueColor: user.admobConsentFilterKey == 'ok'
+                      ? Colors.green
+                      : user.admobConsentFilterKey == 'no'
+                          ? Colors.red
+                          : Colors.orange,
+                ),
+                _InfoRow(
+                  label: 'Stato UMP',
+                  value: (user.admobConsentStatus ?? '-').toString(),
+                ),
+                _InfoRow(
+                  label: 'Ultimo sync ads',
+                  value: _formatDate(user.admobConsentDate),
+                ),
                 const SizedBox(height: 16),
                 _buildUserStatsSection(user),
               ],
@@ -10323,6 +10455,10 @@ class _AdminUserRecord {
   final String? gender;
   final bool acceptedMarketing;
   final DateTime? marketingConsentDate;
+  /// null = mai sincronizzato dall'app; true/false = canRequestAds UMP.
+  final bool? admobCanRequestAds;
+  final String? admobConsentStatus;
+  final DateTime? admobConsentDate;
 
   const _AdminUserRecord({
     required this.id,
@@ -10341,7 +10477,27 @@ class _AdminUserRecord {
     this.gender,
     required this.acceptedMarketing,
     this.marketingConsentDate,
+    this.admobCanRequestAds,
+    this.admobConsentStatus,
+    this.admobConsentDate,
   });
+
+  /// Chiave filtro dashboard: ok | no | unknown
+  String get admobConsentFilterKey {
+    if (admobCanRequestAds == null) return 'unknown';
+    return admobCanRequestAds! ? 'ok' : 'no';
+  }
+
+  String get admobConsentLabel {
+    switch (admobConsentFilterKey) {
+      case 'ok':
+        return 'OK';
+      case 'no':
+        return 'NO';
+      default:
+        return '?';
+    }
+  }
 
   factory _AdminUserRecord.fromDoc(
       QueryDocumentSnapshot<Map<String, dynamic>> doc) {
@@ -10363,6 +10519,11 @@ class _AdminUserRecord {
 
     final consents = data['consents'] as Map<String, dynamic>?;
     final marketing = consents?['marketing'] as Map<String, dynamic>?;
+    final admob = consents?['admob'] as Map<String, dynamic>?;
+    bool? admobCanRequest;
+    if (admob != null && admob.containsKey('canRequestAds')) {
+      admobCanRequest = admob['canRequestAds'] == true;
+    }
 
     return _AdminUserRecord(
       id: doc.id,
@@ -10385,6 +10546,9 @@ class _AdminUserRecord {
       acceptedMarketing: marketing?['accepted'] ?? false,
       marketingConsentDate: parseDate(marketing?['lastModified']) ??
           parseDate(marketing?['consentDate']),
+      admobCanRequestAds: admobCanRequest,
+      admobConsentStatus: (admob?['status'] as String?)?.trim(),
+      admobConsentDate: parseDate(admob?['lastModified']),
     );
   }
 
@@ -10428,6 +10592,7 @@ class _AdminUserRecord {
       lastLogin: null,
       premiumUntil: null,
       acceptedMarketing: false,
+      admobCanRequestAds: null,
     );
   }
 }
