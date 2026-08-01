@@ -1878,12 +1878,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Dopo no-fill: retry con `AdRequest(nonPersonalizedAds: true)` per massimizzare fill se il consenso consente NPA.
 - **Nota**: consenso marketing dashboard SaveIn! ≠ consenso ads AdMob/UMP (metriche diverse).
 
-### Build `1.1.4+74` — UMP differito + filtro Ads AdMob in dashboard (02/08/2026)
+### Build `1.1.4+74` — filtro Ads AdMob in dashboard + sync UMP (02/08/2026)
 
-- Form UMP **non** all'apertura a freddo: spiegazione + consenso al **primo bisogno** di ads (banner/gate).
+- Form UMP di nuovo **all'avvio** se richiesto (ritardo consenso annullato: ads subito dopo scelta).
 - Sync Firestore `users/{uid}.consents.admob` (`canRequestAds`, `status`, `lastModified`).
 - Dashboard utenti: colonna **Ads AdMob**, filtro (OK / NO / non scelto), card conteggi.
 - Marketing Apple/Google resta `acceptedMarketing=true` alla prima registrazione (indipendente da AdMob).
+- AdMob Privacy: partner comuni OK; CSV ATP non serve nel repo app.
 
 ### AdMob ↔ Firebase + Analytics + Google Ads (29/07/2026)
 

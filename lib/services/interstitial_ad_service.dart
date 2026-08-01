@@ -68,9 +68,8 @@ class InterstitialAdService {
 
     _initializing = () async {
       try {
-        // All'avvio: solo refresh info UMP, senza form a freddo.
-        // Il form (con spiegazione) parte al primo bisogno di ads.
-        await AdsConsentService.instance.refreshConsentInfoOnly();
+        // Consenso UMP all'avvio (form se richiesto), poi MobileAds.
+        await AdsConsentService.instance.gatherConsent();
         await MobileAds.instance.initialize();
         // In debug forza ads non personalizzate: evita blocchi ATT/privacy in test.
         if (kDebugMode) {
@@ -164,10 +163,6 @@ class InterstitialAdService {
   /// sblocco automatico**.
   Future<bool> showFeatureAdGate(BuildContext context, String feature) async {
     if (!await _featureRequiresAd(feature)) return true;
-    if (!context.mounted) return false;
-
-    // Spiega + form UMP solo al bisogno (non all'apertura app).
-    await AdsConsentService.instance.ensureConsentForAds(context);
     if (!context.mounted) return false;
 
     while (context.mounted) {
@@ -302,10 +297,8 @@ class InterstitialAdService {
     }
 
     if (requestConsentIfNeeded) {
-      await AdsConsentService.instance.ensureConsentForAds(
-        context,
-        showExplainer: context != null,
-      );
+      // Di solito gia' raccolto in initialize(); qui solo se ancora richiesto.
+      await AdsConsentService.instance.gatherConsent();
     }
 
     final canRequest = await AdsConsentService.instance.canRequestAds();

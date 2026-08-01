@@ -52,11 +52,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
       return;
     }
 
-    if (!mounted) return;
-    // Spiega + form solo al primo bisogno (non all'avvio app).
-    final canRequest = await AdsConsentService.instance.ensureConsentForAds(
-      context,
-    );
+    final canRequest = await AdsConsentService.instance.canRequestAds();
     if (!canRequest) {
       debugPrint('BannerAd skip: UMP canRequestAds=false');
       return;
