@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:savein/models/folder.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import '../services/folder_service.dart'; // Import per MockPost
+import '../data_service.dart'; // Import per contatti
 import 'folder_management.dart';
 
 // Helper class per i dialoghi dell'app
@@ -321,6 +322,8 @@ class DialogHelpers {
     final TextEditingController controller = TextEditingController();
     bool isLoading = false;
     String? error;
+    List<String>? contacts;
+    bool showContacts = false;
 
     showDialog(
       context: context,
@@ -443,26 +446,96 @@ class DialogHelpers {
                 ),
                 SizedBox(height: 16),
               ],
-              TextField(
-                controller: controller,
-                style: TextStyle(color: textColor),
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  hintText: 'Email del destinatario',
-                  hintStyle: TextStyle(color: hintColor),
-                  filled: true,
-                  fillColor: fieldColor,
-                  errorText: error,
-                  prefixIcon: Icon(Icons.email_outlined, color: hintColor),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      style: TextStyle(color: textColor),
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: InputDecoration(
+                        hintText: 'Email del destinatario',
+                        hintStyle: TextStyle(color: hintColor),
+                        filled: true,
+                        fillColor: fieldColor,
+                        errorText: error,
+                        prefixIcon: Icon(Icons.email_outlined, color: hintColor),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      autofocus: systemShareContent == null &&
+                          systemShareContentBuilder == null,
+                    ),
                   ),
-                ),
-                autofocus: systemShareContent == null &&
-                    systemShareContentBuilder == null,
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(
+                      showContacts ? Icons.close : Icons.contact_mail_outlined,
+                      color: Colors.blue,
+                    ),
+                    onPressed: () async {
+                      if (!showContacts && contacts == null) {
+                        setDialogState(() => isLoading = true);
+                        final fetched =
+                            await DataService.instance.getSharedContacts();
+                        setDialogState(() {
+                          contacts = fetched;
+                          isLoading = false;
+                          showContacts = true;
+                        });
+                      } else {
+                        setDialogState(() => showContacts = !showContacts);
+                      }
+                    },
+                    tooltip: 'Scegli dai contatti',
+                  ),
+                ],
               ),
-              if (isLoading)
+              if (showContacts && contacts != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  decoration: BoxDecoration(
+                    color: fieldColor,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: contacts!.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Text(
+                            'Nessun contatto salvato',
+                            style: TextStyle(color: hintColor, fontSize: 13),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: contacts!.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            color: hintColor.withOpacity(0.2),
+                          ),
+                          itemBuilder: (context, index) {
+                            final email = contacts![index];
+                            return ListTile(
+                              visualDensity: VisualDensity.compact,
+                              title: Text(
+                                email,
+                                style:
+                                    TextStyle(color: textColor, fontSize: 14),
+                              ),
+                              onTap: () {
+                                controller.text = email;
+                                setDialogState(() => showContacts = false);
+                              },
+                            );
+                          },
+                        ),
+                ),
+              ],
+              if (isLoading && !showContacts)
                 Padding(
                   padding: const EdgeInsets.only(top: 16.0),
                   child: Center(child: CircularProgressIndicator()),

@@ -238,6 +238,46 @@ class FirebaseDataService {
           .doc(_currentUserId)
           .collection('shared_items');
 
+  /// Reference alla collezione contacts dell'utente corrente
+  CollectionReference<Map<String, dynamic>> get _contactsCollection =>
+      _firestore.collection('users').doc(_currentUserId).collection('contacts');
+
+  // ============================================================================
+  // OPERAZIONI CONTACTS (PER CONDIVISIONE)
+  // ============================================================================
+
+  /// Salva un'email nei contatti dell'utente
+  Future<void> saveContact(String email) async {
+    try {
+      final normalizedEmail = email.trim().toLowerCase();
+      if (normalizedEmail.isEmpty) return;
+
+      await _contactsCollection.doc(normalizedEmail).set({
+        'email': normalizedEmail,
+        'lastSharedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (kDebugMode) print('DEBUG: Contatto $normalizedEmail salvato');
+    } catch (e) {
+      if (kDebugMode) print('ERRORE saveContact: $e');
+    }
+  }
+
+  /// Ottiene la lista dei contatti salvati ordinati per data decrescente
+  Future<List<String>> getContacts() async {
+    try {
+      final snapshot = await _contactsCollection
+          .orderBy('lastSharedAt', descending: true)
+          .limit(50)
+          .get();
+
+      return snapshot.docs.map((doc) => doc.id).toList();
+    } catch (e) {
+      if (kDebugMode) print('ERRORE getContacts: $e');
+      return [];
+    }
+  }
+
   // ============================================================================
   // TEST CONNETTIVITÀ SEMPLIFICATO - RISOLVE IL PROBLEMA PERMISSION-DENIED
   // ============================================================================

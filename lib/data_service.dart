@@ -1787,6 +1787,9 @@ class DataService {
           'isShared': postToShare.isShared,
         },
       );
+      // 🔥 Salva il contatto dopo la condivisione riuscita
+      await saveSharedContact(recipientEmail);
+
       await PlanLimitsService.recordFeatureSuccess('share_post');
     });
   }
@@ -1816,6 +1819,9 @@ class DataService {
           'parentId': folder.parentId,
         },
       );
+      // 🔥 Salva il contatto dopo la condivisione riuscita
+      await saveSharedContact(recipientEmail);
+
       await PlanLimitsService.recordFeatureSuccess('share_folder');
     });
   }
@@ -1823,6 +1829,25 @@ class DataService {
   /// Ottiene gli elementi condivisi con l'utente corrente
   Future<List<Map<String, dynamic>>> getSharedItems() async {
     return await _firebaseService.getSharedItems();
+  }
+
+  /// Ottiene la lista delle email con cui l'utente ha già condiviso
+  Future<List<String>> getSharedContacts() async {
+    try {
+      return await _firebaseService.getContacts();
+    } catch (e) {
+      if (kDebugMode) print('DEBUG: Errore getSharedContacts: $e');
+      return [];
+    }
+  }
+
+  /// Salva un contatto email
+  Future<void> saveSharedContact(String email) async {
+    try {
+      await _firebaseService.saveContact(email);
+    } catch (e) {
+      if (kDebugMode) print('DEBUG: Errore saveSharedContact: $e');
+    }
   }
 
   /// Anteprima live di una condivisione utente-utente prima dell'import.

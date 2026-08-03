@@ -1896,6 +1896,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.5+78` — Contatti salvati per condivisione (03/08/2026)
+
+- **Feature contatti**: quando l'utente condivide un post o una cartella tramite email, l'indirizzo email viene salvato automaticamente nei "Contatti".
+- **UI Condivisione**: aggiunto pulsante (icona rubrica) nel popup di condivisione per visualizzare e selezionare velocemente le email usate in passato.
+- **DataService**: nuovi metodi `getSharedContacts()` e `saveSharedContact(email)`.
+- **Firebase**: collezione `users/{uid}/contacts/{email}` con campo `lastSharedAt` per ordinamento (mostra gli ultimi 50 contatti).
+
 ### Build `1.1.5+77` — nuovo train App Store (02/08/2026)
 
 - Marketing **1.1.5**, build **77**: evita upload su train `1.1.4` gia' "Pronta per la distribuzione" (build 70) / rischio 90186-90062.
