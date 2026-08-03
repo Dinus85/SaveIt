@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth_service.dart';
 
@@ -15,11 +16,16 @@ class AdsConsentService {
   static final AdsConsentService instance = AdsConsentService._();
 
   bool _gathering = false;
+  bool _hasReset = false; // 🆕 Per evitare reset multipli nella stessa sessione
   Completer<bool>? _inFlight;
 
   /// Aggiorna info e mostra il form solo se ancora richiesto da UMP.
   Future<bool> gatherConsent({bool forceEeaDebug = false}) async {
     if (kIsWeb) return false;
+
+    // 🔥 NUOVO: Forza reset consenso se necessario per nuova versione build
+    await resetConsentIfNeeded();
+
     if (_inFlight != null) return _inFlight!.future;
 
     _inFlight = Completer<bool>();
@@ -195,6 +201,27 @@ class AdsConsentService {
       return const AdRequest(nonPersonalizedAds: true);
     }
     return const AdRequest();
+  }
+
+  /// 🆕 Forza il reset del consenso UMP se è la prima volta che si avvia questa build.
+  /// Serve per rinfrescare i consensi dopo cambiamenti alle policy AdMob.
+  Future<void> resetConsentIfNeeded() async {
+    if (kIsWeb || _hasReset) return;
+
+    try {
+      const int currentConsentVersion = 2; // 🆕 Incrementare per forzare un nuovo reset
+      final prefs = await SharedPreferences.getInstance();
+      final lastResetVersion = prefs.getInt('last_consent_reset_version') ?? 0;
+
+      if (lastResetVersion < currentConsentVersion) {
+        debugPrint('UMP: Resetting consent state (v$lastResetVersion -> v$currentConsentVersion)');
+        await ConsentInformation.instance.reset();
+        await prefs.setInt('last_consent_reset_version', currentConsentVersion);
+        _hasReset = true;
+      }
+    } catch (e) {
+      debugPrint('UMP resetConsentIfNeeded error: $e');
+    }
   }
 
   /// Scrive `consents.admob` su Firestore per la dashboard admin.

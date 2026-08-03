@@ -1896,6 +1896,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.5+80` — Reset Consenso Pubblicità (03/08/2026)
+
+- **Reset UMP Consent**: implementata la logica per forzare il reset del consenso AdMob/UMP per tutti gli utenti al primo avvio di questa build.
+- **Motivazione**: assicura che anche chi aveva negato il consenso in passato visualizzi di nuovo il form per poter aggiornare le proprie preferenze secondo le nuove policy.
+- **Dettagli**: aggiunto metodo `resetConsentIfNeeded()` in `AdsConsentService` con tracking della versione del reset tramite `SharedPreferences`.
+
 ### Build `1.1.5+79` — Vista Pinterest per i Post (03/08/2026)
 
 - **Vista Pinterest**: aggiunta la possibilità per l'utente di scegliere tra la classica vista a elenco e una vista a griglia (Pinterest-style) per i post all'interno delle cartelle.
