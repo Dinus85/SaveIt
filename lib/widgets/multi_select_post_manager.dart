@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:savein/models/folder.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/sharing_service.dart';
@@ -98,6 +99,7 @@ class MultiSelectPostManager extends StatefulWidget {
   /// conflitti con scroll/RefreshIndicator del parent.
   final bool scrollable;
   final bool asSliver;
+  final SliverSimpleGridDelegate? gridDelegate; // 🆕 NUOVO: Per vista Pinterest
 
   const MultiSelectPostManager({
     Key? key,
@@ -108,6 +110,7 @@ class MultiSelectPostManager extends StatefulWidget {
     required this.childBuilder,
     this.scrollable = true,
     this.asSliver = false,
+    this.gridDelegate, // 🆕 NUOVO
   }) : super(key: key);
 
   @override
@@ -139,16 +142,14 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
   @override
   Widget build(BuildContext context) {
     if (widget.asSliver) {
-      return SliverMainAxisGroup(
-        slivers: [
-          if (_selectionState.isSelectionMode)
-            SliverToBoxAdapter(child: _buildSelectionActionBar()),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
+      final sliver = widget.gridDelegate != null
+          ? SliverMasonryGrid.count(
+              crossAxisCount: (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount).crossAxisCount,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              itemBuilder: (context, index) {
                 final post = widget.posts[index];
                 final isSelected = _selectionState.isSelected(post.id);
-
                 return widget.childBuilder(
                   post,
                   isSelected,
@@ -157,35 +158,75 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
                 );
               },
               childCount: widget.posts.length,
-            ),
-          ),
+            )
+          : SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final post = widget.posts[index];
+                  final isSelected = _selectionState.isSelected(post.id);
+
+                  return widget.childBuilder(
+                    post,
+                    isSelected,
+                    () => _handlePostTap(post),
+                    () => _handlePostLongPress(post),
+                  );
+                },
+                childCount: widget.posts.length,
+              ),
+            );
+
+      return SliverMainAxisGroup(
+        slivers: [
+          if (_selectionState.isSelectionMode)
+            SliverToBoxAdapter(child: _buildSelectionActionBar()),
+          sliver,
         ],
       );
     }
 
-    final list = ListView.builder(
-      itemCount: widget.posts.length,
-      shrinkWrap: !widget.scrollable,
-      physics: widget.scrollable ? null : const NeverScrollableScrollPhysics(),
-      itemBuilder: (context, index) {
-        final post = widget.posts[index];
-        final isSelected = _selectionState.isSelected(post.id);
+    final list = widget.gridDelegate != null
+        ? MasonryGridView.count(
+            crossAxisCount: (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount).crossAxisCount,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            itemCount: widget.posts.length,
+            shrinkWrap: !widget.scrollable,
+            physics: widget.scrollable ? null : const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, index) {
+              final post = widget.posts[index];
+              final isSelected = _selectionState.isSelected(post.id);
+              return widget.childBuilder(
+                post,
+                isSelected,
+                () => _handlePostTap(post),
+                () => _handlePostLongPress(post),
+              );
+            },
+          )
+        : ListView.builder(
+            itemCount: widget.posts.length,
+            shrinkWrap: !widget.scrollable,
+            physics:
+                widget.scrollable ? null : const NeverScrollableScrollPhysics(),
+            itemBuilder: (context, index) {
+              final post = widget.posts[index];
+              final isSelected = _selectionState.isSelected(post.id);
 
-        return widget.childBuilder(
-          post,
-          isSelected,
-          () => _handlePostTap(post),
-          () => _handlePostLongPress(post),
-        );
-      },
-    );
+              return widget.childBuilder(
+                post,
+                isSelected,
+                () => _handlePostTap(post),
+                () => _handlePostLongPress(post),
+              );
+            },
+          );
 
     return Column(
       children: [
         // Barra delle azioni quando in modalità selezione
-        if (_selectionState.isSelectionMode)
-          _buildSelectionActionBar(),
-        
+        if (_selectionState.isSelectionMode) _buildSelectionActionBar(),
+
         // Lista dei post
         if (widget.scrollable) Expanded(child: list) else list,
       ],
@@ -624,6 +665,7 @@ class SelectablePostTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   final Widget child;
+  final EdgeInsets? margin; // 🆕 NUOVO
 
   const SelectablePostTile({
     Key? key,
@@ -633,6 +675,7 @@ class SelectablePostTile extends StatelessWidget {
     required this.onTap,
     required this.onLongPress,
     required this.child,
+    this.margin, // 🆕 NUOVO
   }) : super(key: key);
 
   @override
@@ -641,7 +684,7 @@ class SelectablePostTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Container(
-        margin: EdgeInsets.only(bottom: 12),
+        margin: margin ?? EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(

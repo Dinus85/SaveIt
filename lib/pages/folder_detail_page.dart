@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Per HapticFeedback
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:savein/models/folder.dart';
 import 'package:savein/widgets/folder_card.dart';
 import 'package:savein/widgets/post_preview_image.dart';
@@ -63,6 +65,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   List<MockPost> _posts = [];
   List<SearchResult> _searchResults = [];
   bool _isSearching = false;
+  bool _isPinterestView = false; // 🆕 NUOVO: Vista Pinterest
 
   Timer? _searchDebounceTimer;
   String _lastTrackedQuery = '';
@@ -104,6 +107,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     print(
         'DEBUG: FolderDetailPage inizializzato per cartella: ${_currentFolder.name}');
 
+    _loadViewPreference(); // 🆕 Carica preferenza vista
     _searchController.addListener(_onSearchChanged);
     _contentScrollController.addListener(_onContentScroll);
 
@@ -157,6 +161,26 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         _loadPosts();
       });
     }
+  }
+
+  // 🆕 Carica preferenza vista Pinterest
+  Future<void> _loadViewPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _isPinterestView = prefs.getBool('isPinterestView') ?? false;
+      });
+    }
+  }
+
+  // 🆕 Salva preferenza vista Pinterest
+  Future<void> _toggleViewMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _isPinterestView = !_isPinterestView;
+      prefs.setBool('isPinterestView', _isPinterestView);
+    });
+    HapticFeedback.mediumImpact();
   }
 
   // ✅ NUOVO: Metodo per trovare e aggiornare il folder corrente
@@ -786,12 +810,23 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                         ],
                       ),
               ),
-              if (AuthService().currentUser != null && !_isSearching)
-                LogoutButton(
-                  onLogoutComplete: () {},
-                  isDarkTheme: widget.isDarkTheme,
-                  onThemeChanged: widget.onThemeChanged,
+              if (!_isSearching) ...[
+                IconButton(
+                  icon: Icon(
+                    _isPinterestView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                    color: themeColors.iconColor,
+                    size: 24,
+                  ),
+                  onPressed: _toggleViewMode,
+                  tooltip: _isPinterestView ? 'Vista elenco' : 'Vista Pinterest',
                 ),
+                if (AuthService().currentUser != null)
+                  LogoutButton(
+                    onLogoutComplete: () {},
+                    isDarkTheme: widget.isDarkTheme,
+                    onThemeChanged: widget.onThemeChanged,
+                  ),
+              ],
             ],
           ),
           SizedBox(height: 16),
@@ -1095,6 +1130,11 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                 isDarkTheme: widget.isDarkTheme,
                 folderService: _folderService,
                 onPostsUpdated: () => _loadPosts(),
+                gridDelegate: _isPinterestView
+                    ? const SliverSimpleGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                      )
+                    : null,
                 childBuilder: (post, isSelected, onTap, onLongPress) {
                   return SelectablePostTile(
                     post: post,
@@ -1102,7 +1142,10 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                     isDarkTheme: widget.isDarkTheme,
                     onTap: onTap,
                     onLongPress: onLongPress,
-                    child: _buildPostCard(post, themeColors),
+                    margin: _isPinterestView ? EdgeInsets.zero : null,
+                    child: _isPinterestView
+                        ? _buildPinterestPostCard(post, themeColors)
+                        : _buildPostCard(post, themeColors),
                   );
                 },
               ),
@@ -1177,7 +1220,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
           : baseDecoration;
       return Container(
         key: highlightPost ? _highlightedPostKey : null,
-        margin: EdgeInsets.only(bottom: 12),
+        margin: EdgeInsets.zero, // 🔥 Gestito da SelectablePostTile
         decoration: decoration,
         child: Padding(
           padding: EdgeInsets.all(16),
@@ -1443,6 +1486,192 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       );
     }
     return buildCard();
+  }
+
+  // 🆕 NUOVO: Card post in stile Pinterest
+  Widget _buildPinterestPostCard(MockPost post, ThemeColors themeColors) {
+    final highlightPost = _showReminderHighlight &&
+        widget.highlightPostId != null &&
+        widget.highlightPostId == post.id;
+
+    Widget buildCard({double? pulseValue}) {
+      final pulse = pulseValue ?? 0.0;
+      final BoxDecoration baseDecoration =
+          ThemeHelpers.getCardDecoration(widget.isDarkTheme);
+      final BoxDecoration decoration = highlightPost
+          ? baseDecoration.copyWith(
+              color: Colors.orange.withOpacity(0.18 + pulse * 0.22),
+              border: Border.all(
+                color: Colors.orange.withOpacity(0.7 + pulse * 0.3),
+                width: 2.5 + pulse * 1.5,
+              ),
+            )
+          : baseDecoration;
+
+      return Container(
+        key: highlightPost ? _highlightedPostKey : null,
+        decoration: decoration,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Immagine (Pinterest style: occupa tutta la larghezza)
+            Stack(
+              children: [
+                AspectRatio(
+                  aspectRatio: 1.0, // Rapporto fisso per ora, o dinamico se possibile
+                  child: _buildPostImage(post, themeColors, isPinterest: true),
+                ),
+                // Bottoni sopra l'immagine in alto a destra
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Row(
+                    children: [
+                      _buildPinterestSmallAction(
+                        icon: Icons.share,
+                        onTap: () => _sharePost(post),
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 4),
+                      _buildPinterestSmallAction(
+                        icon: Icons.more_vert,
+                        onTap: () => _showPostActionsMenu(post, themeColors),
+                        color: Colors.grey.shade700,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    post.title.isNotEmpty ? post.title : post.description,
+                    style: TextStyle(
+                      color: themeColors.textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (post.description.isNotEmpty && post.description != post.title) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      post.description,
+                      style: TextStyle(
+                        color: themeColors.subtitleColor,
+                        fontSize: 12,
+                        height: 1.2,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.language, color: themeColors.hintColor, size: 10),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          _extractDomain(post.url),
+                          style: TextStyle(
+                              color: themeColors.hintColor, fontSize: 11),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.folder_outlined, color: themeColors.hintColor, size: 10),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          _buildPostBreadcrumb(post.sourceFolder),
+                          style: TextStyle(
+                              color: themeColors.hintColor, fontSize: 11),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatDate(post.savedDate),
+                        style: TextStyle(
+                            color: themeColors.hintColor, fontSize: 10),
+                      ),
+                      StreamBuilder(
+                        stream: ReminderService.instance.getPostReminders(post.id),
+                        builder: (context, snapshot) {
+                          final hasReminder =
+                              (snapshot.data as List?)?.isNotEmpty == true;
+                          return GestureDetector(
+                            onTap: () => _showReminderDialog(post),
+                            child: Icon(
+                              hasReminder ? Icons.notifications_active : Icons.notifications_none,
+                              color: hasReminder ? Colors.green : Colors.orange,
+                              size: 16,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (highlightPost) {
+      return AnimatedBuilder(
+        animation: _pulseAnim,
+        builder: (context, _) => buildCard(pulseValue: _pulseAnim.value),
+      );
+    }
+    return buildCard();
+  }
+
+  Widget _buildPinterestSmallAction({
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Icon(icon, color: color, size: 14),
+      ),
+    );
   }
 
   Future<void> _showReminderDialog(MockPost post) async {
@@ -1809,26 +2038,29 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   }
 
   // ENHANCED: Widget per immagine del post con Open Graph + fallback
-  Widget _buildPostImage(MockPost post, ThemeColors themeColors) {
+  Widget _buildPostImage(MockPost post, ThemeColors themeColors,
+      {bool isPinterest = false}) {
     final hasPreview = post.imageUrl?.trim().isNotEmpty == true ||
         post.previewStorageUrl?.trim().isNotEmpty == true;
 
     // Se il post ha un'immagine Open Graph o un backup remoto/cache, usala
     if (hasPreview) {
       return Container(
-        width: 80,
-        height: 80,
+        width: isPinterest ? double.infinity : 80,
+        height: isPinterest ? double.infinity : 80,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: widget.isDarkTheme
-                ? Colors.grey.shade700
-                : Colors.grey.shade300,
-            width: 1,
-          ),
+          borderRadius: BorderRadius.circular(isPinterest ? 0 : 8),
+          border: isPinterest
+              ? null
+              : Border.all(
+                  color: widget.isDarkTheme
+                      ? Colors.grey.shade700
+                      : Colors.grey.shade300,
+                  width: 1,
+                ),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(isPinterest ? 0 : 8),
           child: PostPreviewImage(
             postId: post.id,
             postUrl: post.url,
@@ -1841,11 +2073,12 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     }
 
     // Fallback alla thumbnail generata
-    return _buildFallbackThumbnail(post, themeColors);
+    return _buildFallbackThumbnail(post, themeColors, isPinterest: isPinterest);
   }
 
   // Thumbnail di fallback basata sul dominio (metodo originale)
-  Widget _buildFallbackThumbnail(MockPost post, ThemeColors themeColors) {
+  Widget _buildFallbackThumbnail(MockPost post, ThemeColors themeColors,
+      {bool isPinterest = false}) {
     String domain = '';
     try {
       final uri = Uri.parse(post.url);
@@ -1891,16 +2124,19 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     }
 
     return Container(
-      width: 80,
-      height: 80,
+      width: isPinterest ? double.infinity : 80,
+      height: isPinterest ? double.infinity : 80,
       decoration: BoxDecoration(
         color: thumbnailColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color:
-              widget.isDarkTheme ? Colors.grey.shade700 : Colors.grey.shade300,
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(isPinterest ? 0 : 8),
+        border: isPinterest
+            ? null
+            : Border.all(
+                color: widget.isDarkTheme
+                    ? Colors.grey.shade700
+                    : Colors.grey.shade300,
+                width: 1,
+              ),
       ),
       child: Stack(
         children: [
@@ -1908,10 +2144,22 @@ class _FolderDetailPageState extends State<FolderDetailPage>
             child: Icon(
               thumbnailIcon,
               color: _getContrastColor(thumbnailColor),
-              size: 32,
+              size: isPinterest ? 64 : 32,
             ),
           ),
-          if (domain.isNotEmpty && !_isKnownSite(domain))
+          if (isPinterest)
+            Center(
+              child: Text(
+                _extractDomain(post.url).split('.').first.toUpperCase(),
+                style: TextStyle(
+                  color: _getContrastColor(thumbnailColor).withOpacity(0.4),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 24,
+                  letterSpacing: 2,
+                ),
+              ),
+            ),
+          if (domain.isNotEmpty && !_isKnownSite(domain) && !isPinterest)
             Positioned(
               bottom: 4,
               right: 4,

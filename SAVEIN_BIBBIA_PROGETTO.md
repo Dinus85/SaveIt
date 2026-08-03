@@ -1896,6 +1896,14 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.5+79` — Vista Pinterest per i Post (03/08/2026)
+
+- **Vista Pinterest**: aggiunta la possibilità per l'utente di scegliere tra la classica vista a elenco e una vista a griglia (Pinterest-style) per i post all'interno delle cartelle.
+- **Dati post**: la vista Pinterest non è solo una galleria di immagini, ma mostra sotto ogni post i relativi dati: titolo, dominio, descrizione (se presente), data di salvataggio, breadcrumb della cartella e l'icona del reminder.
+- **Persistenza**: la scelta della modalità di visualizzazione viene salvata localmente tramite `SharedPreferences` e applicata automaticamente a tutte le cartelle.
+- **UI/UX**: aggiunto pulsante di switch (icona lista/griglia) nell'header della cartella (vicino al tasto logout). La griglia utilizza `SliverMasonryGrid` per un layout fluido.
+- **Selezione multipla**: la selezione multipla e le azioni batch sono pienamente supportate anche nella vista Pinterest.
+
 ### Build `1.1.5+78` — Contatti salvati per condivisione (03/08/2026)
 
 - **Feature contatti**: quando l'utente condivide un post o una cartella tramite email, l'indirizzo email viene salvato automaticamente nei "Contatti".
