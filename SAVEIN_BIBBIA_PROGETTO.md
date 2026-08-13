@@ -1897,6 +1897,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+86` — nuovo reset consenso UMP per tutti (13/08/2026)
+
+- `last_consent_reset_version` portato a **v4**: al primo avvio della 86 UMP fa `reset()` e il form GDPR viene riproposto anche a chi aveva già scelto.
+- **Azione**: Codemagic → TestFlight **86**.
+
 ### Build `1.1.6+85` — reminder usabile se manca l'ads vera (13/08/2026)
 
 - Dashboard `reminders.requiresAd` resta l'obbligo: se false, nessun ads; se true, si tenta l'interstitial SaveIn.
