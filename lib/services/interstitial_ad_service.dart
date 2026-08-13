@@ -198,17 +198,21 @@ class InterstitialAdService {
   /// Mostra un passaggio pubblicitario prima di usare una funzione configurata
   /// con `requiresAd` nella dashboard limiti piani.
   ///
-  /// Restituisce `true` solo se l'utente ha visto l'ads (o non e' richiesta).
-  /// Se AdMob non consegna: dialog con Riprova / consenso / Annulla — **niente
-  /// sblocco automatico**.
+  /// Se `requiresAd` è false: sblocca subito.
+  /// Se l'ads vera viene consegnata: va vista, poi si sblocca.
+  /// Reminder: se AdMob non ha inventario, la funzione resta usabile.
+  /// Altre feature: dialog Riprova / consenso / Annulla.
   Future<bool> showFeatureAdGate(BuildContext context, String feature) async {
     if (!await _featureRequiresAd(feature)) return true;
     if (!context.mounted) return false;
+
+    final allowWithoutRealAd = feature == 'reminders';
 
     while (context.mounted) {
       var shown = await _showInterstitial(
         context: context,
         requestConsentIfNeeded: false,
+        allowTestFallback: !allowWithoutRealAd,
       );
       if (!shown) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -216,6 +220,7 @@ class InterstitialAdService {
         shown = await _showInterstitial(
           context: context,
           requestConsentIfNeeded: false,
+          allowTestFallback: !allowWithoutRealAd,
         );
       }
       // Fallback fill: se consenso ok ma no inventory personalizzato, riprova NPA.
@@ -225,9 +230,11 @@ class InterstitialAdService {
           context: context,
           forceNonPersonalized: true,
           requestConsentIfNeeded: false,
+          allowTestFallback: !allowWithoutRealAd,
         );
       }
       if (shown) return true;
+      if (allowWithoutRealAd) return true;
       if (!context.mounted) return false;
 
       final action = await showDialog<_AdGateAction>(
@@ -320,6 +327,7 @@ class InterstitialAdService {
     bool forceNonPersonalized = false,
     bool requestConsentIfNeeded = true,
     String? adUnitOverride,
+    bool allowTestFallback = true,
   }) async {
     if (!_shouldUseAds || _isShowingAd) {
       lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
@@ -420,7 +428,8 @@ class InterstitialAdService {
 
     final testId = _testInterstitialAdUnitId;
     final alreadyTest = adUnitOverride != null && adUnitOverride == testId;
-    if (_isTestFlightBuild &&
+    if (allowTestFallback &&
+        _isTestFlightBuild &&
         !alreadyTest &&
         testId != null &&
         (lastFailureReason == 'no_fill' ||
@@ -430,6 +439,7 @@ class InterstitialAdService {
         context: context,
         requestConsentIfNeeded: false,
         adUnitOverride: testId,
+        allowTestFallback: false,
       );
     }
     return false;

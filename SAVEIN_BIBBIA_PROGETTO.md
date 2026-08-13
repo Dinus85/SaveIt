@@ -218,7 +218,7 @@ SaveIn! consente di impostare reminder su post e cartelle.
 ### Regole prodotto
 
 - I reminder sono disponibili anche agli utenti Free.
-- Utenti Free: prima di impostare o aprire un reminder deve comparire un passaggio pubblicitario reale. Se AdMob non carica: dialog con **Riprova** / **Gestisci consenso** / **Annulla** — **niente sblocco automatico** (da `1.1.4+72`).
+- Utenti Free: se in dashboard `reminders.requiresAd` è true, si tenta un interstitial **vero**. Se AdMob lo consegna, va visto. Se non c'è inventario, il reminder resta usabile (da `1.1.6+85`). Se `requiresAd` è false, nessun ads.
 - Utenti Premium/Admin: nessuna pubblicita sui reminder.
 - L'apertura di una notifica reminder non apre direttamente l'URL del post: entra in SaveIn! e naviga al target.
 - Reminder non annuali: dopo tap/apertura vengono eliminati e spariscono dalla UI.
@@ -737,7 +737,7 @@ Logica:
 - Annuncio ogni 5 import post.
 - Gate ADV prima di impostare un reminder (`showReminderSetupGate`).
 - Gate ADV prima di aprire un reminder da notifica o popup interno (`showReminderOpenGate`).
-- Se AdMob non carica, i gate Free mostrano Riprova/consenso/Annulla senza sbloccare la funzione (da `1.1.4+72`).
+- Gate Free con `requiresAd`: se AdMob consegna l'ads, va vista. Per i **reminder**, se non c'è inventario la funzione resta usabile (da `1.1.6+85`). Share/import restano con dialog Riprova/Annulla se l'ads manca.
 - Premium/Admin non devono vedere annunci.
 
 Config native:
@@ -1896,6 +1896,14 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - `FirebaseAnalytics.setConsent` default granted in `main.dart` (fuori UE); in UE UMP aggiorna i flag se Consent Mode e' ON in AdMob.
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
+
+### Build `1.1.6+85` — reminder usabile se manca l'ads vera (13/08/2026)
+
+- Dashboard `reminders.requiresAd` resta l'obbligo: se false, nessun ads; se true, si tenta l'interstitial SaveIn.
+- Se AdMob consegna l'ads vera, va vista prima di impostare/aprire il reminder.
+- Se non c'è inventario (no-fill / timeout / consenso insufficiente), il reminder si usa comunque. Niente dialog di blocco.
+- Le ads di test Google non contano come obbligo sul reminder (restano solo fallback banner/altri interstitial in TestFlight).
+- **Azione**: Codemagic → TestFlight **85**.
 
 ### Build `1.1.6+84` — fallback ads di test su TestFlight (13/08/2026)
 
