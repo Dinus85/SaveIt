@@ -203,7 +203,10 @@ class InterstitialAdService {
         case _AdGateAction.retry:
           continue;
         case _AdGateAction.consent:
-          // Form consenso direttamente qui (niente Account).
+          // Su iOS il form UMP non salva se parte mentre il dialog Flutter
+          // sta ancora chiudendosi.
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+          if (!context.mounted) return false;
           await AdsConsentService.instance.openAdsConsentUi();
           continue;
         case _AdGateAction.premium:
@@ -383,15 +386,16 @@ class _AdRetryDialog extends StatelessWidget {
     switch (reason) {
       case 'consent':
         return 'Questa funzione Free richiede una pubblicità.\n\n'
-            'Tocca “Attiva pubblicità” per aprire qui il consenso '
-            '(bastano anche le ads non personalizzate). '
+            'Tocca “Attiva pubblicità”. Nel form conviene “Consenti” '
+            'sulla prima schermata. Se apri Gestisci, dopo Accetta tutto '
+            'scorri in fondo e tocca Conferma, altrimenti le scelte non si salvano.\n\n'
             'Oppure passa a Premium per usarla senza ads.';
       case 'no_fill':
       case 'timeout':
       case 'show_error':
-        return 'La pubblicità non è disponibile in questo momento.\n\n'
-            'Tocca Riprova, oppure “Attiva pubblicità” per aggiornare il consenso. '
-            'In alternativa passa a Premium.';
+        return 'La pubblicità non è disponibile in questo momento '
+            '(il consenso risulta già registrato).\n\n'
+            'Tocca Riprova. In alternativa passa a Premium.';
       case 'init_error':
         return 'Non è stato possibile avviare il sistema pubblicitario.\n\n'
             'Controlla la connessione e tocca Riprova.';

@@ -1897,6 +1897,14 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+82` — fix salvataggio consenso UMP (13/08/2026)
+
+- **Bug**: da “Attiva pubblicità” il form GDPR veniva riaperto ogni volta con `loadConsentForm` (form nuovo, toggle di default). “Accetta tutto” in Gestisci non restava salvato; riaprendo Gestisci alcune scelte erano di nuovo no. Il timeout 60/90s poteva anche far ricomparire il popup ads sopra il form.
+- **Fix**: primo consenso con `loadAndShowConsentFormIfRequired`; le aperture successive usano `showPrivacyOptionsForm` (scelte persistite). Niente timeout corto sul form. Dopo Conferma si riallinea lo stato UMP prima di `canRequestAds`. Su iOS si attende la chiusura del dialog Flutter prima di aprire UMP.
+- Reset consenso one-shot portato a **v3** (chiave `last_consent_reset_version`) per pulire lo stato parziale della +81.
+- Dialog ads: se il blocco è `consent` spiega Consenti/Conferma; se è `no_fill` non chiede di nuovo il consenso.
+- **Azione**: Codemagic → TestFlight **82**.
+
 ### Build `1.1.6+81` — nuovo train App Store + ricerca cartelle globale (13/08/2026)
 
 - Marketing **1.1.6**, build **81**: il train `1.1.5` e' "Pronta per la distribuzione"; Apple non accetta altri build su `1.1.5` (rischio 90186 / 90062).

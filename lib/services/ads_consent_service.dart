@@ -19,6 +19,11 @@ class AdsConsentService {
   bool _hasReset = false; // 🆕 Per evitare reset multipli nella stessa sessione
   Completer<bool>? _inFlight;
 
+  /// Il form UMP resta aperto finché l'utente non conferma. Un timeout corto
+  /// chiudeva l'attesa e riapriva il popup ads sopra il form, interrompendo
+  /// il salvataggio di "Accetta tutto".
+  static const Duration _formWait = Duration(minutes: 10);
+
   /// Aggiorna info e mostra il form solo se ancora richiesto da UMP.
   Future<bool> gatherConsent({bool forceEeaDebug = false}) async {
     if (kIsWeb) return false;
@@ -33,20 +38,8 @@ class AdsConsentService {
 
     try {
       await _requestConsentInfoUpdate(forceEeaDebug: forceEeaDebug);
-
-      final formDone = Completer<void>();
-      ConsentForm.loadAndShowConsentFormIfRequired((FormError? error) {
-        if (error != null) {
-          debugPrint(
-            'UMP loadAndShowConsentFormIfRequired: ${error.errorCode} ${error.message}',
-          );
-        }
-        if (!formDone.isCompleted) formDone.complete();
-      });
-      await formDone.future.timeout(
-        const Duration(seconds: 60),
-        onTimeout: () {},
-      );
+      await _showConsentFormIfRequired();
+      await _refreshConsentAfterForm(forceEeaDebug: forceEeaDebug);
 
       final canRequest = await ConsentInformation.instance.canRequestAds();
       if (kDebugMode) {
@@ -80,51 +73,18 @@ class AdsConsentService {
     try {
       await _requestConsentInfoUpdate(forceEeaDebug: forceEeaDebug);
 
-      final formAvailable =
-          await ConsentInformation.instance.isConsentFormAvailable();
-      if (formAvailable) {
-        final shown = Completer<void>();
-        ConsentForm.loadConsentForm(
-          (ConsentForm form) {
-            form.show((FormError? error) {
-              if (error != null) {
-                debugPrint(
-                  'UMP consent form show error: ${error.errorCode} ${error.message}',
-                );
-              }
-              unawaited(form.dispose());
-              if (!shown.isCompleted) shown.complete();
-            });
-          },
-          (FormError error) {
-            debugPrint(
-              'UMP loadConsentForm error: ${error.errorCode} ${error.message}',
-            );
-            if (!shown.isCompleted) shown.complete();
-          },
-        );
-        await shown.future.timeout(
-          const Duration(seconds: 90),
-          onTimeout: () {},
-        );
+      final status = await ConsentInformation.instance.getConsentStatus();
+
+      // loadConsentForm a ogni tap mostra un form "nuovo" con toggle di default
+      // (alcuni sì, alcuni no) e può sovrascrivere Accetta tutto.
+      // Prima volta: form consenso. Dopo: solo privacy options (scelte salvate).
+      if (status == ConsentStatus.required || status == ConsentStatus.unknown) {
+        await _showConsentFormIfRequired();
       } else {
-        final privacyStatus = await ConsentInformation.instance
-            .getPrivacyOptionsRequirementStatus();
-        if (privacyStatus == PrivacyOptionsRequirementStatus.required) {
-          await showPrivacyOptionsForm();
-        } else {
-          final formDone = Completer<void>();
-          ConsentForm.loadAndShowConsentFormIfRequired((FormError? error) {
-            if (!formDone.isCompleted) formDone.complete();
-          });
-          await formDone.future.timeout(
-            const Duration(seconds: 60),
-            onTimeout: () {},
-          );
-          await showPrivacyOptionsForm();
-        }
+        await showPrivacyOptionsForm();
       }
 
+      await _refreshConsentAfterForm(forceEeaDebug: forceEeaDebug);
       final can = await canRequestAds();
       await syncAdmobConsentToFirestore();
       return can;
@@ -132,6 +92,26 @@ class AdsConsentService {
       debugPrint('UMP openAdsConsentUi error: $e\n$st');
       return canRequestAds();
     }
+  }
+
+  Future<void> _showConsentFormIfRequired() async {
+    final formDone = Completer<void>();
+    ConsentForm.loadAndShowConsentFormIfRequired((FormError? error) {
+      if (error != null) {
+        debugPrint(
+          'UMP loadAndShowConsentFormIfRequired: ${error.errorCode} ${error.message}',
+        );
+      }
+      if (!formDone.isCompleted) formDone.complete();
+    });
+    await formDone.future.timeout(_formWait, onTimeout: () {});
+  }
+
+  /// UMP scrive la stringa IAB in modo asincrono: rileggere subito
+  /// `canRequestAds` può ancora dare false dopo Accetta tutto.
+  Future<void> _refreshConsentAfterForm({bool forceEeaDebug = false}) async {
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await _requestConsentInfoUpdate(forceEeaDebug: forceEeaDebug);
   }
 
   Future<void> _requestConsentInfoUpdate({bool forceEeaDebug = false}) async {
@@ -189,7 +169,7 @@ class AdsConsentService {
       if (!done.isCompleted) done.complete(error);
     });
     final error = await done.future.timeout(
-      const Duration(seconds: 60),
+      _formWait,
       onTimeout: () => null,
     );
     await syncAdmobConsentToFirestore();
@@ -209,7 +189,7 @@ class AdsConsentService {
     if (kIsWeb || _hasReset) return;
 
     try {
-      const int currentConsentVersion = 2; // 🆕 Incrementare per forzare un nuovo reset
+      const int currentConsentVersion = 3; // Incrementare per forzare un nuovo reset
       final prefs = await SharedPreferences.getInstance();
       final lastResetVersion = prefs.getInt('last_consent_reset_version') ?? 0;
 
