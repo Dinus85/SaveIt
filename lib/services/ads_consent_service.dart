@@ -19,6 +19,14 @@ class AdsConsentService {
   bool _hasReset = false; // 🆕 Per evitare reset multipli nella stessa sessione
   Completer<bool>? _inFlight;
 
+  /// Incrementato dopo ogni aggiornamento UMP. I banner Home lo ascoltano
+  /// per ritentare il load se il primo tentativo era senza consenso.
+  final ValueNotifier<int> consentTick = ValueNotifier<int>(0);
+
+  void _notifyConsentChanged() {
+    consentTick.value++;
+  }
+
   /// Il form UMP resta aperto finché l'utente non conferma. Un timeout corto
   /// chiudeva l'attesa e riapriva il popup ads sopra il form, interrompendo
   /// il salvataggio di "Accetta tutto".
@@ -47,6 +55,7 @@ class AdsConsentService {
         debugPrint('UMP canRequestAds=$canRequest consentStatus=$status');
       }
       await syncAdmobConsentToFirestore();
+      _notifyConsentChanged();
       if (!_inFlight!.isCompleted) _inFlight!.complete(canRequest);
       return canRequest;
     } catch (e, st) {
@@ -54,6 +63,7 @@ class AdsConsentService {
       try {
         final canRequest = await ConsentInformation.instance.canRequestAds();
         await syncAdmobConsentToFirestore();
+        _notifyConsentChanged();
         if (!_inFlight!.isCompleted) _inFlight!.complete(canRequest);
         return canRequest;
       } catch (_) {
@@ -87,9 +97,11 @@ class AdsConsentService {
       await _refreshConsentAfterForm(forceEeaDebug: forceEeaDebug);
       final can = await canRequestAds();
       await syncAdmobConsentToFirestore();
+      _notifyConsentChanged();
       return can;
     } catch (e, st) {
       debugPrint('UMP openAdsConsentUi error: $e\n$st');
+      _notifyConsentChanged();
       return canRequestAds();
     }
   }
@@ -173,6 +185,7 @@ class AdsConsentService {
       onTimeout: () => null,
     );
     await syncAdmobConsentToFirestore();
+    _notifyConsentChanged();
     return error;
   }
 

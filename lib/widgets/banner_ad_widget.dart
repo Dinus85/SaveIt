@@ -15,14 +15,18 @@ class BannerAdWidget extends StatefulWidget {
   State<BannerAdWidget> createState() => _BannerAdWidgetState();
 }
 
-class _BannerAdWidgetState extends State<BannerAdWidget> {
+class _BannerAdWidgetState extends State<BannerAdWidget>
+    with WidgetsBindingObserver {
   BannerAd? _bannerAd;
   bool _isLoaded = false;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     PlanLimitsService.rulesRevision.addListener(_onRulesChanged);
+    AdsConsentService.instance.consentTick.addListener(_onConsentChanged);
     _loadAd();
   }
 
@@ -37,70 +41,91 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
       });
       return;
     }
-    if (_bannerAd == null && !_isLoaded) {
-      _loadAd();
+    _retryIfNeeded();
+  }
+
+  void _onConsentChanged() {
+    _retryIfNeeded();
+  }
+
+  void _retryIfNeeded() {
+    if (!mounted) return;
+    if (!AppAccessService().hasAds) return;
+    if (_isLoaded && _bannerAd != null) return;
+    _loadAd();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _retryIfNeeded();
     }
   }
 
   Future<void> _loadAd() async {
     if (kIsWeb || !AppAccessService().hasAds) return;
+    if (_loading || (_isLoaded && _bannerAd != null)) return;
+    _loading = true;
 
     try {
       await InterstitialAdService.instance.initialize();
+
+      final canRequest = await AdsConsentService.instance.canRequestAds();
+      if (!canRequest) {
+        debugPrint('BannerAd skip: UMP canRequestAds=false');
+        return;
+      }
+
+      if (!mounted) return;
+
+      final adUnitId = InterstitialAdService.bannerAdUnitId;
+      if (kDebugMode) {
+        debugPrint('BannerAd loading unit=$adUnitId');
+      }
+
+      final banner = BannerAd(
+        adUnitId: adUnitId,
+        size: AdSize.banner,
+        // UMP/TCF decide personalizzate vs NPA; non forzare sempre NPA.
+        request: AdsConsentService.instance.buildAdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (ad) {
+            if (!mounted) {
+              ad.dispose();
+              return;
+            }
+            setState(() {
+              _bannerAd = ad as BannerAd;
+              _isLoaded = true;
+            });
+          },
+          onAdFailedToLoad: (ad, error) {
+            debugPrint('BannerAd load error: $error');
+            ad.dispose();
+            if (mounted) {
+              setState(() {
+                _bannerAd = null;
+                _isLoaded = false;
+              });
+            }
+          },
+        ),
+      );
+
+      _bannerAd = banner;
+      await banner.load();
     } catch (e) {
       debugPrint('BannerAd skip: AdMob non inizializzato ($e)');
-      return;
+    } finally {
+      _loading = false;
     }
-
-    final canRequest = await AdsConsentService.instance.canRequestAds();
-    if (!canRequest) {
-      debugPrint('BannerAd skip: UMP canRequestAds=false');
-      return;
-    }
-
-    if (!mounted) return;
-
-    final adUnitId = InterstitialAdService.bannerAdUnitId;
-    if (kDebugMode) {
-      debugPrint('BannerAd loading unit=$adUnitId');
-    }
-
-    final banner = BannerAd(
-      adUnitId: adUnitId,
-      size: AdSize.banner,
-      // UMP/TCF decide personalizzate vs NPA; non forzare sempre NPA.
-      request: AdsConsentService.instance.buildAdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (ad) {
-          if (!mounted) {
-            ad.dispose();
-            return;
-          }
-          setState(() {
-            _bannerAd = ad as BannerAd;
-            _isLoaded = true;
-          });
-        },
-        onAdFailedToLoad: (ad, error) {
-          debugPrint('BannerAd load error: $error');
-          ad.dispose();
-          if (mounted) {
-            setState(() {
-              _bannerAd = null;
-              _isLoaded = false;
-            });
-          }
-        },
-      ),
-    );
-
-    _bannerAd = banner;
-    await banner.load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     PlanLimitsService.rulesRevision.removeListener(_onRulesChanged);
+    AdsConsentService.instance.consentTick.removeListener(_onConsentChanged);
     _bannerAd?.dispose();
     super.dispose();
   }

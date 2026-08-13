@@ -1897,6 +1897,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+83` — retry banner Home dopo consenso UMP (13/08/2026)
+
+- **Bug**: `BannerAdWidget` tentava il load una sola volta. Se all'apertura `canRequestAds` era false, i banner Home restavano vuoti anche dopo Consenti/Conferma (nessun listener sul consenso).
+- **Fix**: `AdsConsentService.consentTick` notifica gather/open/privacy-options; i banner ritentano il load se ancora vuoti. Retry anche al resume dell'app.
+- **Azione**: Codemagic → TestFlight **83**.
+
 ### Build `1.1.6+82` — fix salvataggio consenso UMP (13/08/2026)
 
 - **Bug**: da “Attiva pubblicità” il form GDPR veniva riaperto ogni volta con `loadConsentForm` (form nuovo, toggle di default). “Accetta tutto” in Gestisci non restava salvato; riaprendo Gestisci alcune scelte erano di nuovo no. Il timeout 60/90s poteva anche far ricomparire il popup ads sopra il form.
