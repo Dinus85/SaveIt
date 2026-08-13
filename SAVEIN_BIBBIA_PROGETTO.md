@@ -1897,6 +1897,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+84` — fallback ads di test su TestFlight (13/08/2026)
+
+- **Sintomo**: dopo consenso ok il dialog diceva "consenso già registrato" ma niente ads. UMP è passato; `InterstitialAd.load` parte sulle unit SaveIn e AdMob risponde no-fill (app nuova / UE / TestFlight / poco traffico).
+- **Fix**: su TestFlight (receipt `sandboxReceipt`) se le unit reali non riempiono si usano le unit di test ufficiali Google (interstitial + banner). Sull'App Store il fallback non parte.
+- Timeout produzione su TestFlight ridotto a 8s prima del fallback.
+- **Azione**: Codemagic → TestFlight **84**. In TestFlight l'ads può avere la label "Test Ad": è voluto. In AdMob le richieste sulle unit SaveIn possono comunque comparire (primo tentativo reale).
+
 ### Build `1.1.6+83` — retry banner Home dopo consenso UMP (13/08/2026)
 
 - **Bug**: `BannerAdWidget` tentava il load una sola volta. Se all'apertura `canRequestAds` era false, i banner Home restavano vuoti anche dopo Consenti/Conferma (nessun listener sul consenso).

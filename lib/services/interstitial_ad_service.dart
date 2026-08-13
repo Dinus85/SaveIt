@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -44,14 +45,18 @@ class InterstitialAdService {
 
   bool _isInitialized = false;
   bool _isShowingAd = false;
+  bool _isTestFlightBuild = false;
+  bool _testFlightResolved = false;
   Future<void>? _initializing;
 
   /// Ultimo motivo per cui l'interstitial non e' partita (diagnostica UI).
   String? lastFailureReason;
 
-  /// In debug usa le unit di test Google così le ads si vedono davvero in prova.
-  /// In release/profile usa le unit SaveIn (compariranno anche su AdMob).
+  /// Debug: sempre unit di test Google. TestFlight: unit SaveIn, poi fallback
+  /// test se no-fill. App Store: solo unit SaveIn.
   static bool get useTestAds => kDebugMode;
+
+  bool get isTestFlightBuild => _isTestFlightBuild;
 
   static String get bannerAdUnitId {
     final isIos = defaultTargetPlatform == TargetPlatform.iOS;
@@ -61,8 +66,43 @@ class InterstitialAdService {
     return isIos ? iosBannerAdUnitId : androidBannerAdUnitId;
   }
 
+  static String get testBannerAdUnitId {
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    return isIos ? _iosTestBannerAdUnitId : _androidTestBannerAdUnitId;
+  }
+
+  String? get _testInterstitialAdUnitId {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return _androidTestInterstitialAdUnitId;
+      case TargetPlatform.iOS:
+        return _iosTestInterstitialAdUnitId;
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _resolveTestFlight() async {
+    if (_testFlightResolved || kIsWeb || kDebugMode) {
+      _testFlightResolved = true;
+      return;
+    }
+    _testFlightResolved = true;
+    if (defaultTargetPlatform != TargetPlatform.iOS) return;
+    try {
+      const channel = MethodChannel('eu.savein.app/ads');
+      _isTestFlightBuild =
+          await channel.invokeMethod<bool>('isTestFlight') ?? false;
+      debugPrint('AdMob TestFlight=$_isTestFlightBuild');
+    } catch (e) {
+      debugPrint('AdMob isTestFlight check skip: $e');
+      _isTestFlightBuild = false;
+    }
+  }
+
   Future<void> initialize() async {
     if (kIsWeb) return;
+    await _resolveTestFlight();
     if (_isInitialized) return;
     if (_initializing != null) return _initializing!;
 
@@ -279,13 +319,14 @@ class InterstitialAdService {
     BuildContext? context,
     bool forceNonPersonalized = false,
     bool requestConsentIfNeeded = true,
+    String? adUnitOverride,
   }) async {
     if (!_shouldUseAds || _isShowingAd) {
       lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
       return false;
     }
 
-    final adUnitId = _interstitialAdUnitId;
+    final adUnitId = adUnitOverride ?? _interstitialAdUnitId;
     if (adUnitId == null) {
       lastFailureReason = 'unsupported_platform';
       return false;
@@ -363,14 +404,35 @@ class InterstitialAdService {
       ),
     );
 
-    return completer.future.timeout(
-      const Duration(seconds: 20),
+    final wait = _isTestFlightBuild && adUnitOverride == null
+        ? const Duration(seconds: 8)
+        : const Duration(seconds: 20);
+
+    final shown = await completer.future.timeout(
+      wait,
       onTimeout: () {
         lastFailureReason = 'timeout';
         _isShowingAd = false;
         return false;
       },
     );
+    if (shown) return true;
+
+    final testId = _testInterstitialAdUnitId;
+    final alreadyTest = adUnitOverride != null && adUnitOverride == testId;
+    if (_isTestFlightBuild &&
+        !alreadyTest &&
+        testId != null &&
+        (lastFailureReason == 'no_fill' ||
+            lastFailureReason == 'timeout' ||
+            lastFailureReason == 'show_error')) {
+      return _showInterstitial(
+        context: context,
+        requestConsentIfNeeded: false,
+        adUnitOverride: testId,
+      );
+    }
+    return false;
   }
 }
 

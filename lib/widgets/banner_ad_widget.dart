@@ -114,6 +114,42 @@ class _BannerAdWidgetState extends State<BannerAdWidget>
 
       _bannerAd = banner;
       await banner.load();
+
+      if (!_isLoaded &&
+          InterstitialAdService.instance.isTestFlightBuild &&
+          adUnitId != InterstitialAdService.testBannerAdUnitId) {
+        _bannerAd?.dispose();
+        _bannerAd = null;
+        final testBanner = BannerAd(
+          adUnitId: InterstitialAdService.testBannerAdUnitId,
+          size: AdSize.banner,
+          request: AdsConsentService.instance.buildAdRequest(),
+          listener: BannerAdListener(
+            onAdLoaded: (ad) {
+              if (!mounted) {
+                ad.dispose();
+                return;
+              }
+              setState(() {
+                _bannerAd = ad as BannerAd;
+                _isLoaded = true;
+              });
+            },
+            onAdFailedToLoad: (ad, error) {
+              debugPrint('BannerAd test load error: $error');
+              ad.dispose();
+              if (mounted) {
+                setState(() {
+                  _bannerAd = null;
+                  _isLoaded = false;
+                });
+              }
+            },
+          ),
+        );
+        _bannerAd = testBanner;
+        await testBanner.load();
+      }
     } catch (e) {
       debugPrint('BannerAd skip: AdMob non inizializzato ($e)');
     } finally {

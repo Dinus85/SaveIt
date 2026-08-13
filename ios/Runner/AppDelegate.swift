@@ -13,6 +13,20 @@ import UIKit
     ) {
       ShareExtensionBridge.register(with: shareExtensionRegistrar)
     }
+    if let adsRegistrar = registrar(forPlugin: "AdsEnvironment") {
+      let adsChannel = FlutterMethodChannel(
+        name: "eu.savein.app/ads",
+        binaryMessenger: adsRegistrar.messenger()
+      )
+      adsChannel.setMethodCallHandler { call, result in
+        if call.method == "isTestFlight" {
+          let receiptName = Bundle.main.appStoreReceiptURL?.lastPathComponent
+          result(receiptName == "sandboxReceipt")
+        } else {
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
