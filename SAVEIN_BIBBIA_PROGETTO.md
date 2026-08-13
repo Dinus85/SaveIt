@@ -1897,12 +1897,15 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+81` — nuovo train App Store + ricerca cartelle globale (13/08/2026)
+
+- Marketing **1.1.6**, build **81**: il train `1.1.5` e' "Pronta per la distribuzione"; Apple non accetta altri build su `1.1.5` (rischio 90186 / 90062).
+- Contenuto: ricerca cartelle globale nel popup salvataggio (`FolderCardSelector`): cerca in tutto l'albero (Home + sottocartelle), mostra il path padre nei risultati, tap entra nella cartella trovata.
+- **Azione**: Codemagic → TestFlight **81**; in App Store Connect crea versione **1.1.6** e collega la build.
+
 ### Build `1.1.5+81` — Ricerca cartelle globale nel popup salvataggio (13/08/2026)
 
-- **Bug**: nel `FolderCardSelector` (popup per salvare/importare un post) la ricerca filtrava solo le cartelle root della Home (`_folderService.folders`), quindi le sottocartelle non comparivano.
-- **Fix**: la ricerca attraversa tutto l'albero (`_flattenAllFoldersForSearch`) e include anche le cartelle temporanee create nel dialog.
-- **UI**: nei risultati di ricerca, sotto il nome cartella viene mostrato il percorso padre (`in Viaggi › Giappone`) per distinguere omonimi.
-- **Navigazione**: tap su un risultato di ricerca entra nella cartella usando il path completo (non più relativo alla Home), così una sottocartella trovata dalla search si apre nel posto giusto.
+- Stesso fix della `1.1.6+81`, ma marketing version ancora `1.1.5` (non caricare su App Store: train chiuso).
 
 ### Build `1.1.5+80` — Reset Consenso Pubblicità (03/08/2026)
 
