@@ -116,7 +116,9 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         setState(() {
           _isSearching = false;
           _searchResults.clear();
-          _currentFolders = _combineRealAndTemporaryFolders(_allFolders);
+          _currentFolders = _currentPath.isEmpty
+              ? _combineRealAndTemporaryFolders(_allFolders)
+              : _restoreFoldersForCurrentPath();
         });
       }
       return;
@@ -126,15 +128,77 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
     if (mounted) {
       setState(() {
         _isSearching = true;
-        final allCombined = _combineRealAndTemporaryFolders(_allFolders);
-        final results = allCombined.where((folder) {
-          return folder.name.toLowerCase().contains(query.toLowerCase());
+        final queryLower = query.toLowerCase();
+        final results = _flattenAllFoldersForSearch().where((folder) {
+          if (folder.isSpecial) return false;
+          return folder.name.toLowerCase().contains(queryLower);
         }).toList();
         // Ordina anche i risultati della ricerca
         _searchResults = _sortFolders(results);
         _currentFolders = _searchResults;
       });
     }
+  }
+
+  /// Tutte le cartelle dell'app (Home + sottocartelle + temporanee).
+  List<MockFolder> _flattenAllFoldersForSearch() {
+    final flattened = <MockFolder>[];
+    final seen = <String>{};
+
+    void walk(List<MockFolder> folders) {
+      for (final folder in folders) {
+        final path = _pathSegmentsFor(folder).join(' › ');
+        final key = path.isEmpty ? folder.name : path;
+        if (seen.add(key)) {
+          flattened.add(folder);
+        }
+        if (folder.children.isNotEmpty) {
+          walk(folder.children);
+        }
+      }
+    }
+
+    walk(_allFolders);
+    walk(_localTemporaryFolders);
+    return flattened;
+  }
+
+  List<String> _pathSegmentsFor(MockFolder folder) {
+    if (folder.isSpecial) return [];
+
+    if (_isTemporaryFolder(folder)) {
+      final path = _buildFolderPath(folder);
+      if (path.isEmpty) return [folder.name];
+      return path.split(' › ');
+    }
+
+    final parts = <String>[];
+    MockFolder? current = folder;
+    while (current != null && !current.isSpecial) {
+      parts.insert(0, current.name);
+      current = current.parent;
+    }
+    return parts;
+  }
+
+  String _searchResultSubtitle(MockFolder folder) {
+    final segments = _pathSegmentsFor(folder);
+    if (segments.length <= 1) {
+      return folder.count;
+    }
+    final parentPath = segments.sublist(0, segments.length - 1).join(' › ');
+    return 'in $parentPath';
+  }
+
+  List<MockFolder> _restoreFoldersForCurrentPath() {
+    if (_currentPath.isEmpty) {
+      return _combineRealAndTemporaryFolders(_allFolders);
+    }
+    final parentFolder = _findFolderByPath(_currentPath);
+    if (parentFolder == null) {
+      return _combineRealAndTemporaryFolders(_allFolders);
+    }
+    return _combineChildrenWithTemporary(parentFolder.children, _currentPath);
   }
 
   // 🔥 FIX: Helper per generare una chiave unica per ogni cartella temporanea
@@ -176,11 +240,13 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
     }
 
     try {
+      final pathSegments = _pathSegmentsFor(folder);
+
       if (!_isTemporaryFolder(folder)) {
         await _folderService.syncWithDataService();
         final freshFolders = _folderService.folders;
         MockFolder? freshFolder =
-            _findFolderInUpdatedData(folder.name, freshFolders);
+            _findFolderByPathSafe(pathSegments, freshFolders);
         if (freshFolder == null) {
           freshFolder = folder;
         }
@@ -198,21 +264,14 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         }
       }
 
-      List<String> newPath;
+      // Path completo della cartella (anche se trovata dalla ricerca globale)
+      final newPath = pathSegments.isNotEmpty
+          ? pathSegments
+          : (folder.level == 0
+              ? [folder.name]
+              : [..._currentPath, folder.name]);
 
-      // FIX SEMPLICE: Se clicco su una cartella ROOT, resetto il path
-      if (folder.level == 0) {
-        // È una cartella root, quindi il path deve essere solo questa cartella
-        newPath = [folder.name];
-      } else {
-        // È una sottocartella, aggiungo al path esistente
-        newPath = List.from(_currentPath);
-        if (!newPath.contains(folder.name)) {
-          newPath.add(folder.name);
-        }
-      }
-
-      final newSelectedPath = _buildFolderPath(folder);
+      final newSelectedPath = newPath.join(' › ');
 
       setState(() {
         _currentPath = newPath;
@@ -223,16 +282,16 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         _isSearching = false;
       });
     } catch (e) {
-      List<String> newPath = List.from(_currentPath);
-      if (!newPath.contains(folder.name)) {
-        newPath.add(folder.name);
-      }
+      final fallbackPath = _pathSegmentsFor(folder);
+      final newPath = fallbackPath.isNotEmpty
+          ? fallbackPath
+          : [..._currentPath, folder.name];
 
       setState(() {
         _currentPath = newPath;
         _currentFolders =
             _combineChildrenWithTemporary(folder.children, newPath);
-        _selectedFolderPath = _buildFolderPath(folder);
+        _selectedFolderPath = newPath.join(' › ');
         _searchController.clear();
         _isSearching = false;
       });
@@ -872,11 +931,15 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
                     ),
                     SizedBox(height: 2),
                     Text(
-                      folder.count,
+                      _isSearching
+                          ? _searchResultSubtitle(folder)
+                          : folder.count,
                       style: TextStyle(
                         color: Colors.black54,
                         fontSize: 11,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

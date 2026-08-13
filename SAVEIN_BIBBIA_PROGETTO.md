@@ -192,6 +192,7 @@ Nel `FolderCardSelector` (picker cartella durante l'import da share intent):
 - **Durante l'import post** (`showFolderLimitInfo: false`): **non** mostrare in basso conteggio/limiti livelli cartelle (banner "Livello X/Y", testo "Limite 5 livelli raggiunto"). I limiti restano applicati in background.
 - **Tap su cartella con figli**: 1 tap → entra e seleziona quella cartella.
 - **Tap su cartella foglia (senza figli)**: 1 tap → seleziona, **dialog resta aperto** (l'utente puo' ancora usare "Crea Nuova Cartella" e poi "Conferma Selezione").
+- **Ricerca cartelle**: il campo "Cerca cartelle..." cerca in **tutto l'albero** (Home + tutte le sottocartelle + cartelle temporanee), non solo le cartelle visibili nella Home. Sotto il nome del risultato compare il percorso (`in Viaggi › Giappone`). Tap sul risultato entra nella cartella trovata e la seleziona.
 - File: `lib/widgets/folder_card_selector.dart`, invocato da `SharingService._showCardFolderSelector()`.
 
 Le vecchie costanti Free in `lib/services/access_control_service.dart` sono solo fallback se Firestore non risponde. Non devono essere usate come regola primaria.
@@ -1895,6 +1896,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - `FirebaseAnalytics.setConsent` default granted in `main.dart` (fuori UE); in UE UMP aggiorna i flag se Consent Mode e' ON in AdMob.
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
+
+### Build `1.1.5+81` — Ricerca cartelle globale nel popup salvataggio (13/08/2026)
+
+- **Bug**: nel `FolderCardSelector` (popup per salvare/importare un post) la ricerca filtrava solo le cartelle root della Home (`_folderService.folders`), quindi le sottocartelle non comparivano.
+- **Fix**: la ricerca attraversa tutto l'albero (`_flattenAllFoldersForSearch`) e include anche le cartelle temporanee create nel dialog.
+- **UI**: nei risultati di ricerca, sotto il nome cartella viene mostrato il percorso padre (`in Viaggi › Giappone`) per distinguere omonimi.
+- **Navigazione**: tap su un risultato di ricerca entra nella cartella usando il path completo (non più relativo alla Home), così una sottocartella trovata dalla search si apre nel posto giusto.
 
 ### Build `1.1.5+80` — Reset Consenso Pubblicità (03/08/2026)
 
