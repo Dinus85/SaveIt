@@ -1897,6 +1897,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+87` — interstitial reminder anche con ads di test (13/08/2026)
+
+- In Home il banner si vedeva (su TestFlight spesso unit di test Google); il reminder saltava l'ads perché il fallback test era disattivato sul gate.
+- Ora il reminder prova l'interstitial SaveIn e, in TestFlight, se vuoto usa l'interstitial di test. Se compare, va vista. Se non c'è nessuna ads, il reminder resta usabile.
+- **Azione**: Codemagic → TestFlight **87**.
+
 ### Build `1.1.6+86` — nuovo reset consenso UMP per tutti (13/08/2026)
 
 - `last_consent_reset_version` portato a **v4**: al primo avvio della 86 UMP fa `reset()` e il form GDPR viene riproposto anche a chi aveva già scelto.

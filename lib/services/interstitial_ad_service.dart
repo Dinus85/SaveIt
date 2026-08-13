@@ -212,7 +212,6 @@ class InterstitialAdService {
       var shown = await _showInterstitial(
         context: context,
         requestConsentIfNeeded: false,
-        allowTestFallback: !allowWithoutRealAd,
       );
       if (!shown) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -220,7 +219,6 @@ class InterstitialAdService {
         shown = await _showInterstitial(
           context: context,
           requestConsentIfNeeded: false,
-          allowTestFallback: !allowWithoutRealAd,
         );
       }
       // Fallback fill: se consenso ok ma no inventory personalizzato, riprova NPA.
@@ -230,7 +228,6 @@ class InterstitialAdService {
           context: context,
           forceNonPersonalized: true,
           requestConsentIfNeeded: false,
-          allowTestFallback: !allowWithoutRealAd,
         );
       }
       if (shown) return true;
