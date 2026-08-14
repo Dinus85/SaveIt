@@ -67,7 +67,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   List<MockPost> _posts = [];
   List<SearchResult> _searchResults = [];
   bool _isSearching = false;
-  bool _isPinterestView = false; // 🆕 NUOVO: Vista Pinterest
+  bool _isPinterestView = true;
 
   Timer? _searchDebounceTimer;
   String _lastTrackedQuery = '';
@@ -170,7 +170,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
-        _isPinterestView = prefs.getBool('isPinterestView') ?? false;
+        _isPinterestView = prefs.getBool('isPinterestView') ?? true;
       });
     }
   }

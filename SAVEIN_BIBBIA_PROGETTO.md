@@ -421,7 +421,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.7+88`** (ago 2026). Include banner ads in Home, sottocartelle e tra i post; UMP GDPR; force-update da dashboard.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.7+89`** (ago 2026). Include banner ads in Home, sottocartelle e tra i post; UMP GDPR; force-update da dashboard. Vista post default a griglia.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1148,7 +1148,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.7+88`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.7** (il train `1.1.6` e' Pronta per la distribuzione).
+- Versione app corrente (repo): **`1.1.7+89`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.7** (il train `1.1.6` e' Pronta per la distribuzione).
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1897,6 +1897,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - `FirebaseAnalytics.setConsent` default granted in `main.dart` (fuori UE); in UE UMP aggiorna i flag se Consent Mode e' ON in AdMob.
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
+
+### Build `1.1.7+89` — vista post default a griglia (14/08/2026)
+
+- Default vista post nelle cartelle: **griglia** (Pinterest), non più elenco. Chi ha già scelto elenco resta sull'elenco (`SharedPreferences` `isPinterestView`).
+- **Azione**: Codemagic → TestFlight **89**; collega alla versione App Store **1.1.7**.
 
 ### Build `1.1.7+88` — nuovo train App Store + banner sottocartelle/post (14/08/2026)
 
