@@ -1897,6 +1897,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.7+88` — nuovo train App Store + banner sottocartelle/post (14/08/2026)
+
+- Marketing **1.1.7**, build **88**: il train `1.1.6` e' "Pronta per la distribuzione"; Apple non accetta altri build su `1.1.6` (rischio 90186 / 90062).
+- Contenuto: banner ogni N cartelle anche nelle sottocartelle; banner ogni N post.
+- **Azione**: Codemagic → TestFlight **88**; in App Store Connect crea versione **1.1.7** e collega la build.
+
 ### Build `1.1.6+88` — banner ads nelle sottocartelle e tra i post (13/08/2026)
 
 - Banner ogni N cartelle anche **dentro le sottocartelle** (stessa frequenza della Home, default 3).
