@@ -501,6 +501,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
       _wasInBackground = true;
       _lastBackgroundTime = DateTime.now();
       _analytics.endSession();
+      unawaited(InterstitialAdService.instance.markSessionPaused());
       unawaited(ShareExtensionService.instance.exportCatalog());
     } else if (state == AppLifecycleState.resumed) {
       unawaited(
@@ -1347,7 +1348,7 @@ class _WebHomePageState extends State<WebHomePage>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        unawaited(_maybeShowDailyOpenAd());
+        unawaited(_maybeShowSessionAds(coldStart: true));
         unawaited(_checkDueReminders());
         unawaited(_maybeShowNewSignupPremiumPromo());
         unawaited(_maybeShowPendingSharedImportPrompt());
@@ -1362,6 +1363,7 @@ class _WebHomePageState extends State<WebHomePage>
     if (state == AppLifecycleState.resumed) {
       unawaited(_loadActivePromotionBanner());
       unawaited(_maybeShowPendingSharedImportPrompt());
+      unawaited(_maybeShowSessionAds(coldStart: false));
     }
   }
 
@@ -1551,10 +1553,12 @@ class _WebHomePageState extends State<WebHomePage>
     );
   }
 
-  Future<void> _maybeShowDailyOpenAd() async {
-    if (_dailyOpenAdChecked) return;
-    _dailyOpenAdChecked = true;
-    await InterstitialAdService.instance.showDailyOpenAdIfNeeded();
+  Future<void> _maybeShowSessionAds({required bool coldStart}) async {
+    if (coldStart) {
+      if (_dailyOpenAdChecked) return;
+      _dailyOpenAdChecked = true;
+    }
+    await InterstitialAdService.instance.showSessionAdsIfNeeded();
   }
 
   Future<void> _checkDueReminders() async {

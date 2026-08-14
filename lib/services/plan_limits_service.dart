@@ -122,6 +122,18 @@ class PlanLimitsService {
       id: 'post_banner_every_n_posts',
       name: 'Banner pubblicitari ogni N post',
     ),
+    (
+      id: 'interstitial_daily_open',
+      name: 'Interstitial alla prima apertura del giorno',
+    ),
+    (
+      id: 'interstitial_idle_hours',
+      name: 'Interstitial dopo N ore di inattività',
+    ),
+    (
+      id: 'interstitial_every_n_post_opens',
+      name: 'Interstitial ogni N post aperti',
+    ),
     (id: 'reminders', name: 'Reminder'),
   ];
 
@@ -272,6 +284,48 @@ class PlanLimitsService {
       },
     },
     'post_banner_every_n_posts': {
+      'free': {
+        'enabled': true,
+        'limit': 3,
+        'period': 'total',
+        'requiresAd': false
+      },
+      'premium': {
+        'enabled': false,
+        'limit': 0,
+        'period': 'total',
+        'requiresAd': false
+      },
+    },
+    'interstitial_daily_open': {
+      'free': {
+        'enabled': true,
+        'limit': 1,
+        'period': 'day',
+        'requiresAd': false
+      },
+      'premium': {
+        'enabled': false,
+        'limit': 0,
+        'period': 'day',
+        'requiresAd': false
+      },
+    },
+    'interstitial_idle_hours': {
+      'free': {
+        'enabled': true,
+        'limit': 3,
+        'period': 'total',
+        'requiresAd': false
+      },
+      'premium': {
+        'enabled': false,
+        'limit': 0,
+        'period': 'total',
+        'requiresAd': false
+      },
+    },
+    'interstitial_every_n_post_opens': {
       'free': {
         'enabled': true,
         'limit': 3,
@@ -666,7 +720,12 @@ class PlanLimitsService {
       case 'subfolder_banner_every_n_folders':
         return ('cartella', 'cartelle');
       case 'post_banner_every_n_posts':
+      case 'interstitial_every_n_post_opens':
         return ('post', 'post');
+      case 'interstitial_idle_hours':
+        return ('ora', 'ore');
+      case 'interstitial_daily_open':
+        return ('apertura', 'aperture');
       default:
         return ('utilizzo', 'utilizzi');
     }
@@ -707,6 +766,20 @@ class PlanLimitsService {
   /// Frequenza banner tra i post. Null se disabilitati.
   static int? postBannerEveryNPosts() {
     return _bannerEveryN('post_banner_every_n_posts', 3);
+  }
+
+  static bool dailyOpenInterstitialEnabled() {
+    return _bannerEveryN('interstitial_daily_open', 1) != null;
+  }
+
+  /// Ore di inattività prima di un interstitial. Null se disabilitato.
+  static int? idleInterstitialHours() {
+    return _bannerEveryN('interstitial_idle_hours', 3);
+  }
+
+  /// Ogni N aperture post (contatore persistente). Null se disabilitato.
+  static int? postOpenInterstitialEveryN() {
+    return _bannerEveryN('interstitial_every_n_post_opens', 3);
   }
 
   static int? _bannerEveryN(String featureId, int defaultLimit) {
@@ -761,6 +834,17 @@ class PlanLimitsService {
       if (limit <= 0) return 'Nessun banner tra i post';
       final base = 'Banner ogni $limit post';
       return requiresAd ? '$base · richiede pubblicità' : base;
+    }
+    if (featureId == 'interstitial_daily_open') {
+      return 'Interstitial alla prima apertura del giorno';
+    }
+    if (featureId == 'interstitial_idle_hours') {
+      if (limit <= 0) return 'Nessun interstitial per inattività';
+      return 'Interstitial dopo $limit ${limit == 1 ? 'ora' : 'ore'} di inattività';
+    }
+    if (featureId == 'interstitial_every_n_post_opens') {
+      if (limit <= 0) return 'Nessun interstitial all\'apertura post';
+      return 'Interstitial ogni $limit post aperti';
     }
 
     if (featureId == 'manual_tags') {

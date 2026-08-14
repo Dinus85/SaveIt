@@ -2528,6 +2528,12 @@ class _PlanComparisonSlidesDialogState
         return Icons.view_agenda_outlined;
       case 'post_banner_every_n_posts':
         return Icons.view_day_outlined;
+      case 'interstitial_daily_open':
+        return Icons.wb_sunny_outlined;
+      case 'interstitial_idle_hours':
+        return Icons.hourglass_empty_outlined;
+      case 'interstitial_every_n_post_opens':
+        return Icons.slideshow_outlined;
       case 'reminders':
         return Icons.alarm_outlined;
       default:

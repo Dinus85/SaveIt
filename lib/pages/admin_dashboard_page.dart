@@ -3075,6 +3075,48 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               'requiresAd': false
             },
           },
+          'interstitial_daily_open': {
+            'free': {
+              'enabled': true,
+              'limit': 1,
+              'period': 'day',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': false,
+              'limit': 0,
+              'period': 'day',
+              'requiresAd': false
+            },
+          },
+          'interstitial_idle_hours': {
+            'free': {
+              'enabled': true,
+              'limit': 3,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': false,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
+          'interstitial_every_n_post_opens': {
+            'free': {
+              'enabled': true,
+              'limit': 3,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': false,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
           'reminders': {
             'free': {
               'enabled': true,
@@ -3170,6 +3212,24 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             'name': 'Banner pubblicitari ogni N post',
             'desc':
                 'Solo Free. Il campo Limite indica ogni quanti post inserire un banner (es. 3). Disabilita per nascondere i banner tra i post. Premium non vede pubblicità.'
+          },
+          {
+            'id': 'interstitial_daily_open',
+            'name': 'Interstitial alla prima apertura del giorno',
+            'desc':
+                'Solo Free. Mostra un interstitial alla prima apertura dell\'app nella giornata. Disabilita per toglierlo. Premium non vede pubblicità.'
+          },
+          {
+            'id': 'interstitial_idle_hours',
+            'name': 'Interstitial dopo N ore di inattività',
+            'desc':
+                'Solo Free. Il campo Limite è il numero di ore di inutilizzo dalla sessione precedente (es. 3). Disabilita per toglierlo. Non si somma all\'interstitial della prima apertura dello stesso avvio. Premium non vede pubblicità.'
+          },
+          {
+            'id': 'interstitial_every_n_post_opens',
+            'name': 'Interstitial ogni N post aperti',
+            'desc':
+                'Solo Free. Il campo Limite indica ogni quanti post aperti mostrare un interstitial prima dell\'apertura (es. 3). Il contatore non si azzera a mezzanotte. Disabilita per toglierlo. Premium non vede pubblicità.'
           },
           {
             'id': 'reminders',

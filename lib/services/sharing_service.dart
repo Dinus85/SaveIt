@@ -632,6 +632,11 @@ class SharingService {
 
   static Future<void> openPostDirectly(BuildContext context, String url) async {
     try {
+      if (context.mounted) {
+        await InterstitialAdService.instance.showPostOpenAdIfRequired();
+      }
+      if (!context.mounted) return;
+
       final Uri uri = Uri.parse(url);
 
       print('DEBUG: Tentativo apertura URL: $url');

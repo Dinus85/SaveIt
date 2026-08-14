@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -45,18 +44,13 @@ class InterstitialAdService {
 
   bool _isInitialized = false;
   bool _isShowingAd = false;
-  bool _isTestFlightBuild = false;
-  bool _testFlightResolved = false;
   Future<void>? _initializing;
 
   /// Ultimo motivo per cui l'interstitial non e' partita (diagnostica UI).
   String? lastFailureReason;
 
-  /// Debug: sempre unit di test Google. TestFlight: unit SaveIn, poi fallback
-  /// test se no-fill. App Store: solo unit SaveIn.
+  /// Solo in debug locale: unit di test Google. TestFlight e store: unit SaveIn.
   static bool get useTestAds => kDebugMode;
-
-  bool get isTestFlightBuild => _isTestFlightBuild;
 
   static String get bannerAdUnitId {
     final isIos = defaultTargetPlatform == TargetPlatform.iOS;
@@ -66,43 +60,8 @@ class InterstitialAdService {
     return isIos ? iosBannerAdUnitId : androidBannerAdUnitId;
   }
 
-  static String get testBannerAdUnitId {
-    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
-    return isIos ? _iosTestBannerAdUnitId : _androidTestBannerAdUnitId;
-  }
-
-  String? get _testInterstitialAdUnitId {
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        return _androidTestInterstitialAdUnitId;
-      case TargetPlatform.iOS:
-        return _iosTestInterstitialAdUnitId;
-      default:
-        return null;
-    }
-  }
-
-  Future<void> _resolveTestFlight() async {
-    if (_testFlightResolved || kIsWeb || kDebugMode) {
-      _testFlightResolved = true;
-      return;
-    }
-    _testFlightResolved = true;
-    if (defaultTargetPlatform != TargetPlatform.iOS) return;
-    try {
-      const channel = MethodChannel('eu.savein.app/ads');
-      _isTestFlightBuild =
-          await channel.invokeMethod<bool>('isTestFlight') ?? false;
-      debugPrint('AdMob TestFlight=$_isTestFlightBuild');
-    } catch (e) {
-      debugPrint('AdMob isTestFlight check skip: $e');
-      _isTestFlightBuild = false;
-    }
-  }
-
   Future<void> initialize() async {
     if (kIsWeb) return;
-    await _resolveTestFlight();
     if (_isInitialized) return;
     if (_initializing != null) return _initializing!;
 
@@ -138,24 +97,77 @@ class InterstitialAdService {
     return _initializing!;
   }
 
-  Future<bool> showDailyOpenAdIfNeeded() async {
+  /// Prima apertura del giorno e/o interstitial dopo N ore di inattività.
+  /// Nello stesso resume/avvio mostra al massimo un interstitial (priorità: giornaliero).
+  Future<bool> showSessionAdsIfNeeded() async {
     if (!_shouldUseAds) return false;
 
     final userId = _currentUserId;
     if (userId == null) return false;
 
     final prefs = await SharedPreferences.getInstance();
-    final today = _todayKey();
-    final lastShown = prefs.getString(_dailyOpenAdKey(userId));
-    if (lastShown == today) {
-      return false;
+
+    if (PlanLimitsService.dailyOpenInterstitialEnabled()) {
+      final today = _todayKey();
+      final lastShown = prefs.getString(_dailyOpenAdKey(userId));
+      if (lastShown != today) {
+        final shown = await _showInterstitial();
+        if (shown) {
+          await prefs.setString(_dailyOpenAdKey(userId), today);
+        }
+        return shown;
+      }
     }
 
-    final shown = await _showInterstitial();
-    if (shown) {
-      await prefs.setString(_dailyOpenAdKey(userId), today);
-    }
-    return shown;
+    final idleHours = PlanLimitsService.idleInterstitialHours();
+    if (idleHours == null) return false;
+
+    final lastMs = prefs.getInt(_lastSessionKey(userId));
+    if (lastMs == null) return false;
+
+    final idleFor = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(lastMs),
+    );
+    if (idleFor < Duration(hours: idleHours)) return false;
+
+    return _showInterstitial();
+  }
+
+  Future<bool> showDailyOpenAdIfNeeded() async {
+    return showSessionAdsIfNeeded();
+  }
+
+  /// Salva il momento in cui l'app va in background, per l'interstitial di inattività.
+  Future<void> markSessionPaused() async {
+    if (kIsWeb) return;
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _lastSessionKey(userId),
+      DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  /// Ogni N aperture post (contatore persistente, anche tra giorni).
+  /// Se l'ads non parte, il post si apre comunque.
+  Future<void> showPostOpenAdIfRequired() async {
+    if (!_shouldUseAds || _isShowingAd) return;
+
+    final everyN = PlanLimitsService.postOpenInterstitialEveryN();
+    if (everyN == null) return;
+
+    final userId = _currentUserId;
+    if (userId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final key = _postOpensKey(userId);
+    final count = (prefs.getInt(key) ?? 0) + 1;
+    await prefs.setInt(key, count);
+    if (count % everyN != 0) return;
+
+    await _showInterstitial();
   }
 
   Future<bool> showImportAdIfRequired() async {
@@ -297,6 +309,10 @@ class InterstitialAdService {
 
   String _dailyOpenAdKey(String userId) => 'ads_daily_open_$userId';
 
+  String _lastSessionKey(String userId) => 'ads_last_session_at_$userId';
+
+  String _postOpensKey(String userId) => 'ads_post_opens_$userId';
+
   String _todayKey() {
     final now = DateTime.now();
     final month = now.month.toString().padLeft(2, '0');
@@ -323,15 +339,13 @@ class InterstitialAdService {
     BuildContext? context,
     bool forceNonPersonalized = false,
     bool requestConsentIfNeeded = true,
-    String? adUnitOverride,
-    bool allowTestFallback = true,
   }) async {
     if (!_shouldUseAds || _isShowingAd) {
       lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
       return false;
     }
 
-    final adUnitId = adUnitOverride ?? _interstitialAdUnitId;
+    final adUnitId = _interstitialAdUnitId;
     if (adUnitId == null) {
       lastFailureReason = 'unsupported_platform';
       return false;
@@ -409,37 +423,14 @@ class InterstitialAdService {
       ),
     );
 
-    final wait = _isTestFlightBuild && adUnitOverride == null
-        ? const Duration(seconds: 8)
-        : const Duration(seconds: 20);
-
-    final shown = await completer.future.timeout(
-      wait,
+    return completer.future.timeout(
+      const Duration(seconds: 20),
       onTimeout: () {
         lastFailureReason = 'timeout';
         _isShowingAd = false;
         return false;
       },
     );
-    if (shown) return true;
-
-    final testId = _testInterstitialAdUnitId;
-    final alreadyTest = adUnitOverride != null && adUnitOverride == testId;
-    if (allowTestFallback &&
-        _isTestFlightBuild &&
-        !alreadyTest &&
-        testId != null &&
-        (lastFailureReason == 'no_fill' ||
-            lastFailureReason == 'timeout' ||
-            lastFailureReason == 'show_error')) {
-      return _showInterstitial(
-        context: context,
-        requestConsentIfNeeded: false,
-        adUnitOverride: testId,
-        allowTestFallback: false,
-      );
-    }
-    return false;
   }
 }
 
