@@ -159,7 +159,8 @@ Feature rule principali:
 - `share_post`: abilita e limita condivisione post.
 - `import_shared_post`: ogni post importato conta 1 (singolo o dentro una cartella).
 - `import_shared_folder`: ogni cartella root importata conta 1. L'import cartella richiede anche slot `import_shared_post` sufficienti per i post contenuti (controllo incrociato).
-- `home_banner_every_n_folders`: solo Free; il campo `limit` indica ogni quante cartelle in Home inserire un banner (es. 2/3/4/6). `enabled=false` nasconde i banner.
+- `home_banner_every_n_folders`: solo Free; `limit` = ogni quante cartelle inserire un banner in **Home e sottocartelle** (es. 2/3/4/6). `enabled=false` nasconde i banner cartelle.
+- `post_banner_every_n_posts`: solo Free; `limit` = ogni quanti post inserire un banner (default 3). `enabled=false` nasconde i banner tra i post.
 - Compatibilita': se in Firestore resta solo il vecchio `import_shared`, l'app/functions lo mappano su entrambe le nuove chiavi finche' non si salva dalla dashboard.
 
 Regole importanti:
@@ -420,7 +421,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.2+62`** (lug 2026). Include Share Extension iOS con salvataggio diretto + enrich IG/TikTok in `savePostFromShare`.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.7+88`** (ago 2026). Include banner ads in Home, sottocartelle e tra i post; UMP GDPR; force-update da dashboard.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1147,7 +1148,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.5+77`** — da pubblicare sui canali di test Play quando serve
+- Versione app corrente (repo): **`1.1.7+88`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.7** (il train `1.1.6` e' Pronta per la distribuzione).
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1220,7 +1221,7 @@ Configurazione nei file:
 Logica ads:
 - Solo utenti Free (`AppAccessService().hasAds`)
 - **Interstitial**: mostrato prima di apertura post remindato e ogni 5 import; anche come gate se `requiresAd` e' true per reminder/share/import
-- **Banner**: in Home ogni N cartelle, con N da dashboard `home_banner_every_n_folders.limit` (default Free 3); `enabled=false` nasconde i banner
+- **Banner**: in Home e nelle sottocartelle ogni N cartelle; tra i post ogni N post. N da dashboard `home_banner_every_n_folders` / `post_banner_every_n_posts` (default Free 3); `enabled=false` nasconde i banner
 - Blocco iOS di build `+20` rimosso in `1.1.0+58`; da `1.1.2+63` i cambi dashboard `requiresAd` arrivano subito via live sync `config/plan_limits`
 
 **Stato AdMob / Firebase / Google Ads (29/07/2026)**:
@@ -1900,15 +1901,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 ### Build `1.1.7+88` — nuovo train App Store + banner sottocartelle/post (14/08/2026)
 
 - Marketing **1.1.7**, build **88**: il train `1.1.6` e' "Pronta per la distribuzione"; Apple non accetta altri build su `1.1.6` (rischio 90186 / 90062).
-- Contenuto: banner ogni N cartelle anche nelle sottocartelle; banner ogni N post.
-- **Azione**: Codemagic → TestFlight **88**; in App Store Connect crea versione **1.1.7** e collega la build.
+- Contenuto: banner ogni N cartelle anche nelle sottocartelle (stessa frequenza Home); banner ogni N post in lista e vista Pinterest (`MultiSelectPostManager`).
+- Dashboard: `home_banner_every_n_folders` vale per Home + sottocartelle; nuova voce `post_banner_every_n_posts` (default Free 3).
+- **Azione**: Codemagic → TestFlight **88**; in App Store Connect crea versione **1.1.7** e collega la build. Non caricare altri `1.1.6`.
 
 ### Build `1.1.6+88` — banner ads nelle sottocartelle e tra i post (13/08/2026)
 
-- Banner ogni N cartelle anche **dentro le sottocartelle** (stessa frequenza della Home, default 3).
-- Banner ogni N **post** in tutta l'app (`MultiSelectPostManager`, default 3).
-- Dashboard: voce `post_banner_every_n_posts`; `home_banner_every_n_folders` vale per Home e sottocartelle.
-- **Azione**: Codemagic → TestFlight **88**.
+- Stesso contenuto della `1.1.7+88`, ma marketing version ancora `1.1.6` (non caricare su App Store: train chiuso).
 
 ### Build `1.1.6+87` — interstitial reminder anche con ads di test (13/08/2026)
 
