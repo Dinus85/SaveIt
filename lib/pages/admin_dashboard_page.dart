@@ -3061,6 +3061,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               'requiresAd': false
             },
           },
+          'post_banner_every_n_posts': {
+            'free': {
+              'enabled': true,
+              'limit': 3,
+              'period': 'total',
+              'requiresAd': false
+            },
+            'premium': {
+              'enabled': false,
+              'limit': 0,
+              'period': 'total',
+              'requiresAd': false
+            },
+          },
           'reminders': {
             'free': {
               'enabled': true,
@@ -3147,9 +3161,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           },
           {
             'id': 'home_banner_every_n_folders',
-            'name': 'Banner pubblicitari ogni N cartelle (Home)',
+            'name': 'Banner pubblicitari ogni N cartelle (Home e sottocartelle)',
             'desc':
-                'Solo Free. Il campo Limite indica ogni quante cartelle in Home inserire un banner (es. 2, 3, 4, 6). Disabilita per nascondere i banner. Premium non vede pubblicità.'
+                'Solo Free. Il campo Limite indica ogni quante cartelle inserire un banner in Home e nelle sottocartelle (es. 2, 3, 4, 6). Disabilita per nascondere i banner. Premium non vede pubblicità.'
+          },
+          {
+            'id': 'post_banner_every_n_posts',
+            'name': 'Banner pubblicitari ogni N post',
+            'desc':
+                'Solo Free. Il campo Limite indica ogni quanti post inserire un banner (es. 3). Disabilita per nascondere i banner tra i post. Premium non vede pubblicità.'
           },
           {
             'id': 'reminders',

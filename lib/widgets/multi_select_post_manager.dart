@@ -10,6 +10,9 @@ import 'package:savein/services/sharing_service.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/utils/theme_helpers.dart';
 import 'package:savein/utils/dialog_helpers.dart';
+import 'package:savein/widgets/banner_ad_widget.dart';
+import 'package:savein/services/access_control_service.dart';
+import 'package:savein/services/plan_limits_service.dart';
 
 /// Gestore dello stato per la selezione multipla dei post
 class MultiSelectPostState extends ChangeNotifier {
@@ -141,95 +144,146 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
 
   @override
   Widget build(BuildContext context) {
+    final bannerEveryN = AppAccessService().hasAds
+        ? PlanLimitsService.postBannerEveryNPosts()
+        : null;
+
     if (widget.asSliver) {
-      final sliver = widget.gridDelegate != null
-          ? SliverMasonryGrid.count(
-              crossAxisCount: (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount).crossAxisCount,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              itemBuilder: (context, index) {
-                final post = widget.posts[index];
-                final isSelected = _selectionState.isSelected(post.id);
-                return widget.childBuilder(
-                  post,
-                  isSelected,
-                  () => _handlePostTap(post),
-                  () => _handlePostLongPress(post),
-                );
-              },
-              childCount: widget.posts.length,
-            )
-          : SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final post = widget.posts[index];
-                  final isSelected = _selectionState.isSelected(post.id);
-
-                  return widget.childBuilder(
-                    post,
-                    isSelected,
-                    () => _handlePostTap(post),
-                    () => _handlePostLongPress(post),
-                  );
-                },
-                childCount: widget.posts.length,
-              ),
-            );
-
       return SliverMainAxisGroup(
         slivers: [
           if (_selectionState.isSelectionMode)
             SliverToBoxAdapter(child: _buildSelectionActionBar()),
-          sliver,
+          ..._buildPostSlivers(bannerEveryN),
         ],
       );
     }
 
-    final list = widget.gridDelegate != null
-        ? MasonryGridView.count(
-            crossAxisCount: (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount).crossAxisCount,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            itemCount: widget.posts.length,
-            shrinkWrap: !widget.scrollable,
-            physics: widget.scrollable ? null : const NeverScrollableScrollPhysics(),
-            itemBuilder: (context, index) {
-              final post = widget.posts[index];
-              final isSelected = _selectionState.isSelected(post.id);
-              return widget.childBuilder(
-                post,
-                isSelected,
-                () => _handlePostTap(post),
-                () => _handlePostLongPress(post),
-              );
-            },
-          )
-        : ListView.builder(
-            itemCount: widget.posts.length,
-            shrinkWrap: !widget.scrollable,
-            physics:
-                widget.scrollable ? null : const NeverScrollableScrollPhysics(),
-            itemBuilder: (context, index) {
-              final post = widget.posts[index];
-              final isSelected = _selectionState.isSelected(post.id);
-
-              return widget.childBuilder(
-                post,
-                isSelected,
-                () => _handlePostTap(post),
-                () => _handlePostLongPress(post),
-              );
-            },
-          );
+    final list = _buildPostList(bannerEveryN);
 
     return Column(
       children: [
-        // Barra delle azioni quando in modalità selezione
         if (_selectionState.isSelectionMode) _buildSelectionActionBar(),
-
-        // Lista dei post
         if (widget.scrollable) Expanded(child: list) else list,
       ],
+    );
+  }
+
+  int _visualItemCount(int postCount, int? bannerEveryN) {
+    if (bannerEveryN == null || bannerEveryN <= 0) return postCount;
+    return postCount + (postCount ~/ bannerEveryN);
+  }
+
+  /// `null` = slot banner.
+  int? _postIndexForVisual(int visualIndex, int bannerEveryN) {
+    final cycle = bannerEveryN + 1;
+    final pos = visualIndex % cycle;
+    if (pos == bannerEveryN) return null;
+    return (visualIndex ~/ cycle) * bannerEveryN + pos;
+  }
+
+  Widget _buildPostAt(int postIndex) {
+    final post = widget.posts[postIndex];
+    final isSelected = _selectionState.isSelected(post.id);
+    return widget.childBuilder(
+      post,
+      isSelected,
+      () => _handlePostTap(post),
+      () => _handlePostLongPress(post),
+    );
+  }
+
+  List<Widget> _buildPostSlivers(int? bannerEveryN) {
+    final isPinterest = widget.gridDelegate != null;
+    if (bannerEveryN == null || bannerEveryN <= 0) {
+      return [
+        isPinterest
+            ? _buildPinterestSliver(widget.posts, 0)
+            : _buildListSliver(widget.posts, 0),
+      ];
+    }
+
+    final slivers = <Widget>[];
+    for (var start = 0; start < widget.posts.length; start += bannerEveryN) {
+      final end = (start + bannerEveryN).clamp(0, widget.posts.length);
+      final chunk = widget.posts.sublist(start, end);
+      slivers.add(
+        isPinterest
+            ? _buildPinterestSliver(chunk, start)
+            : _buildListSliver(chunk, start),
+      );
+      if (chunk.length == bannerEveryN) {
+        slivers.add(
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: BannerAdWidget(),
+            ),
+          ),
+        );
+      }
+    }
+    return slivers;
+  }
+
+  Widget _buildPinterestSliver(List<MockPost> posts, int startIndex) {
+    final crossAxisCount =
+        (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount)
+            .crossAxisCount;
+    return SliverMasonryGrid.count(
+      crossAxisCount: crossAxisCount,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      itemBuilder: (context, index) => _buildPostAt(startIndex + index),
+      childCount: posts.length,
+    );
+  }
+
+  Widget _buildListSliver(List<MockPost> posts, int startIndex) {
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) => _buildPostAt(startIndex + index),
+        childCount: posts.length,
+      ),
+    );
+  }
+
+  Widget _buildPostList(int? bannerEveryN) {
+    final isPinterest = widget.gridDelegate != null;
+    final itemCount = _visualItemCount(widget.posts.length, bannerEveryN);
+
+    Widget itemBuilder(BuildContext context, int index) {
+      if (bannerEveryN == null) {
+        return _buildPostAt(index);
+      }
+      final postIndex = _postIndexForVisual(index, bannerEveryN);
+      if (postIndex == null) {
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: BannerAdWidget(),
+        );
+      }
+      return _buildPostAt(postIndex);
+    }
+
+    if (isPinterest && bannerEveryN == null) {
+      return MasonryGridView.count(
+        crossAxisCount:
+            (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount)
+                .crossAxisCount,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        itemCount: widget.posts.length,
+        shrinkWrap: !widget.scrollable,
+        physics: widget.scrollable ? null : const NeverScrollableScrollPhysics(),
+        itemBuilder: (context, index) => _buildPostAt(index),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: itemCount,
+      shrinkWrap: !widget.scrollable,
+      physics: widget.scrollable ? null : const NeverScrollableScrollPhysics(),
+      itemBuilder: itemBuilder,
     );
   }
 

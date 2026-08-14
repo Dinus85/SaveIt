@@ -1897,6 +1897,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Firebase init resta **prima** di UMP/AdMob (requisito Google).
 - **AdMob console (salvato 02/08/2026)**: ON **modalità consenso scopi pubblicitari** + ON **modalità consenso scopi di analisi**.
 
+### Build `1.1.6+88` — banner ads nelle sottocartelle e tra i post (13/08/2026)
+
+- Banner ogni N cartelle anche **dentro le sottocartelle** (stessa frequenza della Home, default 3).
+- Banner ogni N **post** in tutta l'app (`MultiSelectPostManager`, default 3).
+- Dashboard: voce `post_banner_every_n_posts`; `home_banner_every_n_folders` vale per Home e sottocartelle.
+- **Azione**: Codemagic → TestFlight **88**.
+
 ### Build `1.1.6+87` — interstitial reminder anche con ads di test (13/08/2026)
 
 - In Home il banner si vedeva (su TestFlight spesso unit di test Google); il reminder saltava l'ads perché il fallback test era disattivato sul gate.

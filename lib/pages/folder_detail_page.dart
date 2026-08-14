@@ -25,6 +25,8 @@ import 'package:savein/pages/shared_items_page.dart';
 import 'package:savein/widgets/custom_bottom_nav.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/widgets/reminder_dialog.dart';
+import 'package:savein/widgets/banner_ad_widget.dart';
+import 'package:savein/services/plan_limits_service.dart';
 
 // Pagina dettaglio cartella CON APERTURA REALE DEI POST E SELEZIONE MULTIPLA
 class FolderDetailPage extends StatefulWidget {
@@ -1011,70 +1013,13 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         controller: _contentScrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          // Sezione Sottocartelle
+          // Sezione Sottocartelle (griglia 2 colonne + banner ogni N, come in Home)
           if (hasSubfolders)
             SliverPadding(
               padding: const EdgeInsets.only(top: 16),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.0,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final sortedChildren = _getSortedSubfolders();
-                    final subfolder = sortedChildren[index];
-                    final highlightSubfolder = _showReminderHighlight &&
-                        widget.highlightFolderId != null &&
-                        widget.highlightFolderId == subfolder.id;
-
-                    final card = MockFolderCard(
-                      folder: subfolder,
-                      onTap: () => _openSubfolder(subfolder),
-                      onRename: _showRenameSubfolderDialog,
-                      onDelete: _showDeleteSubfolderDialog,
-                      onMove: _showMoveSubfolderDialog,
-                      allFolders: widget.allFolders,
-                      isDarkTheme: widget.isDarkTheme,
-                    );
-
-                    if (highlightSubfolder) {
-                      return AnimatedBuilder(
-                        key: _highlightedFolderKey,
-                        animation: _pulseAnim,
-                        builder: (context, child) {
-                          final pulse = _pulseAnim.value;
-                          return Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              color: Colors.orange
-                                  .withOpacity(0.18 + pulse * 0.22),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: Colors.orange
-                                    .withOpacity(0.7 + pulse * 0.3),
-                                width: 2.5 + pulse * 1.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.orange
-                                      .withOpacity(0.25 + pulse * 0.35),
-                                  blurRadius: 10 + pulse * 12,
-                                  spreadRadius: 1 + pulse * 3,
-                                ),
-                              ],
-                            ),
-                            child: child,
-                          );
-                        },
-                        child: card,
-                      );
-                    }
-                    return card;
-                  },
-                  childCount: _currentFolder.children.length,
+              sliver: SliverList(
+                delegate: SliverChildListDelegate(
+                  _buildSubfolderRowsWithAds(),
                 ),
               ),
             ),
@@ -2185,6 +2130,106 @@ class _FolderDetailPageState extends State<FolderDetailPage>
             ),
         ],
       ),
+    );
+  }
+
+  List<Widget> _buildSubfolderRowsWithAds() {
+    final sortedChildren = _getSortedSubfolders();
+    final showAds = AppAccessService().hasAds;
+    final bannerEveryN = PlanLimitsService.homeBannerEveryNFolders();
+    final List<Widget> rows = [];
+
+    for (int i = 0; i < sortedChildren.length; i += 2) {
+      final folder1 = sortedChildren[i];
+      final folder2 =
+          i + 1 < sortedChildren.length ? sortedChildren[i + 1] : null;
+
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: _buildSubfolderCard(folder1),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: folder2 != null
+                  ? AspectRatio(
+                      aspectRatio: 1,
+                      child: _buildSubfolderCard(folder2),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      );
+
+      if (showAds && bannerEveryN != null) {
+        final foldersShown = (i + 2).clamp(0, sortedChildren.length);
+        final prevShown = i;
+        for (var n = prevShown + 1; n <= foldersShown; n++) {
+          if (n % bannerEveryN == 0) {
+            rows.add(const SizedBox(height: 12));
+            rows.add(const BannerAdWidget());
+            break;
+          }
+        }
+      }
+
+      if (i + 2 < sortedChildren.length) {
+        rows.add(const SizedBox(height: 12));
+      }
+    }
+
+    return rows;
+  }
+
+  Widget _buildSubfolderCard(MockFolder subfolder) {
+    final highlightSubfolder = _showReminderHighlight &&
+        widget.highlightFolderId != null &&
+        widget.highlightFolderId == subfolder.id;
+
+    final card = MockFolderCard(
+      folder: subfolder,
+      onTap: () => _openSubfolder(subfolder),
+      onRename: _showRenameSubfolderDialog,
+      onDelete: _showDeleteSubfolderDialog,
+      onMove: _showMoveSubfolderDialog,
+      allFolders: widget.allFolders,
+      isDarkTheme: widget.isDarkTheme,
+    );
+
+    if (!highlightSubfolder) return card;
+
+    return AnimatedBuilder(
+      key: _highlightedFolderKey,
+      animation: _pulseAnim,
+      builder: (context, child) {
+        final pulse = _pulseAnim.value;
+        return Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: Colors.orange.withOpacity(0.18 + pulse * 0.22),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.orange.withOpacity(0.7 + pulse * 0.3),
+              width: 2.5 + pulse * 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.orange.withOpacity(0.25 + pulse * 0.35),
+                blurRadius: 10 + pulse * 12,
+                spreadRadius: 1 + pulse * 3,
+              ),
+            ],
+          ),
+          child: child,
+        );
+      },
+      child: card,
     );
   }
 

@@ -116,7 +116,11 @@ class PlanLimitsService {
     (id: 'import_shared_folder', name: 'Importazione cartelle'),
     (
       id: 'home_banner_every_n_folders',
-      name: 'Banner pubblicitari ogni N cartelle (Home)',
+      name: 'Banner pubblicitari ogni N cartelle (Home e sottocartelle)',
+    ),
+    (
+      id: 'post_banner_every_n_posts',
+      name: 'Banner pubblicitari ogni N post',
     ),
     (id: 'reminders', name: 'Reminder'),
   ];
@@ -240,6 +244,34 @@ class PlanLimitsService {
       },
     },
     'home_banner_every_n_folders': {
+      'free': {
+        'enabled': true,
+        'limit': 3,
+        'period': 'total',
+        'requiresAd': false
+      },
+      'premium': {
+        'enabled': false,
+        'limit': 0,
+        'period': 'total',
+        'requiresAd': false
+      },
+    },
+    'subfolder_banner_every_n_folders': {
+      'free': {
+        'enabled': true,
+        'limit': 3,
+        'period': 'total',
+        'requiresAd': false
+      },
+      'premium': {
+        'enabled': false,
+        'limit': 0,
+        'period': 'total',
+        'requiresAd': false
+      },
+    },
+    'post_banner_every_n_posts': {
       'free': {
         'enabled': true,
         'limit': 3,
@@ -631,7 +663,10 @@ class PlanLimitsService {
       case 'manual_tags':
         return ('tag', 'tag');
       case 'home_banner_every_n_folders':
+      case 'subfolder_banner_every_n_folders':
         return ('cartella', 'cartelle');
+      case 'post_banner_every_n_posts':
+        return ('post', 'post');
       default:
         return ('utilizzo', 'utilizzi');
     }
@@ -663,14 +698,23 @@ class PlanLimitsService {
     }
   }
 
-  /// Frequenza banner Home: ogni N cartelle (da dashboard `home_banner_every_n_folders`).
+  /// Frequenza banner tra cartelle (Home e sottocartelle).
   /// Ritorna `null` se i banner sono disabilitati; altrimenti N >= 1.
   static int? homeBannerEveryNFolders() {
+    return _bannerEveryN('home_banner_every_n_folders', 3);
+  }
+
+  /// Frequenza banner tra i post. Null se disabilitati.
+  static int? postBannerEveryNPosts() {
+    return _bannerEveryN('post_banner_every_n_posts', 3);
+  }
+
+  static int? _bannerEveryN(String featureId, int defaultLimit) {
     final role = _auth.currentUser?.effectiveRole ?? AppUserRole.free;
     if (role != AppUserRole.free) return null;
 
     Map<String, dynamic>? freeRules;
-    final cached = _cachedRules?['home_banner_every_n_folders'];
+    final cached = _cachedRules?[featureId];
     if (cached is Map) {
       final free = cached['free'];
       if (free is Map) {
@@ -678,8 +722,7 @@ class PlanLimitsService {
       }
     }
     freeRules ??= Map<String, dynamic>.from(
-      (defaultRules['home_banner_every_n_folders']
-          as Map<String, dynamic>)['free'] as Map,
+      (defaultRules[featureId] as Map<String, dynamic>)['free'] as Map,
     );
 
     if (freeRules['enabled'] == false) return null;
@@ -688,7 +731,7 @@ class PlanLimitsService {
         ? raw
         : raw is num
             ? raw.toInt()
-            : int.tryParse(raw?.toString() ?? '') ?? 3;
+            : int.tryParse(raw?.toString() ?? '') ?? defaultLimit;
     if (n <= 0) return null;
     return n;
   }
@@ -708,9 +751,15 @@ class PlanLimitsService {
     final period = (rule['period'] ?? 'total').toString();
     final requiresAd = rule['requiresAd'] == true;
 
-    if (featureId == 'home_banner_every_n_folders') {
-      if (limit <= 0) return 'Nessun banner in Home';
-      final base = 'Banner ogni $limit cartelle in Home';
+    if (featureId == 'home_banner_every_n_folders' ||
+        featureId == 'subfolder_banner_every_n_folders') {
+      if (limit <= 0) return 'Nessun banner tra le cartelle';
+      final base = 'Banner ogni $limit cartelle';
+      return requiresAd ? '$base · richiede pubblicità' : base;
+    }
+    if (featureId == 'post_banner_every_n_posts') {
+      if (limit <= 0) return 'Nessun banner tra i post';
+      final base = 'Banner ogni $limit post';
       return requiresAd ? '$base · richiede pubblicità' : base;
     }
 

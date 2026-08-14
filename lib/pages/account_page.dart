@@ -2526,6 +2526,8 @@ class _PlanComparisonSlidesDialogState
         return Icons.create_new_folder_outlined;
       case 'home_banner_every_n_folders':
         return Icons.view_agenda_outlined;
+      case 'post_banner_every_n_posts':
+        return Icons.view_day_outlined;
       case 'reminders':
         return Icons.alarm_outlined;
       default:
