@@ -202,7 +202,7 @@ class AdsConsentService {
     if (kIsWeb || _hasReset) return;
 
     try {
-      const int currentConsentVersion = 4; // Incrementare per forzare un nuovo reset
+      const int currentConsentVersion = 5; // Incrementare per forzare un nuovo reset
       final prefs = await SharedPreferences.getInstance();
       final lastResetVersion = prefs.getInt('last_consent_reset_version') ?? 0;
 

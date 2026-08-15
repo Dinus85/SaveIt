@@ -1682,7 +1682,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
 
     try {
       final folderService = FolderService();
-      final canProceedAfterAd = await _adService.showImportAdIfRequired();
+      final canProceedAfterAd = await _adService.showImportAdIfRequired(context);
       if (!canProceedAfterAd) {
         if (mounted) {
           setState(() {

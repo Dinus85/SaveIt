@@ -1,1 +1,4 @@
 google.com, pub-1397392558961350, DIRECT, f08c47fec0942fa0
+# Meta Audience Network e AppLovin: sostituisci gli ID dopo la console.
+# facebook.com, YOUR_META_PUBLISHER_ID, RESELLER, c3e20eee3f780d68
+# applovin.com, YOUR_APPLOVIN_APP_ID, DIRECT

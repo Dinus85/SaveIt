@@ -10,7 +10,7 @@ import 'package:savein/services/sharing_service.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/utils/theme_helpers.dart';
 import 'package:savein/utils/dialog_helpers.dart';
-import 'package:savein/widgets/banner_ad_widget.dart';
+import 'package:savein/widgets/native_pin_ad_widget.dart';
 import 'package:savein/services/access_control_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 
@@ -202,21 +202,37 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
       ];
     }
 
+    if (isPinterest) {
+      return [
+        SliverMasonryGrid.count(
+          crossAxisCount:
+              (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount)
+                  .crossAxisCount,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childCount: _visualItemCount(widget.posts.length, bannerEveryN),
+          itemBuilder: (context, index) {
+            final postIndex = _postIndexForVisual(index, bannerEveryN);
+            if (postIndex == null) {
+              return const NativePinAdWidget();
+            }
+            return _buildPostAt(postIndex);
+          },
+        ),
+      ];
+    }
+
     final slivers = <Widget>[];
     for (var start = 0; start < widget.posts.length; start += bannerEveryN) {
       final end = (start + bannerEveryN).clamp(0, widget.posts.length);
       final chunk = widget.posts.sublist(start, end);
-      slivers.add(
-        isPinterest
-            ? _buildPinterestSliver(chunk, start)
-            : _buildListSliver(chunk, start),
-      );
+      slivers.add(_buildListSliver(chunk, start));
       if (chunk.length == bannerEveryN) {
         slivers.add(
           const SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: BannerAdWidget(),
+              child: NativePinAdWidget(),
             ),
           ),
         );
@@ -259,7 +275,7 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
       if (postIndex == null) {
         return const Padding(
           padding: EdgeInsets.symmetric(vertical: 8),
-          child: BannerAdWidget(),
+          child: NativePinAdWidget(),
         );
       }
       return _buildPostAt(postIndex);

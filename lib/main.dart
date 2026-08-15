@@ -580,6 +580,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
   }
 
   void _handleSharedContent(SharedContent sharedContent) {
+    InterstitialAdService.beginImportFlow();
     if (kDebugMode) {
       DebugLogger.logStart(
           '========== CONTENUTO CONDIVISO RICEVUTO ==========');
@@ -598,11 +599,15 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
 
   void _showSharingDialog(SharedContent sharedContent) {
     final BuildContext? context = navigatorKey.currentContext;
-    if (context == null) return;
+    if (context == null) {
+      InterstitialAdService.endImportFlow();
+      return;
+    }
 
     final isLoggedIn = AuthService().isLoggedIn;
 
     if (!isLoggedIn) {
+      InterstitialAdService.endImportFlow();
       _showLoginRequiredDialog(context, sharedContent);
       return;
     }
@@ -613,6 +618,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
         sharedContent,
         isDarkTheme: _isDarkTheme,
       ).then((result) async {
+        InterstitialAdService.endImportFlow();
         // ðŸ”¥ NUOVO: Se result non Ã¨ null, significa che il salvataggio Ã¨ andato a buon fine
         if (result != null && result['folderPath'] != null) {
           print('DEBUG: ðŸ“ Post salvato, preparando navigazione...');
@@ -625,10 +631,12 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
           _navigateToSavedFolder(result['folderPath']!, result['postId']!);
         }
       }).catchError((error) {
+        InterstitialAdService.endImportFlow();
         if (kDebugMode)
           DebugLogger.logError('Dialog salvataggio fallito', error);
       });
     } catch (e) {
+      InterstitialAdService.endImportFlow();
       if (kDebugMode) DebugLogger.logError('Eccezione in showSaveDialog', e);
     }
   }

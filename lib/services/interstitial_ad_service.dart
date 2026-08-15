@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_service.dart';
 import 'access_control_service.dart';
 import 'ads_consent_service.dart';
+import 'ads_ids.dart';
 import 'plan_limits_service.dart';
 
 class InterstitialAdService {
@@ -45,6 +46,9 @@ class InterstitialAdService {
   bool _isInitialized = false;
   bool _isShowingAd = false;
   Future<void>? _initializing;
+
+  /// Se true (import da share in corso) non parte l'interstitial di sessione.
+  static bool suppressSessionAds = false;
 
   /// Ultimo motivo per cui l'interstitial non e' partita (diagnostica UI).
   String? lastFailureReason;
@@ -100,6 +104,7 @@ class InterstitialAdService {
   /// Prima apertura del giorno e/o interstitial dopo N ore di inattività.
   /// Nello stesso resume/avvio mostra al massimo un interstitial (priorità: giornaliero).
   Future<bool> showSessionAdsIfNeeded() async {
+    if (suppressSessionAds) return false;
     if (!_shouldUseAds) return false;
 
     final userId = _currentUserId;
@@ -170,21 +175,33 @@ class InterstitialAdService {
     await _showInterstitial();
   }
 
-  Future<bool> showImportAdIfRequired() async {
-    if (!_shouldUseAds) return true;
-
+  Future<void> markDailyOpenSatisfied() async {
     final userId = _currentUserId;
-    if (userId == null) return true;
-
+    if (userId == null) return;
     final prefs = await SharedPreferences.getInstance();
-    final successfulImports = prefs.getInt(_successfulImportsKey(userId)) ?? 0;
-    final nextImportOrdinal = successfulImports + 1;
+    await prefs.setString(_dailyOpenAdKey(userId), _todayKey());
+  }
 
-    if (nextImportOrdinal % AppAccessService.importInterstitialFrequency != 0) {
-      return true;
+  static void beginImportFlow() {
+    suppressSessionAds = true;
+  }
+
+  static void endImportFlow() {
+    suppressSessionAds = false;
+  }
+
+  /// Ogni import Free richiede un'ads (rewarded, fallback interstitial).
+  /// Non usa più il modulo ogni 5.
+  Future<bool> showImportAdIfRequired([BuildContext? context]) async {
+    if (!_shouldUseAds) return true;
+    if (context == null || !context.mounted) {
+      final shown = await _showRewardedOrInterstitial();
+      if (shown) await markDailyOpenSatisfied();
+      return shown;
     }
-
-    return _showInterstitial();
+    final ok = await showFeatureAdGate(context, 'import_shared_post');
+    if (ok) await markDailyOpenSatisfied();
+    return ok;
   }
 
   /// Mostra una interstitial ad prima di aprire un reminder.
@@ -215,23 +232,33 @@ class InterstitialAdService {
   /// Reminder: se AdMob non ha inventario, la funzione resta usabile.
   /// Altre feature: dialog Riprova / consenso / Annulla.
   Future<bool> showFeatureAdGate(BuildContext context, String feature) async {
-    if (!await _featureRequiresAd(feature)) return true;
+    if (!_shouldUseAds) return true;
+    final isImport = feature == 'import_shared_post' ||
+        feature == 'import_shared_folder';
+    if (!isImport && !await _featureRequiresAd(feature)) return true;
     if (!context.mounted) return false;
 
     final allowWithoutRealAd = feature == 'reminders';
+    final useRewarded = isImport ||
+        feature == 'share_post' ||
+        feature == 'share_folder';
 
     while (context.mounted) {
-      var shown = await _showInterstitial(
-        context: context,
-        requestConsentIfNeeded: false,
-      );
+      var shown = useRewarded
+          ? await _showRewardedOrInterstitial()
+          : await _showInterstitial(
+              context: context,
+              requestConsentIfNeeded: false,
+            );
       if (!shown) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
         if (!context.mounted) return false;
-        shown = await _showInterstitial(
-          context: context,
-          requestConsentIfNeeded: false,
-        );
+        shown = useRewarded
+            ? await _showRewardedOrInterstitial()
+            : await _showInterstitial(
+                context: context,
+                requestConsentIfNeeded: false,
+              );
       }
       // Fallback fill: se consenso ok ma no inventory personalizzato, riprova NPA.
       if (!shown &&
@@ -242,7 +269,10 @@ class InterstitialAdService {
           requestConsentIfNeeded: false,
         );
       }
-      if (shown) return true;
+      if (shown) {
+        if (isImport) await markDailyOpenSatisfied();
+        return true;
+      }
       if (allowWithoutRealAd) return true;
       if (!context.mounted) return false;
 
@@ -333,6 +363,92 @@ class InterstitialAdService {
       default:
         return null;
     }
+  }
+
+  String? get _rewardedAdUnitId {
+    return AdsIds.rewardedAdUnitId;
+  }
+
+  /// Rewarded se l'unità esiste; altrimenti interstitial. Sempre un'ads vera.
+  Future<bool> _showRewardedOrInterstitial() async {
+    final rewardedId = _rewardedAdUnitId;
+    if (rewardedId != null) {
+      final shown = await _showRewarded(rewardedId);
+      if (shown) return true;
+    }
+    return _showInterstitial(requestConsentIfNeeded: false);
+  }
+
+  Future<bool> _showRewarded(String adUnitId) async {
+    if (!_shouldUseAds || _isShowingAd) {
+      lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
+      return false;
+    }
+    try {
+      await initialize();
+    } catch (_) {
+      lastFailureReason = 'init_error';
+      return false;
+    }
+    final canRequest = await AdsConsentService.instance.canRequestAds();
+    if (!canRequest) {
+      lastFailureReason = 'consent';
+      return false;
+    }
+
+    final loadDone = Completer<RewardedAd?>();
+    RewardedAd.load(
+      adUnitId: adUnitId,
+      request: AdsConsentService.instance.buildAdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          if (!loadDone.isCompleted) loadDone.complete(ad);
+        },
+        onAdFailedToLoad: (error) {
+          debugPrint('RewardedAd load error: $error');
+          lastFailureReason = 'no_fill';
+          if (!loadDone.isCompleted) loadDone.complete(null);
+        },
+      ),
+    );
+    final ad = await loadDone.future.timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {
+        lastFailureReason = 'timeout';
+        return null;
+      },
+    );
+    if (ad == null) return false;
+
+    final shown = Completer<bool>();
+    var earned = false;
+    _isShowingAd = true;
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _isShowingAd = false;
+        if (!shown.isCompleted) shown.complete(earned);
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        lastFailureReason = 'show_error';
+        ad.dispose();
+        _isShowingAd = false;
+        if (!shown.isCompleted) shown.complete(false);
+      },
+    );
+    ad.show(
+      onUserEarnedReward: (_, __) {
+        earned = true;
+      },
+    );
+    return shown.future.timeout(
+      const Duration(seconds: 90),
+      onTimeout: () {
+        _isShowingAd = false;
+        lastFailureReason = 'timeout';
+        return earned;
+      },
+    );
   }
 
   Future<bool> _showInterstitial({

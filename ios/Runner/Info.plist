@@ -65,6 +65,8 @@
 		<string>https</string>
 		<string>http</string>
 	</array>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Usiamo l'identificatore pubblicitario solo per mostrare annunci più pertinenti. Puoi rifiutare e continuare a usare l'app.</string>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-1397392558961350~4643419177</string>
 	<!-- SKAdNetwork: richiesto/consigliato da Google AdMob per attribution e fill iOS -->

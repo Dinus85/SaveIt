@@ -525,6 +525,22 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  gma_mediation_applovin:
+    dependency: "direct main"
+    description:
+      name: gma_mediation_applovin
+      sha256: "99b79dcdaeaffba7bf14a9fddd9bf1e2a0e1c80810ebd0600a6d75b54deb9202"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.5.2"
+  gma_mediation_meta:
+    dependency: "direct main"
+    description:
+      name: gma_mediation_meta
+      sha256: d5a7c7c5e6730694739833a70b0cf9746432a1492086cb9892d65be7fa8f797e
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.5.1"
   google_identity_services_web:
     dependency: transitive
     description:
