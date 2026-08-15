@@ -171,7 +171,7 @@ Regole importanti:
 - `PlanLimitsService` deve aggiornare il profilo utente da Firestore prima di scegliere il tier, cosi un cambio Free/Premium fatto dalla dashboard viene capito dall'app anche se era gia aperta.
 - `AuthService` mantiene un listener live su `users/{uid}`: `role`, `premiumUntil` e `premiumSource` devono restare sincronizzati con Firestore. Non usare la cache locale come fonte di verita per i limiti.
 - Per `root_folders` il controllo deve usare il conteggio reale delle cartelle Home, non un contatore `feature_usage`.
-- Annunci Free: interstitial prima apertura del giorno e dopo N ore idle; ogni N post aperti; pin **native** (stile Pinterest, Meta in mediation) ogni N post in griglia, fallback banner. Import/share Free: **rewarded se AdMob ha inventario**. Se l'inventario e' vuoto (no-fill/timeout) la funzione **non si blocca**; i limiti numerici del piano restano. Consenso rifiutato o ads chiusa senza premio: non sblocca. Se l'app si apre da share, l'interstitial giornaliero e' soppresso e l'ads dell'import vale anche come daily-open. Reminder: se no-fill resta usabile. Premium/Admin senza ads. Mediation: AppLovin + Meta via AdMob (`ADS_MEDIATION_SETUP.md`).
+- Annunci Free: interstitial prima apertura del giorno e dopo N ore idle; ogni N post aperti; pin **native** (stile Pinterest, Meta in mediation) ogni N post in griglia, fallback banner. Import Free: interstitial **ogni 5 import**. Se l'app si apre da share alla prima apertura del giorno o dopo N ore idle, mostra l'interstitial di sessione come un'apertura normale (non la salta). Share Free: rewarded se `requiresAd` e AdMob ha inventario. Se l'inventario e' vuoto (no-fill/timeout) la funzione **non si blocca**; i limiti numerici del piano restano. Reminder: se no-fill resta usabile. Premium/Admin senza ads. Mediation: AppLovin + Meta via AdMob (`ADS_MEDIATION_SETUP.md`).
 
 Il passaggio Free/Premium e' disponibile nella pagina account. L'utente non deve potersi assegnare Admin.
 
@@ -421,7 +421,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.10+93`** (ago 2026). Include fail-open se inventario ads vuoto, testi intuitivi per profondità cartelle, pin native, mediation AppLovin/Meta, rewarded su import/share Free, UMP + ATT.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.11+94`** (ago 2026). Include import ogni 5 + interstitial di sessione anche da share, fail-open se inventario ads vuoto, testi intuitivi per profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1148,7 +1148,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.10+93`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.10**.
+- Versione app corrente (repo): **`1.1.11+94`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.11**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -1220,8 +1220,9 @@ Configurazione nei file:
 
 Logica ads:
 - Solo utenti Free (`AppAccessService().hasAds`)
-- **Interstitial**: sessione (daily + idle) e ogni N aperture post; soppresso durante import da share
-- **Rewarded**: ogni import e share Free (fallback interstitial se manca l'unità rewarded)
+- **Interstitial**: sessione (daily + idle) e ogni N aperture post; durante il dialog di import da share viene differita, poi mostrata al salvataggio o alla chiusura se è la prima apertura del giorno / idle
+- **Import Free**: interstitial ogni 5 import (non ogni import). Prima apertura del giorno o dopo N ore idle tramite import → stessa ads di sessione dell'apertura app
+- **Rewarded**: share Free se `requiresAd` (fallback interstitial se manca l'unità rewarded)
 - **Native pin**: ogni N post in griglia Pinterest; fallback banner
 - **Banner cartelle**: Home e sottocartelle ogni N cartelle
 
@@ -2053,3 +2054,10 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Feature gated da ads (`requiresAd` in Limiti, import/share): se AdMob ha inventario l'utente deve guardarla; se inventario vuoto (no-fill/timeout/errore show) **non si blocca**. Consenso rifiutato o ads chiusa senza premio: resta bloccato. I limiti numerici restano.
 - Dashboard Limiti: `folder_levels` con titolo "Profondità cartelle" e anteprima live (1 = solo Home, 2 = Home → cartella, 3 = Home → cartella → sottocartella).
 - **Azione**: Codemagic → TestFlight/Play **93**; in App Store Connect crea versione **1.1.10**.
+
+### Build `1.1.11+94` — import ogni 5 + ads di sessione da share (15/08/2026)
+
+- Import Free: di nuovo interstitial **ogni 5** (non rewarded a ogni import).
+- Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
+- Fail-open se inventario vuoto resta.
+- **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.

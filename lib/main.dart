@@ -601,6 +601,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
     final BuildContext? context = navigatorKey.currentContext;
     if (context == null) {
       InterstitialAdService.endImportFlow();
+      unawaited(InterstitialAdService.instance.showSessionAdsIfNeeded());
       return;
     }
 
@@ -619,6 +620,7 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
         isDarkTheme: _isDarkTheme,
       ).then((result) async {
         InterstitialAdService.endImportFlow();
+        await InterstitialAdService.instance.showSessionAdsIfNeeded();
         // ðŸ”¥ NUOVO: Se result non Ã¨ null, significa che il salvataggio Ã¨ andato a buon fine
         if (result != null && result['folderPath'] != null) {
           print('DEBUG: ðŸ“ Post salvato, preparando navigazione...');
@@ -632,11 +634,13 @@ class _SaveInAppState extends State<SaveInApp> with WidgetsBindingObserver {
         }
       }).catchError((error) {
         InterstitialAdService.endImportFlow();
+        unawaited(InterstitialAdService.instance.showSessionAdsIfNeeded());
         if (kDebugMode)
           DebugLogger.logError('Dialog salvataggio fallito', error);
       });
     } catch (e) {
       InterstitialAdService.endImportFlow();
+      unawaited(InterstitialAdService.instance.showSessionAdsIfNeeded());
       if (kDebugMode) DebugLogger.logError('Eccezione in showSaveDialog', e);
     }
   }

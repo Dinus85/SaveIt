@@ -103,8 +103,8 @@ class InterstitialAdService {
 
   /// Prima apertura del giorno e/o interstitial dopo N ore di inattività.
   /// Nello stesso resume/avvio mostra al massimo un interstitial (priorità: giornaliero).
-  Future<bool> showSessionAdsIfNeeded() async {
-    if (suppressSessionAds) return false;
+  Future<bool> showSessionAdsIfNeeded({bool ignoreSuppress = false}) async {
+    if (!ignoreSuppress && suppressSessionAds) return false;
     if (!_shouldUseAds) return false;
 
     final userId = _currentUserId;
@@ -136,6 +136,27 @@ class InterstitialAdService {
     if (idleFor < Duration(hours: idleHours)) return false;
 
     return _showInterstitial();
+  }
+
+  Future<bool> _isSessionAdDue() async {
+    if (!_shouldUseAds) return false;
+    final userId = _currentUserId;
+    if (userId == null) return false;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (PlanLimitsService.dailyOpenInterstitialEnabled()) {
+      final lastShown = prefs.getString(_dailyOpenAdKey(userId));
+      if (lastShown != _todayKey()) return true;
+    }
+
+    final idleHours = PlanLimitsService.idleInterstitialHours();
+    if (idleHours == null) return false;
+    final lastMs = prefs.getInt(_lastSessionKey(userId));
+    if (lastMs == null) return false;
+    final idleFor = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(lastMs),
+    );
+    return idleFor >= Duration(hours: idleHours);
   }
 
   Future<bool> showDailyOpenAdIfNeeded() async {
@@ -182,6 +203,9 @@ class InterstitialAdService {
     await prefs.setString(_dailyOpenAdKey(userId), _todayKey());
   }
 
+  /// Sopprime l'interstitial di sessione mentre è aperto il dialog di import,
+  /// per non sovrapporla al salvataggio. L'ads daily/idle viene mostrata
+  /// in [showImportAdIfRequired] o dopo la chiusura del dialog.
   static void beginImportFlow() {
     suppressSessionAds = true;
   }
@@ -190,25 +214,38 @@ class InterstitialAdService {
     suppressSessionAds = false;
   }
 
-  /// Ogni import Free richiede un'ads (rewarded, fallback interstitial).
-  /// Non usa più il modulo ogni 5.
+  /// Import Free: interstitial ogni 5 import riusciti.
+  /// Se l'app si apre da share alla prima apertura del giorno o dopo N ore
+  /// di inattività, mostra prima l'ads di sessione (come un'apertura normale).
   /// Se AdMob non ha inventario, l'import non viene bloccato.
   Future<bool> showImportAdIfRequired([BuildContext? context]) async {
     if (!_shouldUseAds) return true;
-    if (context == null || !context.mounted) {
-      final shown = await _showRewardedOrInterstitial();
-      if (shown) {
-        await markDailyOpenSatisfied();
-        return true;
-      }
-      if (lastFailureReason == 'dismissed' || lastFailureReason == 'consent') {
-        return false;
-      }
+
+    if (await _isSessionAdDue()) {
+      await showSessionAdsIfNeeded(ignoreSuppress: true);
       return true;
     }
-    final ok = await showFeatureAdGate(context, 'import_shared_post');
-    if (ok) await markDailyOpenSatisfied();
-    return ok;
+
+    if (!await _featureRequiresAd('import_shared_post') &&
+        !await _featureRequiresAd('import_shared_folder')) {
+      return true;
+    }
+
+    final userId = _currentUserId;
+    if (userId == null) return true;
+
+    final prefs = await SharedPreferences.getInstance();
+    final successfulImports = prefs.getInt(_successfulImportsKey(userId)) ?? 0;
+    final nextImportOrdinal = successfulImports + 1;
+    if (nextImportOrdinal % AppAccessService.importInterstitialFrequency != 0) {
+      return true;
+    }
+
+    await _showInterstitial(
+      context: context,
+      requestConsentIfNeeded: false,
+    );
+    return true;
   }
 
   /// Mostra una interstitial ad prima di aprire un reminder.
@@ -246,13 +283,15 @@ class InterstitialAdService {
     if (!_shouldUseAds) return true;
     final isImport = feature == 'import_shared_post' ||
         feature == 'import_shared_folder';
-    if (!isImport && !await _featureRequiresAd(feature)) return true;
+    if (isImport) {
+      return showImportAdIfRequired(context);
+    }
+    if (!await _featureRequiresAd(feature)) return true;
     if (!context.mounted) return false;
 
     final allowWithoutRealAd = feature == 'reminders';
-    final useRewarded = isImport ||
-        feature == 'share_post' ||
-        feature == 'share_folder';
+    final useRewarded =
+        feature == 'share_post' || feature == 'share_folder';
 
     while (context.mounted) {
       var shown = useRewarded
@@ -281,7 +320,6 @@ class InterstitialAdService {
         );
       }
       if (shown) {
-        if (isImport) await markDailyOpenSatisfied();
         return true;
       }
       if (allowWithoutRealAd) return true;
