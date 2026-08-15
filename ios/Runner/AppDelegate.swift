@@ -40,16 +40,16 @@ import google_mobile_ads
 
 class PinterestPinNativeAdFactory: NSObject, FLTNativeAdFactory {
   func createNativeAd(
-    _ nativeAd: GADNativeAd,
+    _ nativeAd: NativeAd,
     customOptions: [AnyHashable: Any]? = nil
-  ) -> GADNativeAdView? {
-    let adView = GADNativeAdView()
+  ) -> NativeAdView? {
+    let adView = NativeAdView()
     adView.backgroundColor = .white
     adView.layer.cornerRadius = 12
     adView.clipsToBounds = true
     adView.translatesAutoresizingMaskIntoConstraints = false
 
-    let mediaView = GADMediaView()
+    let mediaView = MediaView()
     mediaView.translatesAutoresizingMaskIntoConstraints = false
     adView.mediaView = mediaView
     adView.addSubview(mediaView)

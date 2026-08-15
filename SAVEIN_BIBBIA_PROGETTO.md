@@ -1186,7 +1186,7 @@ Per arrivare in produzione Google richiede:
 
 ### iOS / App Store — prossimi step
 
-Build iOS via **Codemagic** (workflow già funzionante; bundle `eu.savein.app`). Per pubblicazione App Store:
+Build iOS via **Codemagic** (workflow già funzionante; bundle `eu.savein.app`). GMA iOS SDK 12: in `ios/Runner/AppDelegate.swift` usare `NativeAd` / `NativeAdView` / `MediaView` (non `GADNativeAd*`). Per pubblicazione App Store:
 1. Verificare Team Apple Developer, bundle ID `eu.savein.app`, display name `SaveIn!`, icone e `ios/Runner/GoogleService-Info.plist`.
 2. App su App Store Connect con lo stesso bundle ID.
 3. ~~Configurare gli ID AdMob iOS reali e sostituire gli ID test in `ios/Runner/Info.plist` e nei servizi ads Flutter.~~ **FATTO 03/07/2026** (vedi sezione "Google AdMob" sotto) — serve pero' ancora una nuova build iOS per renderlo effettivo sui dispositivi.
