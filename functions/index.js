@@ -5100,7 +5100,7 @@ const dashLimitsPage = (user, featureRules) => {
   const features = [
     {id: "root_folders", name: "Cartelle nella Home"},
     {id: "child_folders", name: "Numero di sottocartelle per ogni cartella"},
-    {id: "folder_levels", name: "Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC"},
+    {id: "folder_levels", name: "Profondità cartelle (Home + sottocartelle)"},
     {id: "share_folder", name: "Condivisione Cartella"},
     {id: "share_post", name: "Condivisione Post"},
     {id: "import_shared_post", name: "Importazione post"},

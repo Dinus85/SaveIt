@@ -153,7 +153,7 @@ I limiti non devono essere hardcoded come fonte di verita': la pagina `Limiti Fu
 Feature rule principali:
 - `root_folders`: numero massimo di cartelle nella Home.
 - `child_folders`: numero massimo di sottocartelle dirette per cartella.
-- `folder_levels`: profondita massima della gerarchia cartelle.
+- `folder_levels`: profondita massima del percorso cartelle. Il numero inserito in dashboard e' quanti “piani” puoi avere: **1 = solo Home**, **2 = Home → cartella**, **3 = Home → cartella → sottocartella**. 0 = illimitato. Non e' “Home + L1 + L2” quando il valore e' 2.
 - `manual_tags`: abilita/disabilita tag manuali.
 - `share_folder`: abilita e limita condivisione cartelle.
 - `share_post`: abilita e limita condivisione post.
@@ -171,7 +171,7 @@ Regole importanti:
 - `PlanLimitsService` deve aggiornare il profilo utente da Firestore prima di scegliere il tier, cosi un cambio Free/Premium fatto dalla dashboard viene capito dall'app anche se era gia aperta.
 - `AuthService` mantiene un listener live su `users/{uid}`: `role`, `premiumUntil` e `premiumSource` devono restare sincronizzati con Firestore. Non usare la cache locale come fonte di verita per i limiti.
 - Per `root_folders` il controllo deve usare il conteggio reale delle cartelle Home, non un contatore `feature_usage`.
-- Annunci Free: interstitial prima apertura del giorno e dopo N ore idle; ogni N post aperti; pin **native** (stile Pinterest, Meta in mediation) ogni N post in griglia, fallback banner. Import/share Free: **rewarded obbligatorio** (niente più ogni 5 import). Se l'app si apre da share, l'interstitial giornaliero è soppresso e l'ads dell'import vale anche come daily-open. Reminder: se no-fill resta usabile. Premium/Admin senza ads. Mediation: AppLovin + Meta via AdMob (`ADS_MEDIATION_SETUP.md`).
+- Annunci Free: interstitial prima apertura del giorno e dopo N ore idle; ogni N post aperti; pin **native** (stile Pinterest, Meta in mediation) ogni N post in griglia, fallback banner. Import/share Free: **rewarded se AdMob ha inventario**. Se l'inventario e' vuoto (no-fill/timeout) la funzione **non si blocca**; i limiti numerici del piano restano. Consenso rifiutato o ads chiusa senza premio: non sblocca. Se l'app si apre da share, l'interstitial giornaliero e' soppresso e l'ads dell'import vale anche come daily-open. Reminder: se no-fill resta usabile. Premium/Admin senza ads. Mediation: AppLovin + Meta via AdMob (`ADS_MEDIATION_SETUP.md`).
 
 Il passaggio Free/Premium e' disponibile nella pagina account. L'utente non deve potersi assegnare Admin.
 
@@ -421,7 +421,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.9+92`** (ago 2026). Include pin native in griglia Pinterest, mediation AppLovin/Meta, rewarded su ogni import/share Free, UMP + ATT.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.10+93`** (ago 2026). Include fail-open se inventario ads vuoto, testi intuitivi per profondità cartelle, pin native, mediation AppLovin/Meta, rewarded su import/share Free, UMP + ATT.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1148,7 +1148,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.9+92`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.9**.
+- Versione app corrente (repo): **`1.1.10+93`** — da pubblicare su TestFlight / test Play. In App Store Connect crea versione **1.1.10**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2033,7 +2033,7 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Frequenza banner Home configurabile da `home_banner_every_n_folders`.
 - **Azione**: Codemagic/TestFlight + Play build **65**; per dashboard hosting/functions solo se non gia' deployati i limiti recenti.
 
-- Diciture dashboard: `child_folders` = "Numero di sottocartelle per ogni cartella"; `folder_levels` = "Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC".
+- Diciture dashboard: `child_folders` = "Numero di sottocartelle per ogni cartella"; `folder_levels` = "Profondità cartelle (Home + sottocartelle)" con anteprima live (1 = solo Home, 2 = Home → cartella, 3 = Home → cartella → sottocartella).
 - Spezzato `import_shared` in `import_shared_post` (default Free 5/day) e `import_shared_folder` (default Free 1/day).
 - Import cartella richiede 1 slot cartella **e** N slot post (N = post nella cartella). Enforcement client + `importSharedResource`.
 - Dialog limite Free: mostra i limiti dashboard (post/cartelle) + CTA **Passa a Premium** (acquisto in-app).
@@ -2044,6 +2044,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 
 - Griglia Pinterest: pin native AdMob (factory `pinterestPin`) ogni N post; fallback banner.
 - Mediation AdMob: adapter AppLovin + Meta. Console: `ADS_MEDIATION_SETUP.md`. ID native/rewarded in `ads_ids.dart`.
-- Import/share Free: rewarded sempre (niente ogni 5). Apertura da share: niente interstitial giornaliero prima; dopo rewarded l'import vale come daily-open. No-fill blocca l'import.
+- Import/share Free: rewarded sempre (niente ogni 5). Apertura da share: niente interstitial giornaliero prima; dopo rewarded l'import vale come daily-open. No-fill **non** blocca l'import (fail-open).
 - ATT (`NSUserTrackingUsageDescription`) + reset consenso UMP v5.
 - **Azione**: Codemagic → TestFlight/Play **92**; in App Store Connect crea versione **1.1.9**. Collegare Meta/AppLovin in AdMob.
+
+### Build `1.1.10+93` — ads fail-open + profondità cartelle chiara (15/08/2026)
+
+- Feature gated da ads (`requiresAd` in Limiti, import/share): se AdMob ha inventario l'utente deve guardarla; se inventario vuoto (no-fill/timeout/errore show) **non si blocca**. Consenso rifiutato o ads chiusa senza premio: resta bloccato. I limiti numerici restano.
+- Dashboard Limiti: `folder_levels` con titolo "Profondità cartelle" e anteprima live (1 = solo Home, 2 = Home → cartella, 3 = Home → cartella → sottocartella).
+- **Azione**: Codemagic → TestFlight/Play **93**; in App Store Connect crea versione **1.1.10**.

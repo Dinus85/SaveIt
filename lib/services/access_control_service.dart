@@ -410,9 +410,10 @@ class AppAccessService {
         return 'La creazione di nuovi livelli di cartelle è temporaneamente disabilitata.';
       }
       if (rule.limit > 0 && pathLength > rule.limit) {
+        final chain = PlanLimitsService.folderLevelsChain(rule.limit);
         return isFree
-            ? 'Versione Free: massimo ${rule.limit} livelli di profondità.'
-            : 'Massimo ${rule.limit} livelli di profondità.';
+            ? 'Versione Free: puoi arrivare fino a $chain.'
+            : 'Puoi arrivare fino a $chain.';
       }
       return null;
     } catch (_) {
@@ -442,9 +443,10 @@ class AppAccessService {
         return 'Il salvataggio in sottocartelle è temporaneamente disabilitato.';
       }
       if (rule.limit > 0 && folder.level >= rule.limit) {
+        final chain = PlanLimitsService.folderLevelsChain(rule.limit);
         return isFree
-            ? 'Versione Free: puoi salvare fino a ${rule.limit} livelli di profondità.'
-            : 'Puoi salvare fino a ${rule.limit} livelli di profondità.';
+            ? 'Versione Free: puoi salvare fino a $chain.'
+            : 'Puoi salvare fino a $chain.';
       }
       return null;
     } catch (_) {

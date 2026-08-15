@@ -107,7 +107,7 @@ class PlanLimitsService {
     ),
     (
       id: 'folder_levels',
-      name: 'Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC',
+      name: 'Profondità cartelle (Home + sottocartelle)',
     ),
     (id: 'manual_tags', name: 'Tag manuali'),
     (id: 'share_folder', name: 'Condivisione Cartella'),
@@ -809,6 +809,35 @@ class PlanLimitsService {
     return n;
   }
 
+  /// Testo intuitivo per il limite `folder_levels`.
+  /// Il numero è la profondità massima del percorso:
+  /// 1 = solo Home, 2 = Home → cartella, 3 = Home → cartella → sottocartella.
+  static String describeFolderLevelsLimit(int limit) {
+    if (limit <= 0) {
+      return 'Illimitato: Home e tutti i livelli di sottocartelle.';
+    }
+    if (limit == 1) {
+      return 'Con 1: solo cartelle in Home. Nessuna sottocartella.';
+    }
+    final nested = limit - 1;
+    final nestedLabel = nested == 1 ? '1 livello' : '$nested livelli';
+    return 'Con $limit: ${folderLevelsChain(limit)} (Home + $nestedLabel sotto Home).';
+  }
+
+  static String folderLevelsChain(int limit) {
+    if (limit <= 0) return 'Home → …';
+    const names = ['Home', 'cartella', 'sottocartella', 'sotto-sottocartella'];
+    final parts = <String>[];
+    for (var i = 0; i < limit; i++) {
+      if (i < names.length) {
+        parts.add(names[i]);
+      } else {
+        parts.add('livello ${i}');
+      }
+    }
+    return parts.join(' → ');
+  }
+
   /// Testo leggibile di una regola tier (Free/Premium) per UI confronto piani.
   static String describeTierRule(String featureId, Map<String, dynamic>? rule) {
     if (rule == null) return 'Non configurato';
@@ -850,6 +879,10 @@ class PlanLimitsService {
     if (featureId == 'manual_tags') {
       final base = 'Disponibile';
       return requiresAd ? '$base · richiede pubblicità' : base;
+    }
+
+    if (featureId == 'folder_levels') {
+      return describeFolderLevelsLimit(limit);
     }
 
     String quota;

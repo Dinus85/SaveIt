@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:universal_html/html.dart' as html;
 
 import '../services/auth_service.dart';
+import '../services/plan_limits_service.dart';
 
 class AdminDashboardPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -3186,10 +3187,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           },
           {
             'id': 'folder_levels',
-            'name':
-                'Livelli di profondità per sottocartelle - Home-L1-L2-L3-ETC',
+            'name': 'Profondità cartelle (Home + sottocartelle)',
             'desc':
-                'Profondità massima dell\'albero: Home, poi L1, L2, L3, ecc.'
+                'Il numero è quanti “piani” di cartelle puoi avere. 1 = solo Home. 2 = Home → cartella. 3 = Home → cartella → sottocartella. 0 = illimitato. Il riquadro a destra mostra l’esempio in base al numero.'
           },
           {
             'id': 'manual_tags',
@@ -3521,18 +3521,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               const Text('Limite (0 = illimitato)',
                   style: TextStyle(fontSize: 12)),
               const SizedBox(height: 4),
-              TextFormField(
-                initialValue: (currentRules['limit'] ?? 0).toString(),
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                onChanged: (val) {
-                  tierRules()['limit'] = int.tryParse(val) ?? 0;
+              _FolderAwareLimitField(
+                featureId: featureId,
+                initialLimit: currentRules['limit'] ?? 0,
+                onChanged: (n) {
+                  tierRules()['limit'] = n;
                   _planLimitsDraftDirty = true;
                 },
               ),
@@ -3581,6 +3574,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                     ),
                   ),
                 ],
+              ),
+              const Padding(
+                padding: EdgeInsets.only(left: 8, top: 4),
+                child: Text(
+                  'Se AdMob non ha inventario, la funzione non si blocca. I limiti numerici restano.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), height: 1.3),
+                ),
               ),
             ],
           ),
@@ -11427,6 +11427,81 @@ class _VersionControlHistoryList extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _FolderAwareLimitField extends StatefulWidget {
+  const _FolderAwareLimitField({
+    required this.featureId,
+    required this.initialLimit,
+    required this.onChanged,
+  });
+
+  final String featureId;
+  final dynamic initialLimit;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<_FolderAwareLimitField> createState() => _FolderAwareLimitFieldState();
+}
+
+class _FolderAwareLimitFieldState extends State<_FolderAwareLimitField> {
+  late final TextEditingController _controller;
+
+  int get _limit => int.tryParse(_controller.text.trim()) ?? 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final raw = widget.initialLimit;
+    final n = raw is int
+        ? raw
+        : raw is num
+            ? raw.toInt()
+            : int.tryParse(raw?.toString() ?? '') ?? 0;
+    _controller = TextEditingController(text: n.toString());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _controller,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onChanged: (val) {
+            widget.onChanged(int.tryParse(val) ?? 0);
+            if (widget.featureId == 'folder_levels') setState(() {});
+          },
+        ),
+        if (widget.featureId == 'folder_levels') ...[
+          const SizedBox(height: 8),
+          Text(
+            PlanLimitsService.describeFolderLevelsLimit(_limit),
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+              color: Colors.teal.shade800,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

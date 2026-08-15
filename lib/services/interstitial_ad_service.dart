@@ -192,12 +192,19 @@ class InterstitialAdService {
 
   /// Ogni import Free richiede un'ads (rewarded, fallback interstitial).
   /// Non usa più il modulo ogni 5.
+  /// Se AdMob non ha inventario, l'import non viene bloccato.
   Future<bool> showImportAdIfRequired([BuildContext? context]) async {
     if (!_shouldUseAds) return true;
     if (context == null || !context.mounted) {
       final shown = await _showRewardedOrInterstitial();
-      if (shown) await markDailyOpenSatisfied();
-      return shown;
+      if (shown) {
+        await markDailyOpenSatisfied();
+        return true;
+      }
+      if (lastFailureReason == 'dismissed' || lastFailureReason == 'consent') {
+        return false;
+      }
+      return true;
     }
     final ok = await showFeatureAdGate(context, 'import_shared_post');
     if (ok) await markDailyOpenSatisfied();
@@ -221,7 +228,10 @@ class InterstitialAdService {
   /// Per Premium/web restituisce true senza mostrare pubblicità.
   Future<bool> showReminderSetupAdIfRequired() async {
     if (!_shouldUseAds) return true;
-    return _showInterstitial();
+    final shown = await _showInterstitial();
+    if (shown) return true;
+    if (lastFailureReason == 'consent') return false;
+    return true;
   }
 
   /// Mostra un passaggio pubblicitario prima di usare una funzione configurata
@@ -229,8 +239,9 @@ class InterstitialAdService {
   ///
   /// Se `requiresAd` è false: sblocca subito.
   /// Se l'ads vera viene consegnata: va vista, poi si sblocca.
-  /// Reminder: se AdMob non ha inventario, la funzione resta usabile.
-  /// Altre feature: dialog Riprova / consenso / Annulla.
+  /// Se AdMob non ha inventario (no-fill/timeout/errore show): la funzione
+  /// resta usabile. I limiti numerici del piano restano. Consenso rifiutato
+  /// o ads chiusa senza premio: non sblocca.
   Future<bool> showFeatureAdGate(BuildContext context, String feature) async {
     if (!_shouldUseAds) return true;
     final isImport = feature == 'import_shared_post' ||
@@ -274,6 +285,8 @@ class InterstitialAdService {
         return true;
       }
       if (allowWithoutRealAd) return true;
+      if (lastFailureReason == 'dismissed') return false;
+      if (_isAdInventoryFailure()) return true;
       if (!context.mounted) return false;
 
       final action = await showDialog<_AdGateAction>(
@@ -333,6 +346,20 @@ class InterstitialAdService {
     return PlanLimitsService.featureRequiresAd(feature);
   }
 
+  bool _isAdInventoryFailure() {
+    switch (lastFailureReason) {
+      case 'no_fill':
+      case 'timeout':
+      case 'show_error':
+      case 'init_error':
+      case 'unsupported_platform':
+      case 'busy':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   String? get _currentUserId => _authService.currentUser?.id;
 
   String _successfulImportsKey(String userId) => 'ads_successful_imports_$userId';
@@ -375,6 +402,7 @@ class InterstitialAdService {
     if (rewardedId != null) {
       final shown = await _showRewarded(rewardedId);
       if (shown) return true;
+      if (lastFailureReason == 'dismissed') return false;
     }
     return _showInterstitial(requestConsentIfNeeded: false);
   }
@@ -427,6 +455,7 @@ class InterstitialAdService {
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _isShowingAd = false;
+        if (!earned) lastFailureReason = 'dismissed';
         if (!shown.isCompleted) shown.complete(earned);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {

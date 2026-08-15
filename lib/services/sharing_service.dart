@@ -1690,7 +1690,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
           });
         }
         _showFeedback(
-          'Pubblicità non disponibile al momento. Riprova tra poco per completare il salvataggio.',
+          'Salvataggio annullato. Per continuare completa la pubblicità oppure passa a Premium.',
           backgroundColor: Colors.orange,
         );
         return;
