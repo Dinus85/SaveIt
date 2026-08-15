@@ -98,8 +98,8 @@ dependencies {
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.android.gms:play-services-auth:20.7.0'
-    implementation 'com.google.ads.mediation:applovin:10.3.5.0'
-    implementation 'com.google.ads.mediation:facebook:10.8.0.0'
+    // Adapter AppLovin/Meta: li porta gma_mediation_applovin / gma_mediation_meta.
+    // Non aggiungere com.google.ads.mediation:facebook qui: 10.8.0.0 non esiste su Maven.
     
 }
 

@@ -745,6 +745,7 @@ Logica:
 - Share Free: rewarded se `requiresAd` in dashboard (fallback interstitial). No-fill: non blocca; i limiti numerici restano.
 - Gate ADV reminder: se no-fill il reminder resta usabile.
 - Mediation AdMob: AppLovin + Meta. Passi console in `ADS_MEDIATION_SETUP.md`.
+- Android: **non** aggiungere a mano `com.google.ads.mediation:facebook:10.8.0.0` in `android/app/build.gradle` (versione inesistente su Maven). Gli adapter li portano `gma_mediation_meta` / `gma_mediation_applovin`.
 
 Config native:
 - Android: `android/app/src/main/AndroidManifest.xml`
