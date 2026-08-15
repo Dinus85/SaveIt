@@ -171,7 +171,8 @@ Regole importanti:
 - `PlanLimitsService` deve aggiornare il profilo utente da Firestore prima di scegliere il tier, cosi un cambio Free/Premium fatto dalla dashboard viene capito dall'app anche se era gia aperta.
 - `AuthService` mantiene un listener live su `users/{uid}`: `role`, `premiumUntil` e `premiumSource` devono restare sincronizzati con Firestore. Non usare la cache locale come fonte di verita per i limiti.
 - Per `root_folders` il controllo deve usare il conteggio reale delle cartelle Home, non un contatore `feature_usage`.
-- Annunci Free: interstitial prima apertura del giorno e dopo N ore idle; ogni N post aperti; pin **native** (stile Pinterest, Meta in mediation) ogni N post in griglia, fallback banner. Import Free: interstitial **ogni 5 import**. Se l'app si apre da share alla prima apertura del giorno o dopo N ore idle, mostra l'interstitial di sessione come un'apertura normale (non la salta). Share Free: rewarded se `requiresAd` e AdMob ha inventario. Se l'inventario e' vuoto (no-fill/timeout) la funzione **non si blocca**; i limiti numerici del piano restano. Reminder: se no-fill resta usabile. Premium/Admin senza ads. Mediation: AppLovin + Meta via AdMob (`ADS_MEDIATION_SETUP.md`).
+- Annunci Free: interstitial prima apertura del giorno e dopo N ore idle; ogni N post aperti; pin **native** (stile Pinterest, Meta in mediation) ogni N post in griglia, fallback banner. Import Free: interstitial **ogni 5 import**. Se l'app si apre da share alla prima apertura del giorno o dopo N ore idle, mostra l'interstitial di sessione come un'apertura normale. Share Free: rewarded se `requiresAd` e AdMob ha inventario. Se l'inventario e' vuoto la funzione **non si blocca**; i limiti numerici restano. Reminder: se no-fill resta usabile. Premium/Admin senza ads.
+- Guida console mediation (AppLovin + Meta): **`ADS_MEDIATION_SETUP.md`** nella **root del repo**, accanto a `pubspec.yaml` e a questa bibbia. Non è in `lib/` né nella dashboard.
 
 Il passaggio Free/Premium e' disponibile nella pagina account. L'utente non deve potersi assegnare Admin.
 
@@ -729,17 +730,21 @@ firebase deploy --only firestore:rules
 
 ## Pubblicita
 
+Guida console mediation (AppLovin + Meta): **`ADS_MEDIATION_SETUP.md`** nella root del repo (accanto a `pubspec.yaml`). Non è in `lib/` né nella dashboard.
+
 Servizio:
 - `lib/services/interstitial_ad_service.dart`
+- ID native/rewarded: `lib/services/ads_ids.dart`
 
 Logica:
 - Solo utenti Free.
-- Interstitial a prima apertura giornaliera e dopo N ore idle (soppresso se è in corso un import da share).
+- Interstitial a prima apertura giornaliera e dopo N ore idle.
+- Se l'app si apre da share, l'ads di sessione non parte sopra il dialog: viene mostrata al salvataggio o alla chiusura del dialog, come un'apertura normale.
 - Pin native in griglia Pinterest ogni N post (`NativePinAdWidget`, factory `pinterestPin`); fallback banner se native non è configurata/caricata.
-- Import e share Free: rewarded obbligatorio (fallback interstitial). Nessun bypass ogni-5. No-fill = dialog Riprova, l'import non parte.
-- Dopo rewarded import, il daily-open si considera assolto.
+- Import Free: interstitial **ogni 5 import**. Se AdMob non ha inventario, l'import non si blocca.
+- Share Free: rewarded se `requiresAd` in dashboard (fallback interstitial). No-fill: non blocca; i limiti numerici restano.
 - Gate ADV reminder: se no-fill il reminder resta usabile.
-- Mediation AdMob: AppLovin + Meta. ID native/rewarded produzione in `lib/services/ads_ids.dart`. Guida console: `ADS_MEDIATION_SETUP.md`.
+- Mediation AdMob: AppLovin + Meta. Passi console in `ADS_MEDIATION_SETUP.md`.
 
 Config native:
 - Android: `android/app/src/main/AndroidManifest.xml`
@@ -1225,6 +1230,7 @@ Logica ads:
 - **Rewarded**: share Free se `requiresAd` (fallback interstitial se manca l'unità rewarded)
 - **Native pin**: ogni N post in griglia Pinterest; fallback banner
 - **Banner cartelle**: Home e sottocartelle ogni N cartelle
+- **Guida console mediation**: `ADS_MEDIATION_SETUP.md` nella **root del repo** (stesso livello di `pubspec.yaml` e `SAVEIN_BIBBIA_PROGETTO.md`)
 
 **Stato AdMob / Firebase / Google Ads (29/07/2026)**:
 - **Google Analytics** abilitato sul progetto Firebase `saveit-app-1784d` (account Analytics `otf_dino`).
@@ -2044,7 +2050,7 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 ### Build `1.1.9+92` — native pin, mediation, import senza bypass (15/08/2026)
 
 - Griglia Pinterest: pin native AdMob (factory `pinterestPin`) ogni N post; fallback banner.
-- Mediation AdMob: adapter AppLovin + Meta. Console: `ADS_MEDIATION_SETUP.md`. ID native/rewarded in `ads_ids.dart`.
+- Mediation AdMob: adapter AppLovin + Meta. Console: root repo `ADS_MEDIATION_SETUP.md`. ID native/rewarded in `ads_ids.dart`.
 - Import/share Free: rewarded sempre (niente ogni 5). Apertura da share: niente interstitial giornaliero prima; dopo rewarded l'import vale come daily-open. No-fill **non** blocca l'import (fail-open).
 - ATT (`NSUserTrackingUsageDescription`) + reset consenso UMP v5.
 - **Azione**: Codemagic → TestFlight/Play **92**; in App Store Connect crea versione **1.1.9**. Collegare Meta/AppLovin in AdMob.

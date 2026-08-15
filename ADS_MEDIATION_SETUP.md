@@ -1,5 +1,8 @@
 # Mediation AdMob (AppLovin + Meta) — da fare in console
 
+**Dove sta questo file:** root del repo SaveIn, accanto a `pubspec.yaml`.
+Percorso: `ADS_MEDIATION_SETUP.md` (stesso nome anche in SmartChef).
+
 Il codice è pronto. Senza questi passaggi i pin nativi e AppLovin/Meta non riempiono (resta Google).
 
 ## AdMob
