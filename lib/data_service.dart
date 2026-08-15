@@ -1755,7 +1755,11 @@ class DataService {
   }
 
   /// Condivide un post con un altro utente
-  Future<void> sharePost(SavedPost post, String recipientEmail) async {
+  Future<void> sharePost(
+    SavedPost post,
+    String recipientEmail, {
+    String message = '',
+  }) async {
     return ScreenAwakeService.keepAwake(() async {
       await _ensureShareFeatureEnabled('share_post', 'Condivisione Post');
 
@@ -1774,6 +1778,7 @@ class DataService {
         resourceId: postToShare.id,
         type: 'post',
         recipientId: recipient['id'],
+        message: message,
         originalData: {
           'url': postToShare.url,
           'title': postToShare.title,
@@ -1795,7 +1800,11 @@ class DataService {
   }
 
   /// Condivide una cartella con un altro utente
-  Future<void> shareFolder(Folder folder, String recipientEmail) async {
+  Future<void> shareFolder(
+    Folder folder,
+    String recipientEmail, {
+    String message = '',
+  }) async {
     return ScreenAwakeService.keepAwake(() async {
       await _ensureShareFeatureEnabled('share_folder', 'Condivisione Cartella');
 
@@ -1812,6 +1821,7 @@ class DataService {
         resourceId: folder.id,
         type: 'folder',
         recipientId: recipient['id'],
+        message: message,
         originalData: {
           'rootId': folder.id,
           'name': folder.name,
@@ -1848,6 +1858,24 @@ class DataService {
     } catch (e) {
       if (kDebugMode) print('DEBUG: Errore saveSharedContact: $e');
     }
+  }
+
+  Future<List<Map<String, dynamic>>> getBlockedSenders() {
+    return _firebaseService.getBlockedSenders();
+  }
+
+  Future<void> blockShareSender({
+    required String senderId,
+    String senderEmail = '',
+  }) {
+    return _firebaseService.blockShareSender(
+      senderId: senderId,
+      senderEmail: senderEmail,
+    );
+  }
+
+  Future<void> unblockShareSender(String senderId) {
+    return _firebaseService.unblockShareSender(senderId);
   }
 
   /// Anteprima live di una condivisione utente-utente prima dell'import.

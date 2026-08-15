@@ -4396,6 +4396,7 @@ exports.shareItemWithUser = onCall(
       const recipientId = (data.recipientId || "").toString().trim();
       const resourceId = (data.resourceId || "").toString().trim();
       const type = (data.type || "").toString().trim();
+      const message = (data.message || "").toString().trim().slice(0, 500);
       const originalData = data.originalData && typeof data.originalData === "object" ?
         data.originalData :
         {};
@@ -4417,17 +4418,157 @@ exports.shareItemWithUser = onCall(
         throw new HttpsError("not-found", "Destinatario non trovato");
       }
 
+      const blockedDoc = await recipientDoc.ref
+          .collection("blocked_senders")
+          .doc(request.auth.uid)
+          .get();
+      if (blockedDoc.exists) {
+        throw new HttpsError(
+            "failed-precondition",
+            "Questo utente ha bloccato le tue condivisioni",
+        );
+      }
+
+      const ownerName = request.auth.token.name ||
+        request.auth.token.email ||
+        "Un utente";
+      const ownerEmail = (request.auth.token.email || "").toString();
+      const recipientData = recipientDoc.data() || {};
+      const resourceTitle = (
+        originalData.title ||
+        originalData.name ||
+        ""
+      ).toString().slice(0, 200);
+
       await recipientDoc.ref.collection("shared_items").add({
         resourceId,
         type,
         ownerId: request.auth.uid,
-        ownerName: request.auth.token.name || request.auth.token.email || "Un utente",
-        ownerEmail: request.auth.token.email || "",
+        ownerName,
+        ownerEmail,
+        message,
         importMode: "source_copy",
         sharedAt: admin.firestore.FieldValue.serverTimestamp(),
         originalData,
       });
 
+      await db.collection("share_audit_log").add({
+        senderId: request.auth.uid,
+        senderEmail: ownerEmail.toLowerCase(),
+        senderName: ownerName,
+        recipientId,
+        recipientEmail: (recipientData.email || "").toString().toLowerCase(),
+        type,
+        resourceId,
+        resourceTitle,
+        message,
+        sharedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const itemLabel = type === "folder" ? "una cartella" : "un post";
+      const pushTitle = "Nuovo contenuto su SaveIn!";
+      const pushBody = message ||
+        `${ownerName} ti ha condiviso ${itemLabel}`;
+      await sendSharePushToUser({
+        userId: recipientId,
+        title: pushTitle,
+        body: pushBody,
+        type,
+      });
+
+      return {ok: true};
+    }
+);
+
+async function sendSharePushToUser({userId, title, body, type}) {
+  try {
+    const tokensSnapshot = await db.collection("users")
+        .doc(userId)
+        .collection("fcmTokens")
+        .get();
+    const tokens = tokensSnapshot.docs
+        .map((doc) => doc.data()?.token)
+        .filter((token) => typeof token === "string" && token.length > 0);
+    if (tokens.length === 0) return;
+
+    for (let i = 0; i < tokens.length; i += 500) {
+      const chunk = tokens.slice(i, i + 500);
+      await admin.messaging().sendEachForMulticast({
+        tokens: chunk,
+        notification: {title, body},
+        android: {
+          priority: "high",
+          notification: {clickAction: "FLUTTER_NOTIFICATION_CLICK"},
+        },
+        data: {
+          type: "shared_item",
+          route: "home",
+          title,
+          body,
+          itemType: type,
+        },
+      });
+    }
+  } catch (error) {
+    console.error("share push skip:", error);
+  }
+}
+
+exports.blockShareSender = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+      const senderId = (request.data?.senderId || "").toString().trim();
+      const senderEmail = (request.data?.senderEmail || "").toString().trim();
+      if (!senderId || senderId === request.auth.uid) {
+        throw new HttpsError("invalid-argument", "Mittente non valido");
+      }
+
+      const userRef = db.collection("users").doc(request.auth.uid);
+      await userRef.collection("blocked_senders").doc(senderId).set({
+        senderId,
+        senderEmail: senderEmail.toLowerCase(),
+        blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+
+      const pending = await userRef.collection("shared_items")
+          .where("ownerId", "==", senderId)
+          .get();
+      if (!pending.empty) {
+        const batch = db.batch();
+        pending.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+      }
+
+      return {ok: true, removed: pending.size};
+    }
+);
+
+exports.unblockShareSender = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 30,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+      const senderId = (request.data?.senderId || "").toString().trim();
+      if (!senderId) {
+        throw new HttpsError("invalid-argument", "Mittente non valido");
+      }
+      await db.collection("users")
+          .doc(request.auth.uid)
+          .collection("blocked_senders")
+          .doc(senderId)
+          .delete();
       return {ok: true};
     }
 );

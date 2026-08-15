@@ -3021,10 +3021,14 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       widget.isDarkTheme,
       'post',
       post.title,
-      (email) async {
+      (email, message) async {
         final realPosts = await DataService.instance.getPosts();
         final postToShare = realPosts.firstWhere((p) => p.id == post.id);
-        await DataService.instance.sharePost(postToShare, email);
+        await DataService.instance.sharePost(
+          postToShare,
+          email,
+          message: message,
+        );
       },
       canStartShare: () async {
         return AppAccessService().guardFeatureUse(

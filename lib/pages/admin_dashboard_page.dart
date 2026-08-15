@@ -49,6 +49,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       TextEditingController();
   final TextEditingController _emailSubjectController = TextEditingController();
   final TextEditingController _emailBodyController = TextEditingController();
+  final TextEditingController _shareAuditSearchController =
+      TextEditingController();
 
   String _searchQuery = '';
   AppUserRole? _roleFilter;
@@ -126,6 +128,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     _notificationBodyController.dispose();
     _emailSubjectController.dispose();
     _emailBodyController.dispose();
+    _shareAuditSearchController.dispose();
     super.dispose();
   }
 
@@ -1671,6 +1674,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
+                      const SizedBox(width: 10),
+                      _AdminNavButton(
+                        label: 'Storico invii',
+                        selected: _activeSection ==
+                            _AdminDashboardSection.shareAudit,
+                        onPressed: () {
+                          setState(() {
+                            _activeSection = _AdminDashboardSection.shareAudit;
+                          });
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -1702,6 +1716,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                             ? _buildCentralPromoRedirectPage()
                             : _activeSection == _AdminDashboardSection.accesses
                                 ? _buildDashboardAccessPage()
+                                : _activeSection ==
+                                        _AdminDashboardSection.shareAudit
+                                    ? _buildShareAuditPage()
                                 : StreamBuilder<
                                     QuerySnapshot<Map<String, dynamic>>>(
                                     stream: _firestore
@@ -8614,6 +8631,152 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ),
     );
   }
+
+  Widget _buildShareAuditPage() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('share_audit_log')
+          .orderBy('sharedAt', descending: true)
+          .limit(300)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Errore storico invii: ${snapshot.error}',
+              style: const TextStyle(color: Color(0xFF111827)),
+            ),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final query = _shareAuditSearchController.text.trim().toLowerCase();
+        final docs = snapshot.data?.docs ?? [];
+        final rows = docs.where((doc) {
+          if (query.isEmpty) return true;
+          final data = doc.data();
+          final haystack = [
+            data['senderEmail'],
+            data['senderName'],
+            data['recipientEmail'],
+            data['resourceTitle'],
+            data['message'],
+            data['type'],
+          ].map((value) => value?.toString().toLowerCase() ?? '').join(' ');
+          return haystack.contains(query);
+        }).toList();
+
+        return Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Storico invii post e cartelle',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Registro di tutte le condivisioni via email, con messaggio incluso. Serve per moderare contenuti illegali.',
+                style: TextStyle(color: Color(0xFF4B5563)),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _shareAuditSearchController,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Cerca per email, nome, titolo o messaggio',
+                  prefixIcon: const Icon(Icons.search),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${rows.length} invii mostrati (ultimi ${docs.length})',
+                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: rows.isEmpty
+                    ? const Center(child: Text('Nessun invio registrato.'))
+                    : Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: ListView.separated(
+                          itemCount: rows.length,
+                          separatorBuilder: (_, __) =>
+                              Divider(height: 1, color: Colors.grey.shade200),
+                          itemBuilder: (context, index) {
+                            final data = rows[index].data();
+                            final sharedAt = data['sharedAt'];
+                            DateTime? when;
+                            if (sharedAt is Timestamp) {
+                              when = sharedAt.toDate();
+                            }
+                            final type = data['type']?.toString() == 'folder'
+                                ? 'Cartella'
+                                : 'Post';
+                            final message =
+                                data['message']?.toString().trim() ?? '';
+                            return ListTile(
+                              isThreeLine: true,
+                              leading: CircleAvatar(
+                                backgroundColor: type == 'Cartella'
+                                    ? Colors.amber.shade100
+                                    : Colors.blue.shade50,
+                                child: Icon(
+                                  type == 'Cartella'
+                                      ? Icons.folder_outlined
+                                      : Icons.article_outlined,
+                                  color: type == 'Cartella'
+                                      ? Colors.amber.shade800
+                                      : Colors.blue,
+                                ),
+                              ),
+                              title: Text(
+                                data['resourceTitle']?.toString().isNotEmpty ==
+                                        true
+                                    ? data['resourceTitle'].toString()
+                                    : type,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                [
+                                  'Da ${data['senderEmail'] ?? '-'} a ${data['recipientEmail'] ?? '-'}',
+                                  if (when != null)
+                                    _formatDate(when),
+                                  if (message.isNotEmpty) 'Messaggio: $message',
+                                  if (message.isEmpty) 'Nessun messaggio',
+                                ].join('\n'),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _StatCard extends StatelessWidget {
@@ -9391,6 +9554,7 @@ enum _AdminDashboardSection {
   notifications,
   promos,
   accesses,
+  shareAudit,
 }
 
 enum _NotificationMode { notification, email }

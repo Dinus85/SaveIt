@@ -86,6 +86,13 @@ class _SharedItemsPageState extends State<SharedItemsPage> {
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,
         iconTheme: IconThemeData(color: themeColors.iconColor),
+        actions: [
+          IconButton(
+            tooltip: 'Utenti bloccati',
+            icon: Icon(Icons.block, color: themeColors.iconColor),
+            onPressed: () => _showBlockedSenders(context, themeColors),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -149,6 +156,8 @@ class _SharedItemsPageState extends State<SharedItemsPage> {
   ) {
     final type = item['type']?.toString() ?? 'post';
     final ownerName = item['ownerName']?.toString() ?? 'un utente';
+    final ownerEmail = item['ownerEmail']?.toString().trim() ?? '';
+    final message = item['message']?.toString().trim() ?? '';
     final originalData = _originalData(item);
     final title = _sharedItemTitle(item);
     final color = type == 'folder'
@@ -186,8 +195,15 @@ class _SharedItemsPageState extends State<SharedItemsPage> {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          'Condiviso da $ownerName',
+          [
+            ownerEmail.isNotEmpty
+                ? 'Da $ownerName ($ownerEmail)'
+                : 'Da $ownerName',
+            if (message.isNotEmpty) message,
+          ].join('\n'),
           style: TextStyle(color: themeColors.subtitleColor, fontSize: 12),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
         ),
         trailing: Wrap(
           spacing: 4,
@@ -204,6 +220,60 @@ class _SharedItemsPageState extends State<SharedItemsPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showBlockedSenders(
+    BuildContext context,
+    ThemeColors themeColors,
+  ) async {
+    final blocked = await DataService.instance.getBlockedSenders();
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Utenti bloccati'),
+        content: SizedBox(
+          width: 360,
+          child: blocked.isEmpty
+              ? const Text('Nessun utente bloccato.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: blocked.length,
+                  itemBuilder: (context, index) {
+                    final item = blocked[index];
+                    final email = item['senderEmail']?.toString() ?? '';
+                    final senderId = item['senderId']?.toString() ??
+                        item['id']?.toString() ??
+                        '';
+                    return ListTile(
+                      dense: true,
+                      title: Text(email.isEmpty ? senderId : email),
+                      trailing: TextButton(
+                        onPressed: () async {
+                          await DataService.instance.unblockShareSender(senderId);
+                          if (dialogContext.mounted) {
+                            Navigator.of(dialogContext).pop();
+                          }
+                          if (mounted) {
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              const SnackBar(content: Text('Utente sbloccato.')),
+                            );
+                          }
+                        },
+                        child: const Text('Sblocca'),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Chiudi'),
+          ),
+        ],
       ),
     );
   }
@@ -723,6 +793,8 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
   Widget build(BuildContext context) {
     final type = widget.item['type']?.toString() ?? 'post';
     final ownerName = widget.item['ownerName']?.toString() ?? 'un utente';
+    final ownerEmail = widget.item['ownerEmail']?.toString().trim() ?? '';
+    final message = widget.item['message']?.toString().trim() ?? '';
     final originalData =
         _previewData ?? _mergeSharedPreviewData(widget.item, null);
     final title = _sharedItemTitle({
@@ -759,9 +831,28 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '$ownerName ti ha condiviso ${isFolder ? 'la cartella' : 'il post'}:',
+              ownerEmail.isNotEmpty
+                  ? '$ownerName ($ownerEmail) ti ha condiviso ${isFolder ? 'la cartella' : 'il post'}:'
+                  : '$ownerName ti ha condiviso ${isFolder ? 'la cartella' : 'il post'}:',
               style: TextStyle(color: subtitleColor, height: 1.35),
             ),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: widget.isDarkTheme
+                      ? Colors.grey.shade800
+                      : Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  message,
+                  style: TextStyle(color: textColor, height: 1.35),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             if (_loadingPreview)
               AspectRatio(
@@ -824,6 +915,20 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
         TextButton(
           onPressed: _isImporting ? null : () => Navigator.of(context).pop(false),
           child: const Text('Più tardi'),
+        ),
+        TextButton(
+          onPressed: _isImporting
+              ? null
+              : () async {
+                  final blocked = await _blockSharedSender(
+                    context,
+                    widget.item,
+                  );
+                  if (blocked && context.mounted) {
+                    Navigator.of(context).pop(true);
+                  }
+                },
+          child: const Text('Blocca', style: TextStyle(color: Colors.orange)),
         ),
         TextButton(
           onPressed: _isImporting
@@ -1266,6 +1371,59 @@ Widget _buildFolderDestinationNode(
 List<Folder> _childFolders(String parentId, List<Folder> folders) {
   return folders.where((folder) => folder.parentId == parentId).toList()
     ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+}
+
+Future<bool> _blockSharedSender(
+  BuildContext context,
+  Map<String, dynamic> item,
+) async {
+  final ownerId = item['ownerId']?.toString() ?? '';
+  final ownerEmail = item['ownerEmail']?.toString() ?? '';
+  final ownerName = item['ownerName']?.toString() ?? 'questo utente';
+  if (ownerId.isEmpty) return false;
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Blocca utente'),
+      content: Text(
+        ownerEmail.isNotEmpty
+            ? 'Vuoi bloccare $ownerName ($ownerEmail)? Non potrà più inviarti post o cartelle.'
+            : 'Vuoi bloccare $ownerName? Non potrà più inviarti post o cartelle.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Annulla'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Blocca', style: TextStyle(color: Colors.orange)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return false;
+
+  try {
+    await DataService.instance.blockShareSender(
+      senderId: ownerId,
+      senderEmail: ownerEmail,
+    );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Utente bloccato.')),
+      );
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_readableError(e)), backgroundColor: Colors.red),
+      );
+    }
+    return false;
+  }
 }
 
 Future<bool> _rejectSharedItem(

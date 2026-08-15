@@ -278,6 +278,47 @@ class FirebaseDataService {
     }
   }
 
+  CollectionReference<Map<String, dynamic>> get _blockedSendersCollection =>
+      _firestore
+          .collection('users')
+          .doc(_currentUserId)
+          .collection('blocked_senders');
+
+  Future<List<Map<String, dynamic>>> getBlockedSenders() async {
+    try {
+      final snapshot = await _blockedSendersCollection.get();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'senderId': data['senderId'] ?? doc.id,
+          'senderEmail': data['senderEmail'] ?? '',
+        };
+      }).toList();
+    } catch (e) {
+      if (kDebugMode) print('ERRORE getBlockedSenders: $e');
+      return [];
+    }
+  }
+
+  Future<void> blockShareSender({
+    required String senderId,
+    String senderEmail = '',
+  }) async {
+    final callable = _functions.httpsCallable('blockShareSender');
+    await callable.call(<String, dynamic>{
+      'senderId': senderId,
+      'senderEmail': senderEmail,
+    });
+  }
+
+  Future<void> unblockShareSender(String senderId) async {
+    final callable = _functions.httpsCallable('unblockShareSender');
+    await callable.call(<String, dynamic>{
+      'senderId': senderId,
+    });
+  }
+
   // ============================================================================
   // TEST CONNETTIVITÀ SEMPLIFICATO - RISOLVE IL PROBLEMA PERMISSION-DENIED
   // ============================================================================
@@ -1129,6 +1170,7 @@ class FirebaseDataService {
     required String type, // 'post' o 'folder'
     required String recipientId,
     required Map<String, dynamic> originalData,
+    String message = '',
   }) async {
     try {
       final currentUser = _auth.currentUser;
@@ -1140,6 +1182,7 @@ class FirebaseDataService {
         'type': type,
         'recipientId': recipientId,
         'originalData': originalData,
+        'message': message.trim(),
       });
 
       if (kDebugMode)
@@ -1163,7 +1206,12 @@ class FirebaseDataService {
           .orderBy('sharedAt', descending: true)
           .get();
 
-      return snapshot.docs.map((doc) {
+      final blocked = await getBlockedSenders();
+      final blockedIds = blocked.map((item) => item['id']?.toString()).toSet();
+
+      return snapshot.docs
+          .where((doc) => !blockedIds.contains(doc.data()['ownerId']?.toString()))
+          .map((doc) {
         final data = doc.data();
         return {
           'id': doc.id,

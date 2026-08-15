@@ -140,6 +140,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /share_audit_log/{logId} {
+      allow read: if isDashboardViewer();
+      allow write: if false;
+    }
+
     match /users/{userId}/account_history/{historyId} {
       allow read: if isOwner(userId) || isDashboardViewer();
       allow create: if isOwner(userId) || isDashboardAdmin();

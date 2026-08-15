@@ -306,7 +306,7 @@ class DialogHelpers {
     bool isDarkTheme,
     String type, // 'post' o 'folder'
     String title,
-    Future<void> Function(String) onShare, {
+    Future<void> Function(String email, String message) onShare, {
     String? systemShareContent,
     Future<String> Function()? systemShareContentBuilder,
     Future<bool> Function()? canStartShare,
@@ -320,6 +320,7 @@ class DialogHelpers {
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
 
     final TextEditingController controller = TextEditingController();
+    final TextEditingController messageController = TextEditingController();
     bool isLoading = false;
     String? error;
     List<String>? contacts;
@@ -493,6 +494,24 @@ class DialogHelpers {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: messageController,
+                style: TextStyle(color: textColor),
+                maxLines: 3,
+                maxLength: 500,
+                decoration: InputDecoration(
+                  hintText: 'Messaggio per il destinatario (opzionale)',
+                  hintStyle: TextStyle(color: hintColor),
+                  filled: true,
+                  fillColor: fieldColor,
+                  prefixIcon: Icon(Icons.chat_bubble_outline, color: hintColor),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
               if (showContacts && contacts != null) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -567,7 +586,7 @@ class DialogHelpers {
                       });
 
                       try {
-                        await onShare(email);
+                        await onShare(email, messageController.text.trim());
                         if (context.mounted) {
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -586,6 +605,9 @@ class DialogHelpers {
                               error = 'Utente non trovato';
                             } else if (errStr.contains('stesso')) {
                               error = 'Non puoi condividere con te stesso';
+                            } else if (errStr.contains('bloccato')) {
+                              error =
+                                  'Questo utente ha bloccato le tue condivisioni';
                             } else if (errStr.contains('disabilitata')) {
                               error =
                                   e.toString().replaceFirst('Exception: ', '');
