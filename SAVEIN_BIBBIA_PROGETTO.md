@@ -2072,6 +2072,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+105` — import Google Maps/Search nome e anteprima (16/08/2026)
+
+- Google Search non restituisce Open Graph (solo titolo **Google Search** in una pagina JS). L'import prende il nome dal testo condiviso o da `q=` / `/maps/place/`, poi scarica l'anteprima da Google Maps.
+- I link `maps.app.goo.gl` non vengono più scartati a favore di `google.com/search`.
+- **Azione**: deploy `functions:savePostFromShare`; Codemagic → TestFlight/Play **105**; collega alla versione App Store **1.1.11**.
+
 ### Build `1.1.11+104` — popup se il destinatario ha bloccato (16/08/2026)
 
 - Se condividi con qualcuno che ti ha bloccato, il messaggio **Questo utente ha bloccato le ricezioni da parte tua** è un popup sopra quello di condivisione. Con **Ok** si chiudono entrambi.

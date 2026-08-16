@@ -357,16 +357,15 @@ class SharingService {
     print('DEBUG: ========== SELEZIONE MIGLIOR URL ==========');
     print('DEBUG: URL trovati nel testo: ${urls.length}');
 
-    // Lista completa di domini di condivisione da evitare
+    // Lista di accorciatori usa-e-getta. NON includere maps.app.goo.gl:
+    // contiene "goo.gl" ma è il link vero del ristorante/luogo Google.
     final shareServiceDomains = [
-      'share.google.com',
       't.co',
       'bit.ly',
       'tinyurl.com',
       'short.link',
       'ow.ly',
       'fb.me',
-      'goo.gl',
       'tiny.cc',
       'is.gd',
       'buff.ly',
@@ -374,101 +373,33 @@ class SharingService {
       'linktr.ee',
     ];
 
-    // STRATEGIA 1: Cerca URL diretti (non di condivisione)
-    for (String url in urls) {
-      try {
-        final domain = UrlMetadataService.getDomainFromUrl(url).toLowerCase();
-        final isShareService = shareServiceDomains
-            .any((shareDomain) => domain.contains(shareDomain));
-
-        print('DEBUG: Analizzando URL: $url');
-        print('DEBUG: Dominio: $domain');
-        print('DEBUG: ÃƒË† servizio condivisione: $isShareService');
-
-        if (!isShareService) {
-          print('DEBUG: ✓ URL diretto selezionato: $url');
-          return url;
-        }
-      } catch (e) {
-        print('DEBUG: Errore analisi URL $url: $e');
-        continue;
+    int score(String url) {
+      final lower = url.toLowerCase();
+      final domain = UrlMetadataService.getDomainFromUrl(url).toLowerCase();
+      if (lower.contains('/maps/place/')) return 100;
+      if (domain.contains('maps.app.goo.gl') || lower.contains('goo.gl/maps')) {
+        return 90;
       }
+      if (lower.contains('google.com/maps') ||
+          lower.contains('google.it/maps') ||
+          lower.contains('maps.google.')) {
+        return 80;
+      }
+      if (domain.contains('share.google')) return 70;
+      if (shareServiceDomains.any((item) => domain.contains(item)) ||
+          (domain.contains('goo.gl') && !domain.contains('maps.app.goo.gl'))) {
+        return 5;
+      }
+      if (lower.contains('google.com/search') ||
+          lower.contains('google.it/search')) {
+        return 40;
+      }
+      return 60;
     }
 
-    // STRATEGIA 2: Se tutti sono URL di condivisione, prova a estrarre l'URL reale dai parametri
-    print(
-        'DEBUG: Tutti gli URL sono servizi di condivisione, cercando URL originale nei parametri...');
-
-    for (String url in urls) {
-      try {
-        final uri = Uri.parse(url);
-
-        // Per Google Share, cerca il parametro 'url'
-        if (url.contains('share.google')) {
-          print('DEBUG: Trovato link Google Share: $url');
-
-          // Prova vari parametri comuni
-          final possibleParams = ['url', 'u', 'link', 'target'];
-          for (var param in possibleParams) {
-            if (uri.queryParameters.containsKey(param)) {
-              final extractedUrl = uri.queryParameters[param];
-              if (extractedUrl != null &&
-                  extractedUrl.isNotEmpty &&
-                  extractedUrl.startsWith('http')) {
-                print(
-                    'DEBUG: ✓ URL estratto dal parametro "$param": $extractedUrl');
-                return extractedUrl;
-              }
-            }
-          }
-
-          // Prova a decodificare l'intero path/query per trovare URL nascosti
-          final fullUrl = url.toString();
-          final urlPattern =
-              RegExp(r'https?%3A%2F%2F[^&\s]+', caseSensitive: false);
-          final match = urlPattern.firstMatch(fullUrl);
-          if (match != null) {
-            final encodedUrl = match.group(0)!;
-            final decodedUrl = Uri.decodeComponent(encodedUrl);
-            print('DEBUG: ✓ URL decodificato trovato: $decodedUrl');
-            return decodedUrl;
-          }
-        }
-
-        // Per altri servizi di shortening, cerca parametri comuni
-        if (uri.queryParameters.isNotEmpty) {
-          final possibleParams = ['url', 'u', 'link', 'to', 'target', 'dest'];
-          for (var param in possibleParams) {
-            if (uri.queryParameters.containsKey(param)) {
-              final extractedUrl = uri.queryParameters[param];
-              if (extractedUrl != null &&
-                  extractedUrl.isNotEmpty &&
-                  extractedUrl.startsWith('http')) {
-                print(
-                    'DEBUG: ✓ URL estratto dal parametro "$param": $extractedUrl');
-                return extractedUrl;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        print('DEBUG: Errore estrazione parametri da $url: $e');
-      }
-    }
-
-    // STRATEGIA 3: Se non è stato trovato niente, prendi il piÃƒÂ¹ lungo
-    print('DEBUG: Nessun URL estratto, selezionando il piÃƒÂ¹ lungo...');
-
-    String longestUrl = urls.first;
-    for (String url in urls) {
-      if (url.length > longestUrl.length) {
-        longestUrl = url;
-      }
-    }
-
-    print(
-        'DEBUG: ⚠ URL piÃƒÂ¹ lungo selezionato (potrebbe essere ancora un link di condivisione): $longestUrl');
-    return longestUrl;
+    urls.sort((a, b) => score(b).compareTo(score(a)));
+    print('DEBUG: URL scelto: ${urls.first} (score ${score(urls.first)})');
+    return urls.first;
   }
 
   List<String> _extractUrlsFromText(String text) {
@@ -477,9 +408,10 @@ class SharingService {
       caseSensitive: false,
     );
 
-    final matches =
-        urlRegex.allMatches(text).map((match) => match.group(0)!).toList();
-    return matches;
+    return urlRegex
+        .allMatches(text)
+        .map((match) => match.group(0)!.replaceAll(RegExp(r'[.,);]+$'), ''))
+        .toList();
   }
 
   bool _isValidUrl(String text) {
@@ -1854,11 +1786,14 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
       String finalUrl = widget.sharedContent.url;
       print('DEBUG: URL originale ricevuto: $finalUrl');
 
-      if (finalUrl.contains('share.google')) {
+      if (UrlMetadataService.isGoogleMapsOrSearchUrl(finalUrl) ||
+          finalUrl.contains('share.google') ||
+          finalUrl.contains('maps.app.goo.gl')) {
         print(
-            'DEBUG: Trovato link di condivisione Google, risolvendo URL originale...');
+            'DEBUG: Trovato link Google, risolvendo URL originale...');
         try {
-          final resolvedUrl = await _resolveGoogleShareUrl(finalUrl);
+          final resolvedUrl =
+              await UrlMetadataService.resolveGoogleImportUrl(finalUrl);
           print('DEBUG: Risultato risoluzione: $resolvedUrl');
 
           if (resolvedUrl != null &&

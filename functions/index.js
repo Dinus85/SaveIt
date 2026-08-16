@@ -3148,6 +3148,7 @@ const isGenericGoogleTitle = (title) => {
     "www.google.com",
     "www.google.it",
     "post salvato",
+    "luogo su google maps",
   ]);
   return generic.has(value) || value.startsWith("google search");
 };
@@ -3211,15 +3212,17 @@ const placeNameFromSharedText = (text, url) => {
       .map((line) => line.trim())
       .filter(Boolean);
   for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (line.startsWith("http://") || line.startsWith("https://")) continue;
+    let candidate = line.replace(/https?:\/\/\S+/ig, "").replace(/\s+/g, " ")
+        .trim();
+    const lower = candidate.toLowerCase();
+    if (!candidate) continue;
     if (lower.includes("maps.app.goo.gl") || lower.includes("share.google")) {
       continue;
     }
-    if (/^[★☆⭐\s·.•\d.,/]+$/.test(line)) continue;
-    if (/^\d+(\.\d+)?\s*(stars?|stelle)/i.test(line)) continue;
-    if (lower.includes("google maps") && line.length < 48) continue;
-    const name = line.split(" · ")[0].trim();
+    if (/^[★☆⭐\s·.•\d.,/]+$/.test(candidate)) continue;
+    if (/^\d+(\.\d+)?\s*(stars?|stelle)/i.test(candidate)) continue;
+    if (lower.includes("google maps") && candidate.length < 48) continue;
+    const name = candidate.split(" · ")[0].trim();
     if (name.length >= 2 && name.length <= 120 && !isGenericGoogleTitle(name)) {
       return name;
     }
@@ -3283,7 +3286,129 @@ const extractJsonLdPlaceName = (html) => {
   return "";
 };
 
-const fetchShareUrlMetadata = async (rawUrl) => {
+const googleBrowserHeaders = {
+  "User-Agent":
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+  "Accept":
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+};
+
+const extractGoogleDestinationFromHtml = (html) => {
+  const decoded = (html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&");
+  const patterns = [
+    /https:\/\/(?:www\.)?google\.[a-z.]+\/maps\/place\/[^"\s<>\\]+/i,
+    /https:\/\/maps\.google\.[a-z.]+\/maps\/place\/[^"\s<>\\]+/i,
+    /https:\/\/(?:www\.)?google\.[a-z.]+\/maps\/search\/\?[^"\s<>\\]+/i,
+    /https:\/\/(?:www\.)?google\.[a-z.]+\/search\?[^"\s<>\\]*q=[^"\s<>\\]+/i,
+  ];
+  for (const pattern of patterns) {
+    const match = decoded.match(pattern);
+    if (!match) continue;
+    return match[0].replace(/[.,);]+$/, "");
+  }
+  return "";
+};
+
+const resolveGoogleImportUrl = async (url) => {
+  let current = (url || "").toString().trim();
+  if (!current) return url;
+  for (let i = 0; i < 4; i++) {
+    if (placeNameFromGoogleUrl(current) && current.includes("/maps/place/")) {
+      return current;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(current, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: googleBrowserHeaders,
+      });
+      clearTimeout(timer);
+      const finalUrl = response.url || current;
+      if (placeNameFromGoogleUrl(finalUrl) &&
+          (finalUrl.includes("/maps/place/") ||
+            finalUrl.includes("q=") ||
+            finalUrl.includes("query="))) {
+        return finalUrl;
+      }
+      const html = response.ok ? await response.text() : "";
+      const fromHtml = extractGoogleDestinationFromHtml(html);
+      if (fromHtml && fromHtml !== current) {
+        current = fromHtml;
+        continue;
+      }
+      return finalUrl;
+    } catch (_) {
+      clearTimeout(timer);
+      return current;
+    }
+  }
+  return current;
+};
+
+const googleMapsLookupUrl = (resolvedUrl, placeName) => {
+  const lower = (resolvedUrl || "").toLowerCase();
+  if (lower.includes("/maps/place/")) return resolvedUrl;
+  if (placeName && placeName.trim()) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName.trim())}`;
+  }
+  return resolvedUrl;
+};
+
+const fetchGoogleMapsPreviewImage = async (resolvedUrl, placeName) => {
+  const lower = (resolvedUrl || "").toLowerCase();
+  if (lower.includes("/search?") && !placeName && !lower.includes("/maps/")) {
+    return null;
+  }
+  const mapsUrl = googleMapsLookupUrl(resolvedUrl, placeName);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 18000);
+  try {
+    const response = await fetch(mapsUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: googleBrowserHeaders,
+    });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const html = (await response.text()).slice(0, 350000);
+    const imageUrl = absoluteShareUrl(
+        extractMetaContent(html, ["og:image", "twitter:image", "og:image:url"]),
+        response.url || mapsUrl
+    );
+    if (imageUrl && !isGenericGoogleImage(imageUrl)) return imageUrl;
+    return null;
+  } catch (_) {
+    clearTimeout(timer);
+    return null;
+  }
+};
+
+const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
+  const resolved = await resolveGoogleImportUrl(rawUrl);
+  const name = placeNameFromSharedText(sharedText, resolved) ||
+    placeNameFromGoogleUrl(resolved) ||
+    placeNameFromGoogleUrl(rawUrl);
+  const imageUrl = await fetchGoogleMapsPreviewImage(resolved, name);
+  const description = sharedText && sharedText !== rawUrl ?
+    sharedText.substring(0, 2000) :
+    "";
+  return {
+    title: (name || placeNameFromSharedText(sharedText, rawUrl) ||
+      "Luogo su Google Maps").substring(0, 300),
+    description,
+    imageUrl,
+    creatorName: null,
+    creatorUsername: null,
+    metadataProvider: "ios_share_extension_google_maps",
+  };
+};
+
+const fetchShareUrlMetadata = async (rawUrl, sharedText = "") => {
   const empty = {
     title: "",
     description: "",
@@ -3294,6 +3419,9 @@ const fetchShareUrlMetadata = async (rawUrl) => {
   };
   try {
     let workingUrl = (rawUrl || "").toString().trim();
+    if (isGoogleMapsOrSearchUrl(workingUrl)) {
+      return await fetchGooglePlaceMetadata(workingUrl, sharedText);
+    }
     if (isAnyTikTokUrl(workingUrl)) {
       workingUrl = await resolveTikTokShareUrl(workingUrl);
       const tikTok = await fetchTikTokOEmbedMetadata(workingUrl);
@@ -4433,7 +4561,7 @@ exports.savePostFromShare = onRequest(
         }
 
         if (isThinShareTitle(title, hostname) || !imageUrl || !description) {
-          const scraped = await fetchShareUrlMetadata(url);
+          const scraped = await fetchShareUrlMetadata(url, sharedText);
           if (isThinShareTitle(title, hostname) && scraped.title) {
             title = scraped.title;
           }
