@@ -4425,7 +4425,7 @@ exports.shareItemWithUser = onCall(
       if (blockedDoc.exists) {
         throw new HttpsError(
             "failed-precondition",
-            "Questo utente ha bloccato le tue condivisioni",
+            "Questo utente ha bloccato le ricezioni da parte tua",
         );
       }
 
@@ -4526,6 +4526,7 @@ exports.blockShareSender = onCall(
       }
       const senderId = (request.data?.senderId || "").toString().trim();
       const senderEmail = (request.data?.senderEmail || "").toString().trim();
+      const senderName = (request.data?.senderName || "").toString().trim();
       if (!senderId || senderId === request.auth.uid) {
         throw new HttpsError("invalid-argument", "Mittente non valido");
       }
@@ -4534,6 +4535,7 @@ exports.blockShareSender = onCall(
       await userRef.collection("blocked_senders").doc(senderId).set({
         senderId,
         senderEmail: senderEmail.toLowerCase(),
+        senderName,
         blockedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
 

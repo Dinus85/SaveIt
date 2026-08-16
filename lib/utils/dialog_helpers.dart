@@ -605,9 +605,10 @@ class DialogHelpers {
                               error = 'Utente non trovato';
                             } else if (errStr.contains('stesso')) {
                               error = 'Non puoi condividere con te stesso';
-                            } else if (errStr.contains('bloccato')) {
+                            } else if (errStr.contains('bloccato') ||
+                                errStr.contains('ricezioni')) {
                               error =
-                                  'Questo utente ha bloccato le tue condivisioni';
+                                  'Questo utente ha bloccato le ricezioni da parte tua.';
                             } else if (errStr.contains('disabilitata')) {
                               error =
                                   e.toString().replaceFirst('Exception: ', '');

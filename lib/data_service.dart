@@ -1867,10 +1867,12 @@ class DataService {
   Future<void> blockShareSender({
     required String senderId,
     String senderEmail = '',
+    String senderName = '',
   }) {
     return _firebaseService.blockShareSender(
       senderId: senderId,
       senderEmail: senderEmail,
+      senderName: senderName,
     );
   }
 

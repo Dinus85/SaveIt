@@ -26,6 +26,7 @@ import 'package:savein/data_service.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/services/ads_consent_service.dart';
+import 'package:savein/widgets/blocked_senders_dialog.dart';
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -1256,6 +1257,16 @@ class AccountPage extends StatelessWidget {
                           cardTextColor,
                           cardSubtitleColor,
                           () => _openEditProfilePage(context),
+                        ),
+
+                        _buildOptionCard(
+                          'Utenti bloccati',
+                          'Vedi e sblocca chi non può più inviarti post o cartelle',
+                          Icons.block,
+                          cardColor,
+                          cardTextColor,
+                          cardSubtitleColor,
+                          () => BlockedSendersDialog.show(context),
                         ),
 
                         _buildOptionCard(

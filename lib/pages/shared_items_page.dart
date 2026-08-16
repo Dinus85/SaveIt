@@ -7,6 +7,7 @@ import 'package:savein/pages/folder_detail_page.dart';
 import 'package:savein/services/access_control_service.dart';
 import 'package:savein/services/folder_service.dart';
 import 'package:savein/utils/theme_helpers.dart';
+import 'package:savein/widgets/blocked_senders_dialog.dart';
 import 'package:savein/widgets/free_limit_dialog.dart';
 
 class SharedItemsPage extends StatefulWidget {
@@ -90,7 +91,7 @@ class _SharedItemsPageState extends State<SharedItemsPage> {
           IconButton(
             tooltip: 'Utenti bloccati',
             icon: Icon(Icons.block, color: themeColors.iconColor),
-            onPressed: () => _showBlockedSenders(context, themeColors),
+            onPressed: () => BlockedSendersDialog.show(context),
           ),
         ],
       ),
@@ -916,19 +917,54 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
           onPressed: _isImporting ? null : () => Navigator.of(context).pop(false),
           child: const Text('Più tardi'),
         ),
-        TextButton(
-          onPressed: _isImporting
-              ? null
-              : () async {
-                  final blocked = await _blockSharedSender(
-                    context,
-                    widget.item,
-                  );
-                  if (blocked && context.mounted) {
-                    Navigator.of(context).pop(true);
-                  }
-                },
-          child: const Text('Blocca', style: TextStyle(color: Colors.orange)),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton(
+              onPressed: _isImporting
+                  ? null
+                  : () async {
+                      final blocked = await _blockSharedSender(
+                        context,
+                        widget.item,
+                      );
+                      if (blocked && context.mounted) {
+                        Navigator.of(context).pop(true);
+                      }
+                    },
+              child: const Text(
+                'Blocca utente',
+                style: TextStyle(color: Colors.orange),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Potrai sbloccarlo nella pagina account se vorrai.',
+              icon: const Icon(
+                Icons.help_outline,
+                color: Colors.orange,
+                size: 20,
+              ),
+              onPressed: _isImporting
+                  ? null
+                  : () {
+                      showDialog<void>(
+                        context: context,
+                        builder: (helpContext) => AlertDialog(
+                          content: const Text(
+                            'Potrai sbloccarlo nella pagina account se vorrai.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(helpContext).pop(),
+                              child: const Text('Ok'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+            ),
+          ],
         ),
         TextButton(
           onPressed: _isImporting
@@ -1388,8 +1424,8 @@ Future<bool> _blockSharedSender(
       title: const Text('Blocca utente'),
       content: Text(
         ownerEmail.isNotEmpty
-            ? 'Vuoi bloccare $ownerName ($ownerEmail)? Non potrà più inviarti post o cartelle.'
-            : 'Vuoi bloccare $ownerName? Non potrà più inviarti post o cartelle.',
+            ? 'Vuoi bloccare $ownerName ($ownerEmail)? Non potrà più inviarti post o cartelle. Potrai sbloccarlo nella pagina account se vorrai.'
+            : 'Vuoi bloccare $ownerName? Non potrà più inviarti post o cartelle. Potrai sbloccarlo nella pagina account se vorrai.',
       ),
       actions: [
         TextButton(
@@ -1398,7 +1434,10 @@ Future<bool> _blockSharedSender(
         ),
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('Blocca', style: TextStyle(color: Colors.orange)),
+          child: const Text(
+            'Blocca utente',
+            style: TextStyle(color: Colors.orange),
+          ),
         ),
       ],
     ),
@@ -1409,6 +1448,7 @@ Future<bool> _blockSharedSender(
     await DataService.instance.blockShareSender(
       senderId: ownerId,
       senderEmail: ownerEmail,
+      senderName: ownerName,
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

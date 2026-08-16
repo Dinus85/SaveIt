@@ -293,6 +293,7 @@ class FirebaseDataService {
           'id': doc.id,
           'senderId': data['senderId'] ?? doc.id,
           'senderEmail': data['senderEmail'] ?? '',
+          'senderName': data['senderName'] ?? '',
         };
       }).toList();
     } catch (e) {
@@ -304,11 +305,13 @@ class FirebaseDataService {
   Future<void> blockShareSender({
     required String senderId,
     String senderEmail = '',
+    String senderName = '',
   }) async {
     final callable = _functions.httpsCallable('blockShareSender');
     await callable.call(<String, dynamic>{
       'senderId': senderId,
       'senderEmail': senderEmail,
+      'senderName': senderName,
     });
   }
 
