@@ -988,57 +988,66 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
                   );
                 },
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  TextButton.icon(
-                    onPressed: () async {
-                      final blocked = await _blockSharedSender(
-                        context,
-                        widget.item,
-                      );
-                      if (blocked && context.mounted) {
-                        Navigator.of(context).pop(true);
-                      }
-                    },
-                    icon: const Icon(Icons.block, size: 18),
-                    label: const Text('Blocca utente'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.orange.shade700,
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isImporting
+                          ? null
+                          : () {
+                              final item = widget.item;
+                              final pageContext = widget.pageContext;
+                              Navigator.of(context).pop(true);
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (pageContext.mounted) {
+                                  _blockSharedSender(pageContext, item);
+                                }
+                              });
+                            },
+                      icon: const Icon(Icons.block, size: 18),
+                      label: const Text('Blocca utente'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange.shade700,
+                        side: BorderSide(
+                          color: Colors.orange.shade400,
+                          width: 1.4,
+                        ),
+                        minimumSize: const Size.fromHeight(44),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
                     ),
                   ),
                   IconButton(
                     tooltip:
                         'Potrai sbloccarlo nella pagina account se vorrai.',
                     visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 32,
-                      height: 32,
-                    ),
                     icon: Icon(
                       Icons.help_outline,
                       color: Colors.orange.shade700,
                       size: 18,
                     ),
-                    onPressed: () {
-                      showDialog<void>(
-                        context: context,
-                        builder: (helpContext) => AlertDialog(
-                          content: const Text(
-                            'Potrai sbloccarlo nella pagina account se vorrai.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.of(helpContext).pop(),
-                              child: const Text('Ok'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                    onPressed: _isImporting
+                        ? null
+                        : () {
+                            showDialog<void>(
+                              context: context,
+                              builder: (helpContext) => AlertDialog(
+                                content: const Text(
+                                  'Potrai sbloccarlo nella pagina account se vorrai.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(helpContext).pop(),
+                                    child: const Text('Ok'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                   ),
                 ],
               ),

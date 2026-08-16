@@ -1913,7 +1913,7 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 
 - Popup condivisione post/cartella: oltre all'email si può scrivere un **messaggio** (max 500). Arriva nella push FCM e nel dialog di import del destinatario.
 - Il destinatario **vede email e nome** del mittente (`ownerEmail` era già salvato, ora è in UI).
-- Il destinatario può **Bloccare utente** il mittente: non riceve più sue condivisioni; le pending vengono cancellate. Sblocco da Account → **Utenti bloccati** (anche da `Condivisi con me` → icona blocco). Help: "Potrai sbloccarlo nella pagina account se vorrai."
+- Il destinatario può **Bloccare utente** il mittente: non riceve più sue condivisioni; le pending vengono cancellate. Sblocco da Account → **Utenti bloccati** (anche da `Condivisi con me` → icona blocco). Nella stessa schermata c'è **Utenti conosciuti** con tasto **Blocca**. Help: "Potrai sbloccarlo nella pagina account se vorrai."
 - Se il destinatario ha bloccato il mittente, chi prova a condividere vede: "Questo utente ha bloccato le ricezioni da parte tua."
 - Collezioni: `users/{uid}/blocked_senders/{senderUid}`, `share_audit_log` (tutti gli invii email, messaggio incluso).
 - Dashboard → **Storico invii**: elenco cercabile mittente/destinatario/titolo/messaggio per moderazione.
@@ -2071,6 +2071,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.11+103` — tasto Blocca visibile + lista utenti conosciuti (16/08/2026)
+
+- Popup ricezione: **Blocca utente** ha il bordo come gli altri tasti. Al tap il popup di condivisione si chiude subito; conferma e blocco restano dopo.
+- Account → **Utenti bloccati**: stessa schermata con **Utenti conosciuti** (chi ti ha inviato o a cui hai già condiviso) e tasto **Blocca** accanto. **Sblocca** resta per i già bloccati.
+- **Azione**: Codemagic → TestFlight/Play **103**; collega alla versione App Store **1.1.11**.
 
 ### Build `1.1.11+102` — import ristoranti Google Maps/Search (16/08/2026)
 

@@ -1261,7 +1261,7 @@ class AccountPage extends StatelessWidget {
 
                         _buildOptionCard(
                           'Utenti bloccati',
-                          'Vedi e sblocca chi non può più inviarti post o cartelle',
+                          'Blocca o sblocca chi può inviarti post e cartelle',
                           Icons.block,
                           cardColor,
                           cardTextColor,
