@@ -9508,34 +9508,33 @@ class _AdminNavButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = selected ? Colors.white : const Color(0xFF374151);
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: Material(
-        color: selected ? Colors.deepPurple : const Color(0xFFF8FAFC),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(999),
-          side: BorderSide(
-            color: selected ? Colors.deepPurple : const Color(0xFFCBD5E1),
-            width: 1.2,
+    return UnconstrainedBox(
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: selected ? Colors.deepPurple : const Color(0xFFF8FAFC),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
+            side: BorderSide(
+              color: selected ? Colors.deepPurple : const Color(0xFFCBD5E1),
+              width: 1.2,
+            ),
           ),
-        ),
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(999),
-          child: Container(
-            height: 44,
-            constraints: const BoxConstraints(minWidth: 120),
-            padding: const EdgeInsets.symmetric(horizontal: 22),
-            alignment: Alignment.center,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: foreground,
-                fontWeight: FontWeight.w700,
-                height: 1,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
               ),
             ),
           ),

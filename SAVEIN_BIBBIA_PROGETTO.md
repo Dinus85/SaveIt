@@ -2071,6 +2071,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+99` — menu dashboard pill compatte + storico visibile (16/08/2026)
+
+- I tasti menu tornano pill compatte (larghezza del testo), non a tutta riga. Se non c'è spazio vanno a capo (`Wrap`).
+- Lo storico invii torna visibile sotto il menu: prima i 9 tasti full-width occupavano tutto lo schermo.
+- **Azione**: `flutter build web --release` + `firebase deploy --only hosting`. Hard refresh (Ctrl+F5).
+
 ### Build `1.1.11+98` — menu dashboard sotto Logout + contenuto storico invii (16/08/2026)
 
 - Menu dashboard: i pulsanti extra non restano dietro Logout. Logo/Logout in alto, voci menu in una barra sotto con **seconda riga** (`Wrap`).
