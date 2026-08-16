@@ -4439,6 +4439,15 @@ exports.shareItemWithUser = onCall(
         originalData.name ||
         ""
       ).toString().slice(0, 200);
+      const auditOriginal = {
+        title: (originalData.title || originalData.name || "").toString().slice(0, 200),
+        name: (originalData.name || "").toString().slice(0, 200),
+        url: (originalData.url || "").toString().slice(0, 500),
+        imageUrl: (originalData.imageUrl || "").toString().slice(0, 500),
+        previewStorageUrl: (originalData.previewStorageUrl || "").toString().slice(0, 500),
+        description: (originalData.description || "").toString().slice(0, 500),
+        color: (originalData.color || "").toString().slice(0, 40),
+      };
 
       await recipientDoc.ref.collection("shared_items").add({
         resourceId,
@@ -4462,6 +4471,7 @@ exports.shareItemWithUser = onCall(
         resourceId,
         resourceTitle,
         message,
+        originalData: auditOriginal,
         sharedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 

@@ -1375,6 +1375,7 @@ firebase deploy --only functions:assetLinks,hosting --project saveit-app-1784d
 - **Legal pages pubbliche SaveIn**:
   - `https://savein.eu/privacy` e `https://savein.eu/terms` sono servite da Cloud Functions pubbliche (`renderPrivacyPage`, `renderTermsPage`) via Firebase Hosting rewrite.
   - La sorgente e' il repo GitHub legal content (`privacy_policy.json`, `terms_conditions.json`), non una pagina protetta dell'app.
+  - Clausola uso illecito / forze dell'ordine / parte civile: va nei **Termini e Condizioni** (`terms_conditions.json` v3.3+), non nella Privacy Policy. L'app e `https://savein.eu/terms` la leggono da lì.
   - File backend: `functions/legal_content_page.js`; registrazione in `functions/index.js`; rewrites in `firebase.json`.
 
 - **Premium iOS / App Store**:
@@ -2069,6 +2070,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.11+97` — menu dashboard a due righe, storico post, clausola legale (16/08/2026)
+
+- Dashboard admin: i pulsanti menu extra non restano nascosti in scroll orizzontale; vanno a capo su una **seconda riga** (`Wrap`).
+- Storico invii: mostra anteprima del post inviato (immagine, descrizione, URL, messaggio). Tocca la riga per il dettaglio. I nuovi invii salvano `originalData` in `share_audit_log` (serve deploy functions).
+- Termini e Condizioni (repo `saveit-legal-content`, v3.3): aggiunta clausola su uso illecito, collaborazione con le forze dell'ordine e costituzione di parte civile.
+- **Azione**: `firebase deploy --only functions`; Codemagic → TestFlight/Play **97**; collega alla versione App Store **1.1.11** se non è ancora in revisione.
 
 ### Build `1.1.11+96` — sblocco mittenti da Account (16/08/2026)
 

@@ -1568,30 +1568,27 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           backgroundColor: Colors.white,
           elevation: 1,
           shadowColor: const Color(0x22000000),
-          toolbarHeight: 72,
+          toolbarHeight: 64,
           titleSpacing: 16,
-          title: Row(
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.asset(
-                      'assets/icon/app_icon_phone.png',
-                      width: 44,
-                      height: 44,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 24),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
+          title: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.asset(
+              'assets/icon/app_icon_phone.png',
+              width: 44,
+              height: 44,
+              fit: BoxFit.cover,
+            ),
+          ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(112),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
                       _AdminNavButton(
                         label: 'Home dashboard',
                         selected:
@@ -1604,14 +1601,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                     _AdminDashboardSection.userFolders,
                         onPressed: _goToDashboardHome,
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Banner promo',
                         selected:
                             _activeSection == _AdminDashboardSection.promos,
                         onPressed: _openCentralPromoAdmin,
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Limiti Funzioni',
                         selected:
@@ -1622,7 +1617,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Versione app',
                         selected: _activeSection ==
@@ -1634,7 +1628,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Statistiche globali',
                         selected: _activeSection ==
@@ -1645,7 +1638,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Costi/Ricavi',
                         selected:
@@ -1656,14 +1648,12 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Notifiche',
                         selected: _activeSection ==
                             _AdminDashboardSection.notifications,
                         onPressed: _openNotificationsSection,
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Accessi',
                         selected:
@@ -1675,7 +1665,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
-                      const SizedBox(width: 10),
                       _AdminNavButton(
                         label: 'Storico invii',
                         selected: _activeSection ==
@@ -1686,11 +1675,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                           });
                         },
                       ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
           actions: [
             TextButton.icon(
@@ -8632,6 +8620,75 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  Widget _shareAuditIcon(String type) {
+    return CircleAvatar(
+      backgroundColor:
+          type == 'Cartella' ? Colors.amber.shade100 : Colors.blue.shade50,
+      child: Icon(
+        type == 'Cartella' ? Icons.folder_outlined : Icons.article_outlined,
+        color: type == 'Cartella' ? Colors.amber.shade800 : Colors.blue,
+      ),
+    );
+  }
+
+  void _showShareAuditPreview({
+    required String title,
+    required String type,
+    required String imageUrl,
+    required String description,
+    required String url,
+    required String message,
+    required String sender,
+    required String recipient,
+    DateTime? when,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('$type · Da $sender a $recipient'),
+              if (when != null) ...[
+                const SizedBox(height: 4),
+                Text(_formatDate(when)),
+              ],
+              if (imageUrl.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(imageUrl, fit: BoxFit.cover),
+                ),
+              ],
+              if (description.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(description),
+              ],
+              if (url.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(url, style: const TextStyle(color: Color(0xFF2563EB))),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                message.isEmpty ? 'Nessun messaggio' : 'Messaggio: $message',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Chiudi'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildShareAuditPage() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _firestore
@@ -8733,26 +8790,54 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                 : 'Post';
                             final message =
                                 data['message']?.toString().trim() ?? '';
+                            final original =
+                                data['originalData'] is Map<String, dynamic>
+                                    ? data['originalData'] as Map<String, dynamic>
+                                    : <String, dynamic>{};
+                            final imageUrl = (original['previewStorageUrl'] ??
+                                    original['imageUrl'] ??
+                                    '')
+                                .toString()
+                                .trim();
+                            final description =
+                                original['description']?.toString().trim() ??
+                                    '';
+                            final url = original['url']?.toString().trim() ?? '';
+                            final title = data['resourceTitle']
+                                        ?.toString()
+                                        .isNotEmpty ==
+                                    true
+                                ? data['resourceTitle'].toString()
+                                : type;
                             return ListTile(
                               isThreeLine: true,
-                              leading: CircleAvatar(
-                                backgroundColor: type == 'Cartella'
-                                    ? Colors.amber.shade100
-                                    : Colors.blue.shade50,
-                                child: Icon(
-                                  type == 'Cartella'
-                                      ? Icons.folder_outlined
-                                      : Icons.article_outlined,
-                                  color: type == 'Cartella'
-                                      ? Colors.amber.shade800
-                                      : Colors.blue,
-                                ),
+                              onTap: () => _showShareAuditPreview(
+                                title: title,
+                                type: type,
+                                imageUrl: imageUrl,
+                                description: description,
+                                url: url,
+                                message: message,
+                                sender: data['senderEmail']?.toString() ?? '-',
+                                recipient:
+                                    data['recipientEmail']?.toString() ?? '-',
+                                when: when,
                               ),
+                              leading: imageUrl.isNotEmpty
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        imageUrl,
+                                        width: 56,
+                                        height: 56,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            _shareAuditIcon(type),
+                                      ),
+                                    )
+                                  : _shareAuditIcon(type),
                               title: Text(
-                                data['resourceTitle']?.toString().isNotEmpty ==
-                                        true
-                                    ? data['resourceTitle'].toString()
-                                    : type,
+                                title,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -8760,11 +8845,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                               subtitle: Text(
                                 [
                                   'Da ${data['senderEmail'] ?? '-'} a ${data['recipientEmail'] ?? '-'}',
-                                  if (when != null)
-                                    _formatDate(when),
-                                  if (message.isNotEmpty) 'Messaggio: $message',
+                                  if (when != null) _formatDate(when),
+                                  if (description.isNotEmpty)
+                                    description,
+                                  if (message.isNotEmpty)
+                                    'Messaggio: $message',
                                   if (message.isEmpty) 'Nessun messaggio',
                                 ].join('\n'),
+                                maxLines: 5,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             );
                           },
@@ -9209,7 +9298,7 @@ class _AdminNavButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(999),
           child: Container(
             height: 44,
-            constraints: const BoxConstraints(minWidth: 150),
+            constraints: const BoxConstraints(minWidth: 120),
             padding: const EdgeInsets.symmetric(horizontal: 22),
             alignment: Alignment.center,
             child: Text(
