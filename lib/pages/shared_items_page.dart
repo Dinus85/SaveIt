@@ -808,8 +808,42 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
     final textColor = widget.isDarkTheme ? Colors.white : Colors.black87;
     final subtitleColor = widget.isDarkTheme ? Colors.white70 : Colors.black54;
 
+    final laterButton = OutlinedButton(
+      onPressed:
+          _isImporting ? null : () => Navigator.of(context).pop(false),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: textColor,
+        side: BorderSide(
+          color: widget.isDarkTheme ? Colors.white24 : Colors.black26,
+        ),
+        minimumSize: const Size.fromHeight(44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: const Text('Più tardi'),
+    );
+    final rejectButton = OutlinedButton(
+      onPressed: _isImporting
+          ? null
+          : () async {
+              final rejected = await _rejectSharedItem(context, widget.item);
+              if (rejected && context.mounted) {
+                Navigator.of(context).pop(true);
+              }
+            },
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.red.shade600,
+        side: BorderSide(color: Colors.red.shade300),
+        minimumSize: const Size.fromHeight(44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: const Text('Rifiuta'),
+    );
+
     return AlertDialog(
       backgroundColor: backgroundColor,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       title: Row(
         children: [
@@ -880,7 +914,7 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
                 isFolder: isFolder,
                 isDarkTheme: widget.isDarkTheme,
               ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             if (_isImporting)
               Row(
                 children: [
@@ -901,7 +935,7 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
                   ),
                 ],
               )
-            else
+            else ...[
               Text(
                 'Vuoi importarlo nel tuo account?',
                 style: TextStyle(
@@ -909,21 +943,57 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _isImporting ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Più tardi'),
-        ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextButton(
-              onPressed: _isImporting
-                  ? null
-                  : () async {
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _loadingPreview
+                      ? null
+                      : () => _handleImport(context, isFolder: isFolder),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.blue.withOpacity(0.4),
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Importa',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final sideBySide = constraints.maxWidth >= 280;
+                  if (sideBySide) {
+                    return Row(
+                      children: [
+                        Expanded(child: laterButton),
+                        const SizedBox(width: 8),
+                        Expanded(child: rejectButton),
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      laterButton,
+                      const SizedBox(height: 8),
+                      rejectButton,
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: () async {
                       final blocked = await _blockSharedSender(
                         context,
                         widget.item,
@@ -932,21 +1002,27 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
                         Navigator.of(context).pop(true);
                       }
                     },
-              child: const Text(
-                'Blocca utente',
-                style: TextStyle(color: Colors.orange),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Potrai sbloccarlo nella pagina account se vorrai.',
-              icon: const Icon(
-                Icons.help_outline,
-                color: Colors.orange,
-                size: 20,
-              ),
-              onPressed: _isImporting
-                  ? null
-                  : () {
+                    icon: const Icon(Icons.block, size: 18),
+                    label: const Text('Blocca utente'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.orange.shade700,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip:
+                        'Potrai sbloccarlo nella pagina account se vorrai.',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                    icon: Icon(
+                      Icons.help_outline,
+                      color: Colors.orange.shade700,
+                      size: 18,
+                    ),
+                    onPressed: () {
                       showDialog<void>(
                         context: context,
                         builder: (helpContext) => AlertDialog(
@@ -963,28 +1039,13 @@ class _SharedImportPromptDialogState extends State<_SharedImportPromptDialog> {
                         ),
                       );
                     },
-            ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
-        TextButton(
-          onPressed: _isImporting
-              ? null
-              : () async {
-                  final rejected =
-                      await _rejectSharedItem(context, widget.item);
-                  if (rejected && context.mounted) {
-                    Navigator.of(context).pop(true);
-                  }
-                },
-          child: const Text('Rifiuta', style: TextStyle(color: Colors.red)),
-        ),
-        ElevatedButton(
-          onPressed: _isImporting || _loadingPreview
-              ? null
-              : () => _handleImport(context, isFolder: isFolder),
-          child: const Text('Importa'),
-        ),
-      ],
+      ),
     );
   }
 

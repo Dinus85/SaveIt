@@ -2071,6 +2071,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+101` — design popup contenuto condiviso (16/08/2026)
+
+- Popup ricezione: i tasti non sono più impilati a destra. **Importa** è il CTA a tutta larghezza; **Più tardi** e **Rifiuta** stanno affiancati (vanno a colonna solo se lo spazio è stretto); **Blocca utente** + `?` restano sotto, centrati.
+- **Azione**: Codemagic → TestFlight/Play **101**; collega alla versione App Store **1.1.11**.
+
 ### Build `1.1.11+100` — menu dashboard tra logo e Logout (16/08/2026)
 
 - I tasti menu stanno nello spazio tra il logo a sinistra e Logout a destra. Se non ci stanno, vanno a capo nella stessa intestazione (`Wrap` nell'`Expanded` centrale). Non sono più una riga separata sotto.
