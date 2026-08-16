@@ -597,29 +597,53 @@ class DialogHelpers {
                           );
                         }
                       } catch (e) {
-                        if (context.mounted) {
-                          setDialogState(() {
-                            isLoading = false;
-                            final errStr = e.toString().toLowerCase();
-                            if (errStr.contains('non trovato')) {
-                              error = 'Utente non trovato';
-                            } else if (errStr.contains('stesso')) {
-                              error = 'Non puoi condividere con te stesso';
-                            } else if (errStr.contains('bloccato') ||
-                                errStr.contains('ricezioni')) {
-                              error =
-                                  'Questo utente ha bloccato le ricezioni da parte tua.';
-                            } else if (errStr.contains('disabilitata')) {
-                              error =
-                                  e.toString().replaceFirst('Exception: ', '');
-                            } else {
-                              error = e
-                                  .toString()
-                                  .replaceFirst('FirebaseDataException: ', '')
-                                  .replaceFirst('Exception: ', '');
-                            }
-                          });
+                        if (!context.mounted) return;
+                        setDialogState(() => isLoading = false);
+                        final errStr = e.toString().toLowerCase();
+                        if (errStr.contains('bloccato') ||
+                            errStr.contains('ricezioni')) {
+                          await showDialog<void>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (blockedContext) => AlertDialog(
+                              backgroundColor: backgroundColor,
+                              title: Text(
+                                'Ricezione bloccata',
+                                style: TextStyle(color: textColor),
+                              ),
+                              content: Text(
+                                'Questo utente ha bloccato le ricezioni da parte tua.',
+                                style: TextStyle(color: textColor),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(blockedContext).pop(),
+                                  child: const Text('Ok'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (context.mounted) {
+                            Navigator.of(context).pop();
+                          }
+                          return;
                         }
+                        setDialogState(() {
+                          if (errStr.contains('non trovato')) {
+                            error = 'Utente non trovato';
+                          } else if (errStr.contains('stesso')) {
+                            error = 'Non puoi condividere con te stesso';
+                          } else if (errStr.contains('disabilitata')) {
+                            error =
+                                e.toString().replaceFirst('Exception: ', '');
+                          } else {
+                            error = e
+                                .toString()
+                                .replaceFirst('FirebaseDataException: ', '')
+                                .replaceFirst('Exception: ', '');
+                          }
+                        });
                       }
                     },
               child: Text('Condividi email',

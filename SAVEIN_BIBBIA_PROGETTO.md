@@ -2072,6 +2072,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+104` — popup se il destinatario ha bloccato (16/08/2026)
+
+- Se condividi con qualcuno che ti ha bloccato, il messaggio **Questo utente ha bloccato le ricezioni da parte tua** è un popup sopra quello di condivisione. Con **Ok** si chiudono entrambi.
+- **Azione**: Codemagic → TestFlight/Play **104**; collega alla versione App Store **1.1.11**.
+
 ### Build `1.1.11+103` — tasto Blocca visibile + lista utenti conosciuti (16/08/2026)
 
 - Popup ricezione: **Blocca utente** ha il bordo come gli altri tasti. Al tap il popup di condivisione si chiude subito; conferma e blocco restano dopo.
@@ -2117,5 +2122,5 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 
 - Account → **Utenti bloccati**: elenco email/nome e tasto **Sblocca**.
 - Popup ricezione: tasto **Blocca utente** + icona `?` "Potrai sbloccarlo nella pagina account se vorrai."
-- Chi prova a condividere con un utente che lo ha bloccato vede: "Questo utente ha bloccato le ricezioni da parte tua."
+- Chi prova a condividere con un utente che lo ha bloccato vede un popup: "Questo utente ha bloccato le ricezioni da parte tua." Con Ok si chiudono sia quel popup sia quello di condivisione.
 - **Azione**: deploy `functions` (`shareItemWithUser`, `blockShareSender`); Codemagic → TestFlight/Play **96**; collega alla versione App Store **1.1.11** se non è ancora in revisione.
