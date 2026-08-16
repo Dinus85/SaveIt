@@ -2071,6 +2071,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+98` — menu dashboard sotto Logout + contenuto storico invii (16/08/2026)
+
+- Menu dashboard: i pulsanti extra non restano dietro Logout. Logo/Logout in alto, voci menu in una barra sotto con **seconda riga** (`Wrap`).
+- Storico invii: mostra il contenuto condiviso. Per i post immagine/descrizione/URL; per le cartelle i post dentro (da `originalData` o lettura live della cartella mittente).
+- **Azione**: `flutter build web --release` + `firebase deploy --only hosting,functions:shareItemWithUser`.
+
 ### Build `1.1.11+97` — menu dashboard a due righe, storico post, clausola legale (16/08/2026)
 
 - Dashboard admin: i pulsanti menu extra non restano nascosti in scroll orizzontale; vanno a capo su una **seconda riga** (`Wrap`).

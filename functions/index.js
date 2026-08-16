@@ -4448,6 +4448,30 @@ exports.shareItemWithUser = onCall(
         description: (originalData.description || "").toString().slice(0, 500),
         color: (originalData.color || "").toString().slice(0, 40),
       };
+      if (type === "folder") {
+        try {
+          const postsSnap = await db.collection("users")
+              .doc(request.auth.uid)
+              .collection("posts")
+              .where("folderId", "==", resourceId)
+              .limit(20)
+              .get();
+          auditOriginal.posts = postsSnap.docs.map((doc) => {
+            const post = doc.data() || {};
+            return {
+              title: (post.title || "").toString().slice(0, 200),
+              url: (post.url || "").toString().slice(0, 500),
+              imageUrl: (post.previewStorageUrl || post.imageUrl || "")
+                  .toString()
+                  .slice(0, 500),
+              description: (post.description || "").toString().slice(0, 200),
+            };
+          });
+          auditOriginal.postCount = postsSnap.size;
+        } catch (error) {
+          console.error("share audit folder posts skip:", error);
+        }
+      }
 
       await recipientDoc.ref.collection("shared_items").add({
         resourceId,

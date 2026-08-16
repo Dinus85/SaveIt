@@ -1579,107 +1579,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               fit: BoxFit.cover,
             ),
           ),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(112),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Wrap(
-                  spacing: 10,
-                  runSpacing: 8,
-                  children: [
-                      _AdminNavButton(
-                        label: 'Home dashboard',
-                        selected:
-                            _activeSection == _AdminDashboardSection.users ||
-                                _activeSection ==
-                                    _AdminDashboardSection.userDetail ||
-                                _activeSection ==
-                                    _AdminDashboardSection.userPosts ||
-                                _activeSection ==
-                                    _AdminDashboardSection.userFolders,
-                        onPressed: _goToDashboardHome,
-                      ),
-                      _AdminNavButton(
-                        label: 'Banner promo',
-                        selected:
-                            _activeSection == _AdminDashboardSection.promos,
-                        onPressed: _openCentralPromoAdmin,
-                      ),
-                      _AdminNavButton(
-                        label: 'Limiti Funzioni',
-                        selected:
-                            _activeSection == _AdminDashboardSection.planLimits,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.planLimits;
-                          });
-                        },
-                      ),
-                      _AdminNavButton(
-                        label: 'Versione app',
-                        selected: _activeSection ==
-                            _AdminDashboardSection.versionControl,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection =
-                                _AdminDashboardSection.versionControl;
-                          });
-                        },
-                      ),
-                      _AdminNavButton(
-                        label: 'Statistiche globali',
-                        selected: _activeSection ==
-                            _AdminDashboardSection.globalStats,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.globalStats;
-                          });
-                        },
-                      ),
-                      _AdminNavButton(
-                        label: 'Costi/Ricavi',
-                        selected:
-                            _activeSection == _AdminDashboardSection.finance,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.finance;
-                          });
-                        },
-                      ),
-                      _AdminNavButton(
-                        label: 'Notifiche',
-                        selected: _activeSection ==
-                            _AdminDashboardSection.notifications,
-                        onPressed: _openNotificationsSection,
-                      ),
-                      _AdminNavButton(
-                        label: 'Accessi',
-                        selected:
-                            _activeSection == _AdminDashboardSection.accesses,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.accesses;
-                            _accessesPage = 0;
-                          });
-                        },
-                      ),
-                      _AdminNavButton(
-                        label: 'Storico invii',
-                        selected: _activeSection ==
-                            _AdminDashboardSection.shareAudit,
-                        onPressed: () {
-                          setState(() {
-                            _activeSection = _AdminDashboardSection.shareAudit;
-                          });
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
           actions: [
             TextButton.icon(
               onPressed: () async {
@@ -1691,7 +1590,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             const SizedBox(width: 12),
           ],
         ),
-        body: _activeSection == _AdminDashboardSection.planLimits
+        body: Column(
+          children: [
+            _buildAdminNavBar(),
+            Expanded(
+              child: _activeSection == _AdminDashboardSection.planLimits
             ? _buildPlanLimitsPage()
             : _activeSection == _AdminDashboardSection.versionControl
                 ? _buildVersionControlPage()
@@ -1892,6 +1795,104 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                       );
                                     },
                                   ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminNavBar() {
+    return Material(
+      color: Colors.white,
+      elevation: 1,
+      shadowColor: const Color(0x14000000),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _AdminNavButton(
+                label: 'Home dashboard',
+                selected: _activeSection == _AdminDashboardSection.users ||
+                    _activeSection == _AdminDashboardSection.userDetail ||
+                    _activeSection == _AdminDashboardSection.userPosts ||
+                    _activeSection == _AdminDashboardSection.userFolders,
+                onPressed: _goToDashboardHome,
+              ),
+              _AdminNavButton(
+                label: 'Banner promo',
+                selected: _activeSection == _AdminDashboardSection.promos,
+                onPressed: _openCentralPromoAdmin,
+              ),
+              _AdminNavButton(
+                label: 'Limiti Funzioni',
+                selected: _activeSection == _AdminDashboardSection.planLimits,
+                onPressed: () {
+                  setState(() {
+                    _activeSection = _AdminDashboardSection.planLimits;
+                  });
+                },
+              ),
+              _AdminNavButton(
+                label: 'Versione app',
+                selected:
+                    _activeSection == _AdminDashboardSection.versionControl,
+                onPressed: () {
+                  setState(() {
+                    _activeSection = _AdminDashboardSection.versionControl;
+                  });
+                },
+              ),
+              _AdminNavButton(
+                label: 'Statistiche globali',
+                selected: _activeSection == _AdminDashboardSection.globalStats,
+                onPressed: () {
+                  setState(() {
+                    _activeSection = _AdminDashboardSection.globalStats;
+                  });
+                },
+              ),
+              _AdminNavButton(
+                label: 'Costi/Ricavi',
+                selected: _activeSection == _AdminDashboardSection.finance,
+                onPressed: () {
+                  setState(() {
+                    _activeSection = _AdminDashboardSection.finance;
+                  });
+                },
+              ),
+              _AdminNavButton(
+                label: 'Notifiche',
+                selected:
+                    _activeSection == _AdminDashboardSection.notifications,
+                onPressed: _openNotificationsSection,
+              ),
+              _AdminNavButton(
+                label: 'Accessi',
+                selected: _activeSection == _AdminDashboardSection.accesses,
+                onPressed: () {
+                  setState(() {
+                    _activeSection = _AdminDashboardSection.accesses;
+                    _accessesPage = 0;
+                  });
+                },
+              ),
+              _AdminNavButton(
+                label: 'Storico invii',
+                selected: _activeSection == _AdminDashboardSection.shareAudit,
+                onPressed: () {
+                  setState(() {
+                    _activeSection = _AdminDashboardSection.shareAudit;
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -8809,9 +8810,22 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                     true
                                 ? data['resourceTitle'].toString()
                                 : type;
-                            return ListTile(
-                              isThreeLine: true,
-                              onTap: () => _showShareAuditPreview(
+                            return _ShareAuditRow(
+                              title: title,
+                              type: type,
+                              imageUrl: imageUrl,
+                              description: description,
+                              url: url,
+                              message: message,
+                              sender: data['senderEmail']?.toString() ?? '-',
+                              recipient:
+                                  data['recipientEmail']?.toString() ?? '-',
+                              whenLabel: when == null ? '' : _formatDate(when),
+                              original: original,
+                              senderId: data['senderId']?.toString() ?? '',
+                              resourceId: data['resourceId']?.toString() ?? '',
+                              icon: _shareAuditIcon(type),
+                              onOpen: () => _showShareAuditPreview(
                                 title: title,
                                 type: type,
                                 imageUrl: imageUrl,
@@ -8823,38 +8837,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                                     data['recipientEmail']?.toString() ?? '-',
                                 when: when,
                               ),
-                              leading: imageUrl.isNotEmpty
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        imageUrl,
-                                        width: 56,
-                                        height: 56,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) =>
-                                            _shareAuditIcon(type),
-                                      ),
-                                    )
-                                  : _shareAuditIcon(type),
-                              title: Text(
-                                title,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              subtitle: Text(
-                                [
-                                  'Da ${data['senderEmail'] ?? '-'} a ${data['recipientEmail'] ?? '-'}',
-                                  if (when != null) _formatDate(when),
-                                  if (description.isNotEmpty)
-                                    description,
-                                  if (message.isNotEmpty)
-                                    'Messaggio: $message',
-                                  if (message.isEmpty) 'Nessun messaggio',
-                                ].join('\n'),
-                                maxLines: 5,
-                                overflow: TextOverflow.ellipsis,
-                              ),
                             );
                           },
                         ),
@@ -8864,6 +8846,250 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           ),
         );
       },
+    );
+  }
+}
+
+class _ShareAuditRow extends StatelessWidget {
+  final String title;
+  final String type;
+  final String imageUrl;
+  final String description;
+  final String url;
+  final String message;
+  final String sender;
+  final String recipient;
+  final String whenLabel;
+  final Map<String, dynamic> original;
+  final String senderId;
+  final String resourceId;
+  final Widget icon;
+  final VoidCallback onOpen;
+
+  const _ShareAuditRow({
+    required this.title,
+    required this.type,
+    required this.imageUrl,
+    required this.description,
+    required this.url,
+    required this.message,
+    required this.sender,
+    required this.recipient,
+    required this.whenLabel,
+    required this.original,
+    required this.senderId,
+    required this.resourceId,
+    required this.icon,
+    required this.onOpen,
+  });
+
+  List<Map<String, dynamic>> get _embeddedPosts {
+    final raw = original['posts'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> _loadFolderPosts() async {
+    if (_embeddedPosts.isNotEmpty) return _embeddedPosts;
+    if (type != 'Cartella' || senderId.isEmpty || resourceId.isEmpty) {
+      return const [];
+    }
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(senderId)
+        .collection('posts')
+        .where('folderId', isEqualTo: resourceId)
+        .limit(20)
+        .get();
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return {
+        'title': data['title'] ?? 'Post',
+        'url': data['url'] ?? '',
+        'imageUrl': data['previewStorageUrl'] ?? data['imageUrl'] ?? '',
+        'description': data['description'] ?? '',
+      };
+    }).toList();
+  }
+
+  Widget _postPreview(Map<String, dynamic> post) {
+    final postImage = (post['imageUrl'] ?? post['previewStorageUrl'] ?? '')
+        .toString()
+        .trim();
+    final postTitle = (post['title'] ?? 'Post').toString();
+    final postDescription = (post['description'] ?? '').toString().trim();
+    final postUrl = (post['url'] ?? '').toString().trim();
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (postImage.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                postImage,
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => icon,
+              ),
+            )
+          else
+            icon,
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  postTitle,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                if (postDescription.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    postDescription,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                if (postUrl.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    postUrl,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Color(0xFF2563EB)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onOpen,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                imageUrl.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          imageUrl,
+                          width: 72,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => icon,
+                        ),
+                      )
+                    : icon,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$type · $title',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('Da $sender a $recipient'),
+                      if (whenLabel.isNotEmpty) Text(whenLabel),
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(description),
+                      ],
+                      if (url.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          url,
+                          style: const TextStyle(color: Color(0xFF2563EB)),
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      Text(
+                        message.isEmpty
+                            ? 'Nessun messaggio'
+                            : 'Messaggio: $message',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (type == 'Cartella')
+              FutureBuilder<List<Map<String, dynamic>>>(
+                future: _loadFolderPosts(),
+                builder: (context, snapshot) {
+                  final posts = snapshot.data ?? _embeddedPosts;
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      posts.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: LinearProgressIndicator(),
+                    );
+                  }
+                  if (posts.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text('Nessun post trovato in questa cartella.'),
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      Text(
+                        'Contenuto cartella (${posts.length})',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      ...posts.map(_postPreview),
+                    ],
+                  );
+                },
+              )
+            else if (imageUrl.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    imageUrl,
+                    height: 180,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
