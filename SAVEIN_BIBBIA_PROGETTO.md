@@ -2071,6 +2071,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+100` — menu dashboard tra logo e Logout (16/08/2026)
+
+- I tasti menu stanno nello spazio tra il logo a sinistra e Logout a destra. Se non ci stanno, vanno a capo nella stessa intestazione (`Wrap` nell'`Expanded` centrale). Non sono più una riga separata sotto.
+- **Azione**: `flutter build web --release` + `firebase deploy --only hosting`. Hard refresh (Ctrl+F5).
+
 ### Build `1.1.11+99` — menu dashboard pill compatte + storico visibile (16/08/2026)
 
 - I tasti menu tornano pill compatte (larghezza del testo), non a tutta riga. Se non c'è spazio vanno a capo (`Wrap`).

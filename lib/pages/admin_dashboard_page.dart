@@ -1564,35 +1564,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ),
       child: Scaffold(
         backgroundColor: adminBackground,
-        appBar: AppBar(
-          backgroundColor: Colors.white,
-          elevation: 1,
-          shadowColor: const Color(0x22000000),
-          toolbarHeight: 64,
-          titleSpacing: 16,
-          title: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.asset(
-              'assets/icon/app_icon_phone.png',
-              width: 44,
-              height: 44,
-              fit: BoxFit.cover,
-            ),
-          ),
-          actions: [
-            TextButton.icon(
-              onPressed: () async {
-                await AuthService().logout();
-              },
-              icon: const Icon(Icons.logout),
-              label: const Text('Logout'),
-            ),
-            const SizedBox(width: 12),
-          ],
-        ),
         body: Column(
           children: [
-            _buildAdminNavBar(),
+            _buildAdminHeader(),
             Expanded(
               child: _activeSection == _AdminDashboardSection.planLimits
             ? _buildPlanLimitsPage()
@@ -1802,19 +1776,32 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
-  Widget _buildAdminNavBar() {
+  Widget _buildAdminHeader() {
     return Material(
       color: Colors.white,
       elevation: 1,
-      shadowColor: const Color(0x14000000),
+      shadowColor: const Color(0x22000000),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            children: [
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset(
+                'assets/icon/app_icon_phone.png',
+                width: 44,
+                height: 44,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
               _AdminNavButton(
                 label: 'Home dashboard',
                 selected: _activeSection == _AdminDashboardSection.users ||
@@ -1891,7 +1878,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 },
               ),
             ],
-          ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () async {
+                await AuthService().logout();
+              },
+              icon: const Icon(Icons.logout),
+              label: const Text('Logout'),
+            ),
+          ],
         ),
       ),
     );
