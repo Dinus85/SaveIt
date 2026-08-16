@@ -16,6 +16,14 @@ class UrlMetadataService {
     'Connection': 'keep-alive',
   };
 
+  static const Map<String, String> _browserHeaders = {
+    'User-Agent':
+        'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+    'Accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+  };
+
   // Extract metadata from URL with enhanced image extraction
   static Future<UrlMetadata> extractMetadata(String url) async {
     try {
@@ -40,22 +48,32 @@ class UrlMetadataService {
         }
       }
 
+      final headers =
+          _isGoogleMapsOrSearchUrl(url) ? _browserHeaders : _defaultHeaders;
       final response = await http
-          .get(Uri.parse(url), headers: _defaultHeaders)
+          .get(Uri.parse(url), headers: headers)
           .timeout(Duration(seconds: _timeoutSeconds));
 
       if (response.statusCode == 200) {
+        final finalUrl = response.request?.url.toString() ?? url;
         final document = html_parser.parse(response.body);
-        var metadata = _parseHtmlDocument(document, url);
+        var metadata = _parseHtmlDocument(document, finalUrl);
+        metadata = _enrichGooglePlaceMetadata(
+          originalUrl: url,
+          finalUrl: finalUrl,
+          document: document,
+          metadata: metadata,
+        );
 
-        if (_isInstagramPostUrl(url) && metadata.imageUrl?.isNotEmpty != true) {
-          metadata = await _enrichInstagramMetadata(url, metadata);
+        if (_isInstagramPostUrl(finalUrl) &&
+            metadata.imageUrl?.isNotEmpty != true) {
+          metadata = await _enrichInstagramMetadata(finalUrl, metadata);
         }
 
-        if (_isTikTokVideoUrl(url) &&
+        if (_isTikTokVideoUrl(finalUrl) &&
             (_isInvalidTikTokTitle(metadata.title) ||
                 !_hasUsableTikTokImage(metadata.imageUrl))) {
-          metadata = await _enrichTikTokMetadata(url, metadata);
+          metadata = await _enrichTikTokMetadata(finalUrl, metadata);
         }
 
         return metadata;
@@ -118,7 +136,10 @@ class UrlMetadataService {
   }
 
   /// Metadati per import: prima controlla `global_posts`, poi fetch social/web.
-  static Future<UrlMetadata> resolveImportMetadata(String url) async {
+  static Future<UrlMetadata> resolveImportMetadata(
+    String url, {
+    String? sharedText,
+  }) async {
     var normalizedUrl = url.trim();
     if (!normalizedUrl.startsWith('http://') &&
         !normalizedUrl.startsWith('https://')) {
@@ -127,13 +148,20 @@ class UrlMetadataService {
 
     final lookup =
         await GlobalPostLookupService.instance.lookupByUrl(normalizedUrl);
-    if (lookup.found && lookup.isUsableForImport) {
+    if (lookup.found &&
+        lookup.isUsableForImport &&
+        !isGenericImportTitle(lookup.title)) {
       print(
           'DEBUG: Metadati da DB comune global_posts (riuso, saveCount: ${lookup.saveCount})');
-      return lookup.toUrlMetadata(fallbackUrl: normalizedUrl);
+      return _applySharedTextFallback(
+        lookup.toUrlMetadata(fallbackUrl: normalizedUrl),
+        normalizedUrl,
+        sharedText,
+      );
     }
 
-    return extractMetadata(normalizedUrl);
+    final scraped = await extractMetadata(normalizedUrl);
+    return _applySharedTextFallback(scraped, normalizedUrl, sharedText);
   }
 
   static UrlMetadata _parseHtmlDocument(Document document, String url) {
@@ -810,7 +838,9 @@ class UrlMetadataService {
     // Process and validate images
     for (String imageUrl in candidateImages) {
       String? processedUrl = _makeAbsoluteUrl(imageUrl, url);
-      if (processedUrl != null && _isValidImageUrl(processedUrl)) {
+      if (processedUrl != null &&
+          _isValidImageUrl(processedUrl) &&
+          !_isGenericGoogleImage(processedUrl)) {
         return processedUrl;
       }
     }
@@ -882,8 +912,8 @@ class UrlMetadataService {
 
   static void _extractImagesFromJsonObject(dynamic obj, List<String> images) {
     if (obj is Map) {
-      if (obj.containsKey('image')) {
-        dynamic imageData = obj['image'];
+      if (obj.containsKey('image') || obj.containsKey('photo')) {
+        dynamic imageData = obj['image'] ?? obj['photo'];
         if (imageData is String) {
           images.add(imageData);
         } else if (imageData is List) {
@@ -1001,6 +1031,13 @@ class UrlMetadataService {
     if (lowerUrl.contains('tiktokcdn')) return true;
     if (lowerUrl.contains('linkedin.com') && lowerUrl.contains('media'))
       return true;
+    if (lowerUrl.contains('googleusercontent.com') ||
+        lowerUrl.contains('ggpht.com') ||
+        lowerUrl.contains('google.com/maps') ||
+        lowerUrl.contains('encrypted-tbn') ||
+        lowerUrl.contains('gstatic.com')) {
+      return !_isGenericGoogleImage(lowerUrl);
+    }
 
     return false;
   }
@@ -1412,6 +1449,262 @@ class UrlMetadataService {
     } catch (e) {
       return false;
     }
+  }
+
+  static bool _isGoogleMapsOrSearchUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('share.google') ||
+        lower.contains('maps.app.goo.gl') ||
+        lower.contains('goo.gl/maps') ||
+        lower.contains('maps.google.') ||
+        lower.contains('google.com/maps') ||
+        lower.contains('google.it/maps') ||
+        lower.contains('google.com/search') ||
+        lower.contains('google.it/search') ||
+        lower.contains('google.com/url') ||
+        lower.contains('google.it/url');
+  }
+
+  static bool isGenericImportTitle(String? title) {
+    if (title == null) return true;
+    final value = title.trim().toLowerCase();
+    if (value.isEmpty) return true;
+    const generic = {
+      'google',
+      'google search',
+      'google maps',
+      'google maps - ricerca',
+      'ricerca google',
+      'search',
+      'maps',
+      'google.com',
+      'google.it',
+      'www.google.com',
+      'www.google.it',
+      'post salvato',
+    };
+    if (generic.contains(value)) return true;
+    if (value.startsWith('google search')) return true;
+    return false;
+  }
+
+  static String? _cleanGoogleTitle(String? title) {
+    if (title == null) return null;
+    var value = title.trim();
+    if (value.isEmpty) return null;
+    value = value.replaceAll(
+      RegExp(r'\s*[-|–]\s*Google Maps$', caseSensitive: false),
+      '',
+    );
+    value = value.replaceAll(
+      RegExp(r'\s*[-|–]\s*Google Search$', caseSensitive: false),
+      '',
+    );
+    value = value.replaceAll(
+      RegExp(r'\s*[-|–]\s*Google$', caseSensitive: false),
+      '',
+    );
+    value = value.trim();
+    if (isGenericImportTitle(value)) return null;
+    return value;
+  }
+
+  static String? placeNameFromGoogleUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final placeMatch = RegExp(r'/maps/place/([^/@]+)').firstMatch(uri.path);
+      if (placeMatch != null) {
+        final name = _decodePlaceName(placeMatch.group(1)!);
+        if (name != null) return name;
+      }
+      final query = uri.queryParameters['q'] ??
+          uri.queryParameters['query'] ??
+          uri.queryParameters['destination'];
+      if (query != null &&
+          query.trim().isNotEmpty &&
+          !query.startsWith('http') &&
+          !RegExp(r'^-?\d+(\.\d+)?\s*,\s*-?\d+').hasMatch(query.trim())) {
+        return _decodePlaceName(query);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static String? _decodePlaceName(String raw) {
+    var name = raw.replaceAll('+', ' ');
+    try {
+      name = Uri.decodeComponent(name);
+    } catch (_) {}
+    name = name.split(RegExp(r'\s*[|·•]\s*')).first.trim();
+    name = name.replaceAll(RegExp(r'\s+'), ' ');
+    if (name.length < 2 || isGenericImportTitle(name)) return null;
+    return name;
+  }
+
+  static String? placeNameFromSharedText(String? text, String url) {
+    if (text == null) return null;
+    final lines = text
+        .split(RegExp(r'[\r\n]+'))
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty);
+    for (final line in lines) {
+      final lower = line.toLowerCase();
+      if (line.startsWith('http://') || line.startsWith('https://')) continue;
+      if (lower.contains('maps.app.goo.gl') || lower.contains('share.google')) {
+        continue;
+      }
+      if (RegExp(r'^[★☆⭐\s·.•\d.,/]+$').hasMatch(line)) continue;
+      if (RegExp(r'^\d+(\.\d+)?\s*(stars?|stelle)', caseSensitive: false)
+          .hasMatch(line)) {
+        continue;
+      }
+      if (lower.contains('google maps') && line.length < 48) continue;
+      final name = line.split(' · ').first.trim();
+      if (name.length >= 2 &&
+          name.length <= 120 &&
+          !isGenericImportTitle(name)) {
+        return name;
+      }
+    }
+    return placeNameFromGoogleUrl(url);
+  }
+
+  static UrlMetadata _applySharedTextFallback(
+    UrlMetadata metadata,
+    String url,
+    String? sharedText,
+  ) {
+    final cleanedTitle = _cleanGoogleTitle(metadata.title);
+    final title = cleanedTitle ??
+        placeNameFromGoogleUrl(url) ??
+        placeNameFromSharedText(sharedText, url);
+    var description = metadata.description?.trim();
+    if (description != null &&
+        (isGenericImportTitle(description) ||
+            description.toLowerCase().contains('cerca su google') ||
+            description.toLowerCase().contains('search the world') ||
+            description.toLowerCase().contains('google search'))) {
+      description = null;
+    }
+    if ((description == null || description.isEmpty) &&
+        sharedText != null &&
+        sharedText.trim().isNotEmpty &&
+        sharedText.trim() != url) {
+      description = sharedText.trim();
+    }
+    return metadata.copyWith(
+      title: title ?? metadata.title,
+      description: description ?? metadata.description,
+    );
+  }
+
+  static UrlMetadata _enrichGooglePlaceMetadata({
+    required String originalUrl,
+    required String finalUrl,
+    required Document document,
+    required UrlMetadata metadata,
+  }) {
+    if (!_isGoogleMapsOrSearchUrl(originalUrl) &&
+        !_isGoogleMapsOrSearchUrl(finalUrl) &&
+        !isGenericImportTitle(metadata.title)) {
+      return metadata;
+    }
+
+    final jsonLdName = _extractJsonLdPlaceName(document);
+    final canonicalHref = document
+        .querySelector('link[rel="canonical"]')
+        ?.attributes['href']
+        ?.trim();
+    final title = _cleanGoogleTitle(metadata.title) ??
+        jsonLdName ??
+        placeNameFromGoogleUrl(finalUrl) ??
+        placeNameFromGoogleUrl(originalUrl) ??
+        (canonicalHref == null ? null : placeNameFromGoogleUrl(canonicalHref));
+
+    var imageUrl = metadata.imageUrl;
+    if (imageUrl != null && _isGenericGoogleImage(imageUrl)) {
+      imageUrl = null;
+    }
+    if (imageUrl == null || imageUrl.isEmpty) {
+      final jsonLdImages = _extractJsonLdImages(document);
+      for (final candidate in jsonLdImages) {
+        final absolute = _makeAbsoluteUrl(candidate, finalUrl);
+        if (absolute != null &&
+            _isValidImageUrl(absolute) &&
+            !_isGenericGoogleImage(absolute)) {
+          imageUrl = absolute;
+          break;
+        }
+      }
+    }
+
+    return metadata.copyWith(
+      title: title ?? metadata.title,
+      imageUrl: imageUrl ?? metadata.imageUrl,
+      siteName: 'Google Maps',
+    );
+  }
+
+  static String? _extractJsonLdPlaceName(Document document) {
+    final jsonLdElements = document.querySelectorAll(
+      'script[type="application/ld+json"]',
+    );
+    for (final element in jsonLdElements) {
+      try {
+        final jsonData = json.decode(element.text);
+        final name = _findPlaceNameInJson(jsonData);
+        if (name != null) return name;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  static String? _findPlaceNameInJson(dynamic obj) {
+    if (obj is Map) {
+      final type = obj['@type']?.toString().toLowerCase() ?? '';
+      const placeHints = [
+        'restaurant',
+        'localbusiness',
+        'foodestablishment',
+        'place',
+        'cafe',
+        'barorpub',
+        'lodgingbusiness',
+        'touristattraction',
+      ];
+      final looksLikePlace = placeHints.any(type.contains) ||
+          obj.containsKey('address') ||
+          obj.containsKey('geo') ||
+          obj.containsKey('servescuisine');
+      final name = obj['name']?.toString().trim();
+      if (looksLikePlace &&
+          name != null &&
+          name.isNotEmpty &&
+          !isGenericImportTitle(name)) {
+        return name;
+      }
+      for (final value in obj.values) {
+        if (value is Map || value is List) {
+          final nested = _findPlaceNameInJson(value);
+          if (nested != null) return nested;
+        }
+      }
+    } else if (obj is List) {
+      for (final item in obj) {
+        final nested = _findPlaceNameInJson(item);
+        if (nested != null) return nested;
+      }
+    }
+    return null;
+  }
+
+  static bool _isGenericGoogleImage(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('/images/branding') ||
+        lower.contains('googlelogo') ||
+        lower.contains('maps.gstatic.com/mapfiles') ||
+        lower.contains('favicon') ||
+        lower.contains('google.com/images/branding');
   }
 
   // Extract domain from URL for display

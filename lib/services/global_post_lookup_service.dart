@@ -69,8 +69,13 @@ class GlobalPostLookupResult {
 
   /// Metadati sufficienti per saltare un nuovo fetch (Social Vault / scraping).
   bool get isUsableForImport {
-    final hasTitle = title?.isNotEmpty == true &&
-        title!.toLowerCase() != 'post salvato';
+    final normalized = title?.trim().toLowerCase() ?? '';
+    final hasTitle = normalized.isNotEmpty &&
+        normalized != 'post salvato' &&
+        normalized != 'google' &&
+        normalized != 'google search' &&
+        normalized != 'google maps' &&
+        !normalized.startsWith('google search');
     final hasPreview = imageUrl?.isNotEmpty == true ||
         previewStorageUrl?.isNotEmpty == true;
     final hasDescription = description?.isNotEmpty == true;

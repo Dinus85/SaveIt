@@ -3132,6 +3132,157 @@ const absoluteShareUrl = (raw, baseUrl) => {
   }
 };
 
+const isGenericGoogleTitle = (title) => {
+  const value = (title || "").toString().trim().toLowerCase();
+  if (!value) return true;
+  const generic = new Set([
+    "google",
+    "google search",
+    "google maps",
+    "google maps - ricerca",
+    "ricerca google",
+    "search",
+    "maps",
+    "google.com",
+    "google.it",
+    "www.google.com",
+    "www.google.it",
+    "post salvato",
+  ]);
+  return generic.has(value) || value.startsWith("google search");
+};
+
+const isGoogleMapsOrSearchUrl = (url) => {
+  const lower = (url || "").toLowerCase();
+  return lower.includes("share.google") ||
+    lower.includes("maps.app.goo.gl") ||
+    lower.includes("goo.gl/maps") ||
+    lower.includes("maps.google.") ||
+    lower.includes("google.com/maps") ||
+    lower.includes("google.it/maps") ||
+    lower.includes("google.com/search") ||
+    lower.includes("google.it/search") ||
+    lower.includes("google.com/url") ||
+    lower.includes("google.it/url");
+};
+
+const decodePlaceName = (raw) => {
+  let name = (raw || "").toString().replace(/\+/g, " ");
+  try {
+    name = decodeURIComponent(name);
+  } catch (_) {}
+  name = name.split(/\s*[|·•]\s*/)[0].replace(/\s+/g, " ").trim();
+  if (name.length < 2 || isGenericGoogleTitle(name)) return "";
+  return name;
+};
+
+const placeNameFromGoogleUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    const placeMatch = parsed.pathname.match(/\/maps\/place\/([^/@]+)/);
+    if (placeMatch && placeMatch[1]) {
+      const name = decodePlaceName(placeMatch[1]);
+      if (name) return name;
+    }
+    const query = parsed.searchParams.get("q") ||
+      parsed.searchParams.get("query") ||
+      parsed.searchParams.get("destination");
+    if (query &&
+        !query.startsWith("http") &&
+        !/^-?\d+(\.\d+)?\s*,\s*-?\d+/.test(query.trim())) {
+      return decodePlaceName(query);
+    }
+  } catch (_) {}
+  return "";
+};
+
+const cleanGoogleTitle = (title) => {
+  let value = (title || "").toString().trim();
+  if (!value) return "";
+  value = value.replace(/\s*[-|–]\s*Google Maps$/i, "")
+      .replace(/\s*[-|–]\s*Google Search$/i, "")
+      .replace(/\s*[-|–]\s*Google$/i, "")
+      .trim();
+  return isGenericGoogleTitle(value) ? "" : value;
+};
+
+const placeNameFromSharedText = (text, url) => {
+  const lines = (text || "").toString().split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (line.startsWith("http://") || line.startsWith("https://")) continue;
+    if (lower.includes("maps.app.goo.gl") || lower.includes("share.google")) {
+      continue;
+    }
+    if (/^[★☆⭐\s·.•\d.,/]+$/.test(line)) continue;
+    if (/^\d+(\.\d+)?\s*(stars?|stelle)/i.test(line)) continue;
+    if (lower.includes("google maps") && line.length < 48) continue;
+    const name = line.split(" · ")[0].trim();
+    if (name.length >= 2 && name.length <= 120 && !isGenericGoogleTitle(name)) {
+      return name;
+    }
+  }
+  return placeNameFromGoogleUrl(url);
+};
+
+const isGenericGoogleImage = (url) => {
+  const lower = (url || "").toLowerCase();
+  return lower.includes("/images/branding") ||
+    lower.includes("googlelogo") ||
+    lower.includes("maps.gstatic.com/mapfiles") ||
+    lower.includes("favicon");
+};
+
+const findPlaceNameInJson = (obj) => {
+  if (!obj) return "";
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const nested = findPlaceNameInJson(item);
+      if (nested) return nested;
+    }
+    return "";
+  }
+  if (typeof obj !== "object") return "";
+  const type = (obj["@type"] || "").toString().toLowerCase();
+  const looksLikePlace = [
+    "restaurant",
+    "localbusiness",
+    "foodestablishment",
+    "place",
+    "cafe",
+    "barorpub",
+    "lodgingbusiness",
+    "touristattraction",
+  ].some((hint) => type.includes(hint)) ||
+    Object.prototype.hasOwnProperty.call(obj, "address") ||
+    Object.prototype.hasOwnProperty.call(obj, "geo");
+  const name = (obj.name || "").toString().trim();
+  if (looksLikePlace && name && !isGenericGoogleTitle(name)) return name;
+  for (const value of Object.values(obj)) {
+    if (value && (typeof value === "object")) {
+      const nested = findPlaceNameInJson(value);
+      if (nested) return nested;
+    }
+  }
+  return "";
+};
+
+const extractJsonLdPlaceName = (html) => {
+  const scripts = html.match(
+      /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  ) || [];
+  for (const script of scripts) {
+    const body = script.replace(/<script[^>]*>/i, "").replace(/<\/script>/i, "");
+    try {
+      const name = findPlaceNameInJson(JSON.parse(body));
+      if (name) return name;
+    } catch (_) {}
+  }
+  return "";
+};
+
 const fetchShareUrlMetadata = async (rawUrl) => {
   const empty = {
     title: "",
@@ -3156,7 +3307,8 @@ const fetchShareUrlMetadata = async (rawUrl) => {
     }
 
     const headers = {
-      "User-Agent":
+      "User-Agent": isGoogleMapsOrSearchUrl(workingUrl) ?
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36" :
         "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
       "Accept":
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -3174,6 +3326,7 @@ const fetchShareUrlMetadata = async (rawUrl) => {
     let title = "";
     let description = "";
     let imageUrl = null;
+    const finalUrl = response.url || workingUrl;
     if (response.ok) {
       const html = (await response.text()).slice(0, 350000);
       title =
@@ -3192,8 +3345,20 @@ const fetchShareUrlMetadata = async (rawUrl) => {
             "twitter:image",
             "og:image:url",
           ]),
-          workingUrl
+          finalUrl
       );
+      if (isGoogleMapsOrSearchUrl(workingUrl) ||
+          isGoogleMapsOrSearchUrl(finalUrl) ||
+          isGenericGoogleTitle(title)) {
+        title = cleanGoogleTitle(title) ||
+          extractJsonLdPlaceName(html) ||
+          placeNameFromGoogleUrl(finalUrl) ||
+          placeNameFromGoogleUrl(workingUrl) ||
+          title;
+        if (isGenericGoogleImage(imageUrl || "")) {
+          imageUrl = null;
+        }
+      }
     }
 
     if (isInstagramPostUrl(workingUrl) &&
@@ -3473,7 +3638,8 @@ const isThinShareTitle = (title, hostname) => {
   const host = (hostname || "").toString().replace(/^www\./, "").toLowerCase();
   return value === host ||
     value === "post salvato" ||
-    isInvalidTikTokTitle(value);
+    isInvalidTikTokTitle(value) ||
+    isGenericGoogleTitle(value);
 };
 
 const assertShareExtensionRule = (rule, feature, count) => {
@@ -4286,6 +4452,12 @@ exports.savePostFromShare = onRequest(
           if (scraped.metadataProvider) {
             metadataProvider = scraped.metadataProvider;
           }
+        }
+
+        if (isThinShareTitle(title, hostname)) {
+          const fromShare = placeNameFromSharedText(sharedText, url) ||
+            placeNameFromGoogleUrl(url);
+          if (fromShare) title = fromShare;
         }
 
         if (!title) {

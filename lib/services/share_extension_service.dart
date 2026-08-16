@@ -181,11 +181,12 @@ class ShareExtensionService {
       }
       if (existing == null) return;
 
+      final host = Uri.tryParse(url)?.host.replaceFirst(RegExp(r'^www\.'), '') ??
+          '';
       final needsTitle = existing.title.trim().isEmpty ||
           existing.title.toLowerCase() == 'post salvato' ||
-          existing.title.toLowerCase() ==
-              (Uri.tryParse(url)?.host.replaceFirst(RegExp(r'^www\.'), '') ??
-                  '');
+          existing.title.toLowerCase() == host ||
+          UrlMetadataService.isGenericImportTitle(existing.title);
       final needsDescription = existing.description.trim().isEmpty;
       final needsImage = (existing.imageUrl == null ||
               existing.imageUrl!.trim().isEmpty) &&
@@ -405,7 +406,11 @@ class ShareExtensionService {
                   : '$parentPath › ${createdOrExisting.name}';
         }
 
-        final metadata = await UrlMetadataService.resolveImportMetadata(url);
+        final sharedText = item['sharedText']?.toString();
+        final metadata = await UrlMetadataService.resolveImportMetadata(
+          url,
+          sharedText: sharedText,
+        );
         final title = metadata.title?.trim();
         final requestedManualTags = item['tags'] is List
             ? List<dynamic>.from(item['tags'] as List)

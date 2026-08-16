@@ -534,7 +534,10 @@ class SharingService {
 
     // STEP 2: Metadati — riusa global_posts se già importato da altro utente
     Future<UrlMetadata> metadataFuture =
-        UrlMetadataService.resolveImportMetadata(sharedContent.url);
+        UrlMetadataService.resolveImportMetadata(
+      sharedContent.url,
+      sharedText: sharedContent.text,
+    );
 
     // STEP 3: Mostra dialog IMMEDIATAMENTE con dati di base
     // Dialog stabile: non ricreare il widget ad ogni tick del FutureBuilder
@@ -814,26 +817,31 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
 
   // FIX: Metodo corretto che non blocca gli aggiornamenti
   void _updateTitleIfNeeded() {
-    // AGGIORNA SEMPRE quando arrivano metadati reali, anche se giÃƒ  inizializzato
-    if (widget.metadata.title?.isNotEmpty == true &&
-        !widget.isLoadingMetadata) {
-      // CORRETTO: Usa il titolo dai metadati reali se disponibile
-      _titleController.text = widget.metadata.title!;
-      _hasInitializedTitle = true;
-      print(
-          'DEBUG: Titolo aggiornato con metadati reali: ${widget.metadata.title}');
-    } else if (!_hasInitializedTitle && !widget.isLoadingMetadata) {
-      // FALLBACK: Solo se non abbiamo mai inizializzato E non stiamo caricando
-      final fallbackTitle =
-          UrlMetadataService.getDomainFromUrl(widget.sharedContent.url);
-      _titleController.text = fallbackTitle;
-      _hasInitializedTitle = true;
-      print('DEBUG: Titolo impostato con fallback: $fallbackTitle');
-    }
-    // AGGIUNTO: Debug per troubleshooting
-    else if (widget.isLoadingMetadata) {
+    if (widget.isLoadingMetadata) {
       print('DEBUG: Ancora in caricamento metadati, aspettando...');
+      return;
     }
+
+    final metaTitle = widget.metadata.title?.trim();
+    final usableMeta = metaTitle != null &&
+        metaTitle.isNotEmpty &&
+        !UrlMetadataService.isGenericImportTitle(metaTitle);
+    if (usableMeta) {
+      _titleController.text = metaTitle;
+      _hasInitializedTitle = true;
+      print('DEBUG: Titolo aggiornato con metadati reali: $metaTitle');
+      return;
+    }
+
+    final fallbackTitle = UrlMetadataService.placeNameFromSharedText(
+          widget.sharedContent.text,
+          widget.sharedContent.url,
+        ) ??
+        UrlMetadataService.placeNameFromGoogleUrl(widget.sharedContent.url) ??
+        UrlMetadataService.getDomainFromUrl(widget.sharedContent.url);
+    _titleController.text = fallbackTitle;
+    _hasInitializedTitle = true;
+    print('DEBUG: Titolo impostato con fallback: $fallbackTitle');
   }
 
   // Caricamento cartelle per il dialog: evita sync forzato se i dati
@@ -1022,14 +1030,7 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
     if (oldWidget.isLoadingMetadata && !widget.isLoadingMetadata) {
       print('DEBUG: Metadati caricati, aggiornando titolo...');
       print('DEBUG: Nuovo titolo dai metadati: ${widget.metadata.title}');
-
-      // FORZA aggiornamento con i metadati reali
-      if (widget.metadata.title?.isNotEmpty == true) {
-        _titleController.text = widget.metadata.title!;
-        _hasInitializedTitle = true;
-        print(
-            'DEBUG: Titolo aggiornato con successo: ${widget.metadata.title}');
-      }
+      _updateTitleIfNeeded();
 
       // NUOVO: Aggiorna anche i tag se sono stati caricati nuovi hashtag dai metadati
       if (!oldWidget.metadata.hasExtractedHashtags &&

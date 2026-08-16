@@ -629,9 +629,10 @@ SaveIn! raccoglie informazioni di base per personalizzare l'esperienza e offrire
 SaveIn **non** integra SociaVault al 13/07/2026. L'estrazione avviene cosi:
 
 1. Share intent → `SharingService.showSaveDialog()`
-2. **`resolveImportMetadata(url)`** (`lib/url_metadata_service.dart`):
+2. **`resolveImportMetadata(url, {sharedText})`** (`lib/url_metadata_service.dart`):
    - prima: `getGlobalPostByUrl` (Cloud Function) → cache `global_posts`
    - se miss: **`extractMetadata(url)`** — HTTP GET pagina + Open Graph + fallback embed/oEmbed
+   - Google Maps/Search/`share.google`: nome posto da URL/JSON-LD/testo condiviso; ignora titolo **Google Search**; accetta foto `googleusercontent`
 3. Instagram: pagina embed se manca `og:image`
 4. TikTok: redirect `vm.tiktok.com` + oEmbed pubblico
 5. Hashtag: testo condiviso + parsing HTML
@@ -2070,6 +2071,12 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.11+102` — import ristoranti Google Maps/Search (16/08/2026)
+
+- Import da Google (Maps, Search, `share.google`, `maps.app.goo.gl`): non usa più il titolo finto **Google Search**. Prende il nome del posto da URL/JSON-LD/testo condiviso e accetta le foto `googleusercontent` come anteprima.
+- Cache `global_posts` con titolo generico Google non viene riusata; si rifà lo scraping.
+- **Azione**: deploy `functions`; Codemagic → TestFlight/Play **102**; collega alla versione App Store **1.1.11**.
 
 ### Build `1.1.11+101` — design popup contenuto condiviso (16/08/2026)
 
