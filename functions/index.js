@@ -3147,10 +3147,17 @@ const isGenericGoogleTitle = (title) => {
     "google.it",
     "www.google.com",
     "www.google.it",
+    "share.google",
+    "share.google.com",
+    "maps.app.goo.gl",
+    "goo.gl",
     "post salvato",
     "luogo su google maps",
   ]);
-  return generic.has(value) || value.startsWith("google search");
+  return generic.has(value) ||
+    value.startsWith("google search") ||
+    value.includes("share.google") ||
+    value.includes("maps.app.goo.gl");
 };
 
 const isGoogleMapsOrSearchUrl = (url) => {
@@ -3173,6 +3180,9 @@ const decodePlaceName = (raw) => {
     name = decodeURIComponent(name);
   } catch (_) {}
   name = name.split(/\s*[|·•]\s*/)[0].replace(/\s+/g, " ").trim();
+  if (!name || name.toLowerCase().startsWith("data=")) return "";
+  if (name.startsWith("@")) return "";
+  if (/^-?\d+(\.\d+)?\s*,\s*-?\d+/.test(name)) return "";
   if (name.length < 2 || isGenericGoogleTitle(name)) return "";
   return name;
 };
@@ -3235,6 +3245,8 @@ const isGenericGoogleImage = (url) => {
   return lower.includes("/images/branding") ||
     lower.includes("googlelogo") ||
     lower.includes("maps.gstatic.com/mapfiles") ||
+    lower.includes("maps/about/images") ||
+    lower.includes("maps_512dp") ||
     lower.includes("favicon");
 };
 
@@ -3288,11 +3300,118 @@ const extractJsonLdPlaceName = (html) => {
 
 const googleBrowserHeaders = {
   "User-Agent":
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Accept":
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Cookie": "CONSENT=YES+",
 };
+
+const DESKTOP_GOOGLE_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+const parseAndroidIntentMapsUrl = (location) => {
+  let current = (location || "").toString();
+  for (let i = 0; i < 4; i++) {
+    try {
+      current = decodeURIComponent(current);
+    } catch (_) {
+      break;
+    }
+  }
+  const fallbackMatch = current.match(/S\.browser_fallback_url=([^;]+)/i);
+  if (fallbackMatch) {
+    let fallbackUrl = fallbackMatch[1];
+    for (let i = 0; i < 3; i++) {
+      try {
+        fallbackUrl = decodeURIComponent(fallbackUrl);
+      } catch (_) {
+        break;
+      }
+    }
+    const nested = fallbackUrl.match(/(?:^|[?&])url=(https?:\/\/[^&;]+)/i);
+    if (nested) {
+      try {
+        return decodeURIComponent(nested[1]);
+      } catch (_) {
+        return nested[1];
+      }
+    }
+    if (fallbackUrl.startsWith("http")) {
+      return fallbackUrl.split(";")[0];
+    }
+  }
+  const maps = current.match(/https:\/\/(?:www\.)?google\.[a-z.]+\/maps\/[^\s;]+/i);
+  return maps ? maps[0].replace(/;+$/, "") : "";
+};
+
+const unwrapConsentContinue = (url) => {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.toLowerCase().includes("consent.google")) return url;
+    const cont = parsed.searchParams.get("continue");
+    if (cont && /^https?:\/\//i.test(cont)) return cont;
+  } catch (_) {}
+  return url;
+};
+
+const resolveGoogleRedirect = (current, location) => {
+  let loc = (location || "").toString().trim();
+  if (!loc) return "";
+  if (loc.toLowerCase().startsWith("intent:")) {
+    loc = parseAndroidIntentMapsUrl(loc);
+    if (!loc) return "";
+  }
+  if (loc.startsWith("/")) {
+    try {
+      loc = new URL(loc, current).toString();
+    } catch (_) {
+      return "";
+    }
+  }
+  loc = unwrapConsentContinue(loc);
+  return /^https?:\/\//i.test(loc) ? loc : "";
+};
+
+const placeNameFromGoogleHtml = (html) => {
+  const decoded = (html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&");
+  const patterns = [
+    /\/maps\/place\/([^/@?&"']+)/g,
+    /\/maps\/preview\/place\?[^"']*[?&]q=([^&"']+)/g,
+    /[?&]q=([^&"']+)/g,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(decoded))) {
+      const name = decodePlaceName(match[1]);
+      if (name) return name;
+    }
+  }
+  return "";
+};
+
+const imageFromGoogleHtml = (html, baseUrl) => {
+  const decoded = (html || "").replace(/&amp;/g, "&");
+  const og = html.match(
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)/i
+  ) || html.match(
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
+  );
+  if (og && og[1]) {
+    const imageUrl = absoluteShareUrl(og[1].replace(/&amp;/g, "&"), baseUrl);
+    if (imageUrl && !isGenericGoogleImage(imageUrl)) return imageUrl;
+  }
+  const staticMap = decoded.match(
+      /https:\/\/maps\.google\.com\/maps\/api\/staticmap[^"\s<>]+/i
+  );
+  if (staticMap && staticMap[0] && !isGenericGoogleImage(staticMap[0])) {
+    return staticMap[0];
+  }
+  return "";
+};
+
+const hasNamedMapsPlace = (url) =>
+  (url || "").toLowerCase().includes("/maps/place/") && !!placeNameFromGoogleUrl(url);
 
 const extractGoogleDestinationFromHtml = (html) => {
   const decoded = (html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&");
@@ -3311,42 +3430,79 @@ const extractGoogleDestinationFromHtml = (html) => {
 };
 
 const resolveGoogleImportUrl = async (url) => {
+  const unfurled = await unfurlGoogleShare(url);
+  return unfurled.url;
+};
+
+const unfurlGoogleShare = async (url) => {
   let current = (url || "").toString().trim();
-  if (!current) return url;
-  for (let i = 0; i < 4; i++) {
-    if (placeNameFromGoogleUrl(current) && current.includes("/maps/place/")) {
-      return current;
+  if (!current) return {url, html: ""};
+  let lastHtml = "";
+  for (let i = 0; i < 8; i++) {
+    if (hasNamedMapsPlace(current) && lastHtml) {
+      return {url: current, html: lastHtml};
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
     try {
       const response = await fetch(current, {
         method: "GET",
-        redirect: "follow",
+        redirect: "manual",
         signal: controller.signal,
         headers: googleBrowserHeaders,
       });
       clearTimeout(timer);
-      const finalUrl = response.url || current;
-      if (placeNameFromGoogleUrl(finalUrl) &&
-          (finalUrl.includes("/maps/place/") ||
-            finalUrl.includes("q=") ||
-            finalUrl.includes("query="))) {
-        return finalUrl;
+      const location = response.headers.get("location") || "";
+      if (response.status >= 300 && response.status < 400 && location) {
+        const next = resolveGoogleRedirect(current, location);
+        if (next && next !== current) {
+          current = next;
+          continue;
+        }
+        if (location.toLowerCase().includes("consent.google")) {
+          const followed = await fetch(current, {
+            method: "GET",
+            redirect: "follow",
+            signal: controller.signal,
+            headers: googleBrowserHeaders,
+          });
+          current = followed.url || current;
+          lastHtml = followed.ok ? (await followed.text()).slice(0, 400000) : "";
+          if (current.toLowerCase().includes("consent.google")) {
+            current = unwrapConsentContinue(current);
+          }
+          if (hasNamedMapsPlace(current) || imageFromGoogleHtml(lastHtml, current)) {
+            return {url: current, html: lastHtml};
+          }
+        }
+        break;
       }
-      const html = response.ok ? await response.text() : "";
-      const fromHtml = extractGoogleDestinationFromHtml(html);
-      if (fromHtml && fromHtml !== current) {
-        current = fromHtml;
+      lastHtml = response.ok ? (await response.text()).slice(0, 400000) : "";
+      if (hasNamedMapsPlace(current)) {
+        return {url: current, html: lastHtml};
+      }
+      const consentNext = unwrapConsentContinue(current);
+      if (consentNext && consentNext !== current) {
+        current = consentNext;
         continue;
       }
-      return finalUrl;
+      const namedFromHtml = extractGoogleDestinationFromHtml(lastHtml);
+      if (namedFromHtml && namedFromHtml !== current &&
+          (hasNamedMapsPlace(namedFromHtml) ||
+            namedFromHtml.toLowerCase().includes("/maps/"))) {
+        current = namedFromHtml;
+        if (hasNamedMapsPlace(current)) {
+          return {url: current, html: lastHtml};
+        }
+        continue;
+      }
+      return {url: current, html: lastHtml};
     } catch (_) {
       clearTimeout(timer);
-      return current;
+      return {url: current, html: lastHtml};
     }
   }
-  return current;
+  return {url: current, html: lastHtml};
 };
 
 const googleMapsLookupUrl = (resolvedUrl, placeName) => {
@@ -3389,11 +3545,17 @@ const fetchGoogleMapsPreviewImage = async (resolvedUrl, placeName) => {
 };
 
 const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
-  const resolved = await resolveGoogleImportUrl(rawUrl);
+  const unfurled = await unfurlGoogleShare(rawUrl);
+  const resolved = unfurled.url;
+  const html = unfurled.html || "";
   const name = placeNameFromSharedText(sharedText, resolved) ||
     placeNameFromGoogleUrl(resolved) ||
-    placeNameFromGoogleUrl(rawUrl);
-  const imageUrl = await fetchGoogleMapsPreviewImage(resolved, name);
+    placeNameFromGoogleUrl(rawUrl) ||
+    placeNameFromGoogleHtml(html);
+  let imageUrl = imageFromGoogleHtml(html, resolved) || null;
+  if (!imageUrl) {
+    imageUrl = await fetchGoogleMapsPreviewImage(resolved, name);
+  }
   const description = sharedText && sharedText !== rawUrl ?
     sharedText.substring(0, 2000) :
     "";
@@ -3436,7 +3598,7 @@ const fetchShareUrlMetadata = async (rawUrl, sharedText = "") => {
 
     const headers = {
       "User-Agent": isGoogleMapsOrSearchUrl(workingUrl) ?
-        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36" :
+        DESKTOP_GOOGLE_UA :
         "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
       "Accept":
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

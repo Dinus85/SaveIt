@@ -436,7 +436,10 @@ class ShareExtensionService {
         await FolderService().saveSharedPostWithOptionalFolder(
           url: url,
           title: title == null || title.isEmpty
-              ? (Uri.tryParse(url)?.host ?? url)
+              ? (UrlMetadataService.placeNameFromSharedText(sharedText, url) ??
+                  (UrlMetadataService.isGoogleMapsOrSearchUrl(url)
+                      ? 'Luogo su Google Maps'
+                      : (Uri.tryParse(url)?.host ?? url)))
               : title,
           description:
               metadata.description ?? item['sharedText']?.toString() ?? '',

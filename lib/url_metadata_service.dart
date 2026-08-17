@@ -18,10 +18,12 @@ class UrlMetadataService {
 
   static const Map<String, String> _browserHeaders = {
     'User-Agent':
-        'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     'Accept':
         'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+    // Bypass the EU consent interstitial so Maps HTML (name + static map) is returned.
+    'Cookie': 'CONSENT=YES+',
   };
 
   // Extract metadata from URL with enhanced image extraction
@@ -36,7 +38,21 @@ class UrlMetadataService {
       }
 
       if (isGoogleMapsOrSearchUrl(url)) {
-        return await _extractGooglePlaceMetadata(url, sharedText: sharedText);
+        try {
+          return await _extractGooglePlaceMetadata(
+            url,
+            sharedText: sharedText,
+          );
+        } catch (e) {
+          print('DEBUG: Google place metadata failed: $e');
+          return UrlMetadata(
+            title: placeNameFromSharedText(sharedText, url) ??
+                placeNameFromGoogleUrl(url) ??
+                'Luogo su Google Maps',
+            description: _descriptionFromSharedText(sharedText, url),
+            siteName: 'Google Maps',
+          );
+        }
       }
 
       // TikTok: intercetta prima dello scraping HTML perché TikTok
@@ -109,6 +125,16 @@ class UrlMetadataService {
       }
     } catch (e) {
       print('Error extracting metadata: $e');
+
+      if (isGoogleMapsOrSearchUrl(url)) {
+        return UrlMetadata(
+          title: placeNameFromSharedText(sharedText, url) ??
+              placeNameFromGoogleUrl(url) ??
+              'Luogo su Google Maps',
+          description: _descriptionFromSharedText(sharedText, url),
+          siteName: 'Google Maps',
+        );
+      }
 
       if (_isInstagramPostUrl(url)) {
         try {
@@ -967,6 +993,7 @@ class UrlMetadataService {
 
   static String? _makeAbsoluteUrl(String imageUrl, String baseUrl) {
     try {
+      imageUrl = imageUrl.replaceAll('&amp;', '&').trim();
       if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
         return imageUrl;
       }
@@ -1071,6 +1098,15 @@ class UrlMetadataService {
   }
 
   static UrlMetadata _fallbackMetadata(String url) {
+    if (isGoogleMapsOrSearchUrl(url)) {
+      return UrlMetadata(
+        title: placeNameFromGoogleUrl(url) ?? 'Luogo su Google Maps',
+        description: url,
+        siteName: 'Google Maps',
+        extractedHashtags: [],
+      );
+    }
+
     final uri = Uri.parse(url);
     String siteName = uri.host;
 
@@ -1465,11 +1501,15 @@ class UrlMetadataService {
     String url, {
     String? sharedText,
   }) async {
-    final resolved = await resolveGoogleImportUrl(url);
+    final unfurled = await _unfurlGoogleShare(url);
+    final resolved = unfurled.url;
+    final html = unfurled.html;
     final name = placeNameFromSharedText(sharedText, resolved) ??
         placeNameFromGoogleUrl(resolved) ??
-        placeNameFromGoogleUrl(url);
-    final imageUrl = await _fetchGoogleMapsPreviewImage(
+        placeNameFromGoogleUrl(url) ??
+        (html == null ? null : _placeNameFromGoogleHtml(html));
+    var imageUrl = html == null ? null : _imageFromGoogleHtml(html, resolved);
+    imageUrl ??= await _fetchGoogleMapsPreviewImage(
       resolvedUrl: resolved,
       placeName: name,
     );
@@ -1529,37 +1569,261 @@ class UrlMetadataService {
     return null;
   }
 
-  /// Espande share.google / maps.app.goo.gl fino all'URL Maps o Search con il nome.
+  /// Espande i link corti da cellulare (share.google / maps.app.goo.gl).
+  ///
+  /// Da telefono Google risponde spesso `intent://` (Android) o una pagina
+  /// consenso: il client HTTP non li segue da solo, quindi i redirect si
+  /// gestiscono hop-by-hop. Lo User-Agent desktop è solo per lo scraping,
+  /// l'utente continua a condividere dal cellulare.
   static Future<String> resolveGoogleImportUrl(String url) async {
+    final unfurled = await _unfurlGoogleShare(url);
+    return unfurled.url;
+  }
+
+  static Future<({String url, String? html})> _unfurlGoogleShare(
+    String url,
+  ) async {
     var current = url.trim();
-    if (current.isEmpty) return url;
+    if (current.isEmpty) return (url: url, html: null);
+    String? lastHtml;
+    final client = http.Client();
     try {
-      for (var i = 0; i < 2; i++) {
-        if (placeNameFromGoogleUrl(current) != null &&
-            current.toLowerCase().contains('/maps/place/')) {
-          return current;
+      for (var i = 0; i < 8; i++) {
+        if (_hasNamedMapsPlace(current) && lastHtml != null) {
+          return (url: current, html: lastHtml);
         }
-        final response = await http
-            .get(Uri.parse(current), headers: _browserHeaders)
+
+        final request = http.Request('GET', Uri.parse(current))
+          ..followRedirects = false
+          ..headers.addAll(_browserHeaders);
+        final streamed = await client
+            .send(request)
             .timeout(const Duration(seconds: 12));
-        final finalUrl = response.request?.url.toString() ?? current;
-        if (placeNameFromGoogleUrl(finalUrl) != null &&
-            (finalUrl.contains('/maps/place/') ||
-                finalUrl.contains('q=') ||
-                finalUrl.contains('query='))) {
-          return finalUrl;
+        final status = streamed.statusCode;
+        final location = streamed.headers['location'];
+
+        if (status >= 300 &&
+            status < 400 &&
+            location != null &&
+            location.isNotEmpty) {
+          await streamed.stream.drain();
+          final next = _resolveGoogleRedirect(current, location);
+          if (next != null && next != current) {
+            current = next;
+            continue;
+          }
+          // Consent 302 unwraps to the same Maps URL. Cookie lets a
+          // following GET return the real HTML instead of looping.
+          if (location.toLowerCase().contains('consent.google')) {
+            final followed = await client
+                .get(Uri.parse(current), headers: _browserHeaders)
+                .timeout(const Duration(seconds: 15));
+            current = followed.request?.url.toString() ?? current;
+            lastHtml = followed.body.length > 400000
+                ? followed.body.substring(0, 400000)
+                : followed.body;
+            if (current.toLowerCase().contains('consent.google')) {
+              current = _unwrapConsentContinue(current) ?? current;
+            }
+            if (_hasNamedMapsPlace(current) ||
+                (lastHtml.isNotEmpty &&
+                    _imageFromGoogleHtml(lastHtml, current) != null)) {
+              return (url: current, html: lastHtml);
+            }
+          }
+          break;
         }
-        final fromHtml = _extractGoogleDestinationFromHtml(response.body);
-        if (fromHtml != null && fromHtml != current) {
-          current = fromHtml;
+
+        final body = await streamed.stream.bytesToString();
+        lastHtml = body.length > 400000 ? body.substring(0, 400000) : body;
+
+        if (_hasNamedMapsPlace(current)) {
+          return (url: current, html: lastHtml);
+        }
+
+        final consentNext = _continueFromConsent(current, lastHtml);
+        if (consentNext != null && consentNext != current) {
+          current = consentNext;
           continue;
         }
-        return finalUrl;
+
+        final namedFromHtml = _namedMapsUrlFromHtml(lastHtml);
+        if (namedFromHtml != null && namedFromHtml != current) {
+          current = namedFromHtml;
+          if (_hasNamedMapsPlace(current)) {
+            return (url: current, html: lastHtml);
+          }
+          continue;
+        }
+
+        final dest = _extractGoogleDestinationFromHtml(lastHtml);
+        if (dest != null && dest != current) {
+          current = dest;
+          continue;
+        }
+        return (url: current, html: lastHtml);
       }
     } catch (e) {
-      print('DEBUG: resolveGoogleImportUrl failed: $e');
+      print('DEBUG: Google unfurl failed: $e');
+    } finally {
+      client.close();
     }
-    return current;
+    return (url: current, html: lastHtml);
+  }
+
+  static bool _hasNamedMapsPlace(String url) {
+    return url.toLowerCase().contains('/maps/place/') &&
+        placeNameFromGoogleUrl(url) != null;
+  }
+
+  static String? _resolveGoogleRedirect(String current, String location) {
+    var loc = location.trim();
+    if (loc.toLowerCase().startsWith('intent:')) {
+      loc = _parseAndroidIntentMapsUrl(loc) ?? '';
+      if (loc.isEmpty) return null;
+    }
+    if (loc.startsWith('/')) {
+      try {
+        loc = Uri.parse(current).resolve(loc).toString();
+      } catch (_) {
+        return null;
+      }
+    }
+    loc = _unwrapConsentContinue(loc) ?? loc;
+    if (!loc.startsWith('http://') && !loc.startsWith('https://')) {
+      return null;
+    }
+    return loc;
+  }
+
+  static String? _parseAndroidIntentMapsUrl(String location) {
+    var current = location;
+    for (var i = 0; i < 4; i++) {
+      try {
+        current = Uri.decodeComponent(current);
+      } catch (_) {
+        break;
+      }
+    }
+
+    final fallback = RegExp(
+      r'S\.browser_fallback_url=([^;]+)',
+      caseSensitive: false,
+    ).firstMatch(current);
+    if (fallback != null) {
+      var fallbackUrl = fallback.group(1)!;
+      for (var i = 0; i < 3; i++) {
+        try {
+          fallbackUrl = Uri.decodeComponent(fallbackUrl);
+        } catch (_) {
+          break;
+        }
+      }
+      final nested = RegExp(
+        r'(?:^|[?&])url=(https?://[^&;]+)',
+        caseSensitive: false,
+      ).firstMatch(fallbackUrl);
+      if (nested != null) {
+        try {
+          return Uri.decodeComponent(nested.group(1)!);
+        } catch (_) {
+          return nested.group(1);
+        }
+      }
+      if (fallbackUrl.startsWith('http')) {
+        return fallbackUrl.split(';').first;
+      }
+    }
+
+    final maps = RegExp(
+      r'https://(?:www\.)?google\.[a-z.]+/maps/[^\s;]+',
+      caseSensitive: false,
+    ).firstMatch(current);
+    if (maps == null) return null;
+    return maps.group(0)!.replaceAll(RegExp(r'[;]+$'), '');
+  }
+
+  static String? _unwrapConsentContinue(String url) {
+    try {
+      final uri = Uri.parse(url);
+      if (!uri.host.toLowerCase().contains('consent.google')) return url;
+      final cont = uri.queryParameters['continue'];
+      if (cont != null &&
+          (cont.startsWith('http://') || cont.startsWith('https://'))) {
+        return cont;
+      }
+    } catch (_) {}
+    return url;
+  }
+
+  static String? _continueFromConsent(String url, String html) {
+    final fromUrl = _unwrapConsentContinue(url);
+    if (fromUrl != null && fromUrl != url) return fromUrl;
+    if (!url.toLowerCase().contains('consent.google')) return null;
+    final match = RegExp(
+      r'continue=(https?[^&"\']+)',
+      caseSensitive: false,
+    ).firstMatch(html.replaceAll('&amp;', '&'));
+    if (match == null) return null;
+    try {
+      return Uri.decodeComponent(match.group(1)!);
+    } catch (_) {
+      return match.group(1);
+    }
+  }
+
+  static String? _namedMapsUrlFromHtml(String html) {
+    final decoded = html.replaceAll(r'\/', '/').replaceAll('&amp;', '&');
+    final match = RegExp(
+      r'https://(?:www\.)?google\.[a-z.]+/maps/place/[^/@?&"\s<>\\]+',
+      caseSensitive: false,
+    ).firstMatch(decoded);
+    if (match == null) return null;
+    final found = match.group(0)!.replaceAll(RegExp(r'[.,);]+$'), '');
+    if (_hasNamedMapsPlace(found)) return found;
+    return null;
+  }
+
+  static String? _placeNameFromGoogleHtml(String html) {
+    final decoded = html.replaceAll(r'\/', '/').replaceAll('&amp;', '&');
+    final patterns = [
+      RegExp(r'/maps/place/([^/@?&"\']+)'),
+      RegExp(r'/maps/preview/place\?[^"\']*[?&]q=([^&"\']+)'),
+      RegExp(r'[?&]q=([^&"\']+)'),
+    ];
+    for (final pattern in patterns) {
+      for (final match in pattern.allMatches(decoded)) {
+        final name = _decodePlaceName(match.group(1)!);
+        if (name != null) return name;
+      }
+    }
+    return null;
+  }
+
+  static String? _imageFromGoogleHtml(String html, String baseUrl) {
+    final decoded = html.replaceAll('&amp;', '&');
+    final og = RegExp(
+          r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+          caseSensitive: false,
+        ).firstMatch(html) ??
+        RegExp(
+          r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+          caseSensitive: false,
+        ).firstMatch(html);
+    if (og != null) {
+      final absolute = _makeAbsoluteUrl(og.group(1)!, baseUrl);
+      if (absolute != null && !_isGenericGoogleImage(absolute)) {
+        return absolute;
+      }
+    }
+    final staticMap = RegExp(
+      r'https://maps\.google\.com/maps/api/staticmap[^"\s<>]+',
+      caseSensitive: false,
+    ).firstMatch(decoded);
+    if (staticMap == null) return null;
+    final image = staticMap.group(0)!.replaceAll('&amp;', '&');
+    if (_isGenericGoogleImage(image)) return null;
+    return image;
   }
 
   static String? _extractGoogleDestinationFromHtml(String html) {
@@ -1625,11 +1889,17 @@ class UrlMetadataService {
       'google.it',
       'www.google.com',
       'www.google.it',
+      'share.google',
+      'share.google.com',
+      'maps.app.goo.gl',
+      'goo.gl',
       'post salvato',
       'luogo su google maps',
     };
     if (generic.contains(value)) return true;
     if (value.startsWith('google search')) return true;
+    if (value.contains('share.google')) return true;
+    if (value.contains('maps.app.goo.gl')) return true;
     return false;
   }
 
@@ -1686,6 +1956,9 @@ class UrlMetadataService {
     } catch (_) {}
     name = name.split(RegExp(r'\s*[|·•]\s*')).first.trim();
     name = name.replaceAll(RegExp(r'\s+'), ' ');
+    if (name.isEmpty || name.toLowerCase().startsWith('data=')) return null;
+    if (name.startsWith('@')) return null;
+    if (RegExp(r'^-?\d+(\.\d+)?\s*,\s*-?\d+').hasMatch(name)) return null;
     if (name.length < 2 || isGenericImportTitle(name)) return null;
     return name;
   }
@@ -1855,6 +2128,8 @@ class UrlMetadataService {
     return lower.contains('/images/branding') ||
         lower.contains('googlelogo') ||
         lower.contains('maps.gstatic.com/mapfiles') ||
+        lower.contains('maps/about/images') ||
+        lower.contains('maps_512dp') ||
         lower.contains('favicon') ||
         lower.contains('google.com/images/branding');
   }

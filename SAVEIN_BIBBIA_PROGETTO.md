@@ -632,7 +632,7 @@ SaveIn **non** integra SociaVault al 13/07/2026. L'estrazione avviene cosi:
 2. **`resolveImportMetadata(url, {sharedText})`** (`lib/url_metadata_service.dart`):
    - prima: `getGlobalPostByUrl` (Cloud Function) → cache `global_posts`
    - se miss: **`extractMetadata(url)`** — HTTP GET pagina + Open Graph + fallback embed/oEmbed
-   - Google Maps/Search/`share.google`: nome posto da URL/JSON-LD/testo condiviso; ignora titolo **Google Search**; accetta foto `googleusercontent`
+   - Google Maps/Search/`share.google` da cellulare: unfurl hop-by-hop (redirect `intent://` Android + consenso), nome da testo condiviso/`q=`/`/maps/place/`, anteprima da `og:image` Maps; mai titolo `share.google`
 3. Instagram: pagina embed se manca `og:image`
 4. TikTok: redirect `vm.tiktok.com` + oEmbed pubblico
 5. Hashtag: testo condiviso + parsing HTML
@@ -2071,6 +2071,14 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.11+106` — import Google da cellulare (share.google / intent) (17/08/2026)
+
+- Il salvataggio resta da telefono. I link `maps.app.goo.gl` / `share.google` con User-Agent Android rispondono `intent://` e l'app mostrava il dominio **share.google** senza foto.
+- Unfurl hop-by-hop: segue i 302, estrae `S.browser_fallback_url` da `intent://`, salta `consent.google.com`. Lo User-Agent desktop è solo per lo scraping.
+- Nome: testo della share sheet, `/maps/place/Nome/`, o `q=` nell'HTML. Non usa `og:title` = Google Maps. Ignora path vuoti `data=!4m2`.
+- Foto: `og:image` (static map) con `&amp;` decodificato. Placeholder dialog: nome dalla share, non il dominio.
+- **Azione**: deploy `functions:savePostFromShare`; Codemagic → TestFlight/Play **106**; collega alla versione App Store **1.1.11**.
 
 ### Build `1.1.11+105` — import Google Maps/Search nome e anteprima (16/08/2026)
 

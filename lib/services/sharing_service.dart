@@ -482,7 +482,15 @@ class SharingService {
           // Usa metadata placeholder mentre carica
           final metadata = snapshot.data ??
               UrlMetadata(
-                title: UrlMetadataService.getDomainFromUrl(sharedContent.url),
+                title: UrlMetadataService.placeNameFromSharedText(
+                      sharedContent.text,
+                      sharedContent.url,
+                    ) ??
+                    (UrlMetadataService.isGoogleMapsOrSearchUrl(
+                            sharedContent.url)
+                        ? 'Luogo su Google Maps'
+                        : UrlMetadataService.getDomainFromUrl(
+                            sharedContent.url)),
                 description: 'Caricamento informazioni...',
                 imageUrl: null,
                 extractedHashtags: [], // Lista vuota durante il loading
@@ -770,7 +778,9 @@ class _SaveSharedContentDialogState extends State<SaveSharedContentDialog> {
           widget.sharedContent.url,
         ) ??
         UrlMetadataService.placeNameFromGoogleUrl(widget.sharedContent.url) ??
-        UrlMetadataService.getDomainFromUrl(widget.sharedContent.url);
+        (UrlMetadataService.isGoogleMapsOrSearchUrl(widget.sharedContent.url)
+            ? 'Luogo su Google Maps'
+            : UrlMetadataService.getDomainFromUrl(widget.sharedContent.url));
     _titleController.text = fallbackTitle;
     _hasInitializedTitle = true;
     print('DEBUG: Titolo impostato con fallback: $fallbackTitle');
