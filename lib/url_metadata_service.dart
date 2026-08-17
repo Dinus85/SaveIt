@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart';
@@ -1508,11 +1509,11 @@ class UrlMetadataService {
         placeNameFromGoogleUrl(resolved) ??
         placeNameFromGoogleUrl(url) ??
         (html == null ? null : _placeNameFromGoogleHtml(html));
-    var imageUrl = html == null ? null : _imageFromGoogleHtml(html, resolved);
-    imageUrl ??= await _fetchGooglePlacePhoto(
+    var imageUrl = await _fetchGooglePlacePhoto(
       resolvedUrl: resolved,
       placeName: name,
     );
+    imageUrl ??= html == null ? null : _imageFromGoogleHtml(html, resolved);
     final description = _descriptionFromSharedText(sharedText, resolved);
     return UrlMetadata(
       title: name ??
@@ -1531,6 +1532,29 @@ class UrlMetadataService {
     return text;
   }
 
+  static final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
+
+  static Future<String?> _lookupPlacesHeroPhoto(String query) async {
+    try {
+      final callable = _functions.httpsCallable(
+        'lookupGooglePlacePhoto',
+        options: HttpsCallableOptions(
+          timeout: const Duration(seconds: 18),
+        ),
+      );
+      final result = await callable.call<Map<dynamic, dynamic>>({
+        'query': query,
+      });
+      final data = Map<String, dynamic>.from(result.data);
+      final imageUrl = (data['imageUrl'] ?? '').toString().trim();
+      if (imageUrl.startsWith('http')) return imageUrl;
+    } catch (e) {
+      print('DEBUG: Places hero photo lookup failed: $e');
+    }
+    return null;
+  }
+
   static Future<String?> _fetchGooglePlacePhoto({
     required String resolvedUrl,
     required String? placeName,
@@ -1540,6 +1564,9 @@ class UrlMetadataService {
     if (query.isEmpty || isGenericImportTitle(query)) {
       return null;
     }
+
+    final placesPhoto = await _lookupPlacesHeroPhoto(query);
+    if (placesPhoto != null) return placesPhoto;
 
     try {
       final tbmUrl =

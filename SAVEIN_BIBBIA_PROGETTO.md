@@ -422,7 +422,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.11+96`** (ago 2026). Include sblocco mittenti da Account, import ogni 5 + interstitial di sessione anche da share, fail-open se inventario ads vuoto, testi intuitivi per profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.11+110`** (ago 2026). Include sblocco mittenti da Account, import ogni 5 + interstitial di sessione anche da share, fail-open se inventario ads vuoto, testi intuitivi per profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT. Import Google: prima foto Places (stessa della scheda Google).
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1155,7 +1155,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.11+96`** — da pubblicare su TestFlight / test Play. In App Store Connect collega la build **96** alla versione **1.1.11** se non è ancora in revisione.
+- Versione app corrente (repo): **`1.1.11+110`** — da pubblicare su TestFlight / test Play. In App Store Connect collega la build **110** alla versione **1.1.11** se non è ancora in revisione.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2071,6 +2071,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.11+110` — import Google: foto della scheda Places (17/08/2026)
+
+- L'anteprima di un ristorante Google usa la **prima foto della galleria Places** (la stessa della scheda Google Search/Maps), non il logo del sito né la mappa statica.
+- Nuova callable autenticata `lookupGooglePlacePhoto` (Places API sul progetto `saveit-app-1784d`, ADC in Cloud Functions — nessuna API key Places nell'app).
+- Fallback: scrape `tbm=map` / foto del sito se Places non risponde.
+- **Azione**: deploy `functions:lookupGooglePlacePhoto` e `functions:savePostFromShare`; Codemagic → TestFlight/Play **110**; collega alla versione App Store **1.1.11**.
 
 ### Build `1.1.11+109` — import Google: niente logo, prima foto del locale (17/08/2026)
 

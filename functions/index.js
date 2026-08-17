@@ -3627,9 +3627,110 @@ const fetchWebsitePreviewImage = async (website) => {
   }
 };
 
+let placesAuth = null;
+
+const placesBillingProject = () => {
+  try {
+    const cfg = process.env.FIREBASE_CONFIG ?
+      JSON.parse(process.env.FIREBASE_CONFIG) : {};
+    return cfg.projectId ||
+      process.env.GCLOUD_PROJECT ||
+      process.env.GCP_PROJECT ||
+      "saveit-app-1784d";
+  } catch (_) {
+    return process.env.GCLOUD_PROJECT || "saveit-app-1784d";
+  }
+};
+
+const getPlacesAccessToken = async () => {
+  if (!placesAuth) {
+    const {google} = require("googleapis");
+    placesAuth = new google.auth.GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+  }
+  const client = await placesAuth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  return (tokenResponse && tokenResponse.token) || tokenResponse || "";
+};
+
+const fetchPlacesHeroPhoto = async (query) => {
+  const q = (query || "").trim();
+  if (!q || isGenericGoogleTitle(q)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const token = await getPlacesAccessToken();
+    if (!token) return null;
+    const projectId = placesBillingProject();
+    const searchRes = await fetch(
+        "https://places.googleapis.com/v1/places:searchText",
+        {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "X-Goog-FieldMask": "places.id,places.displayName,places.photos",
+            "X-Goog-User-Project": projectId,
+          },
+          body: JSON.stringify({
+            textQuery: q,
+            languageCode: "it",
+            maxResultCount: 1,
+          }),
+        }
+    );
+    if (!searchRes.ok) {
+      const detail = await searchRes.text();
+      console.warn(
+          "Places searchText failed",
+          searchRes.status,
+          detail.slice(0, 400)
+      );
+      return null;
+    }
+    const searchJson = await searchRes.json();
+    const firstPlace = (searchJson.places || [])[0] || {};
+    const photoName = ((firstPlace.photos || [])[0] || {}).name || "";
+    if (!photoName) return null;
+    const mediaRes = await fetch(
+        `https://places.googleapis.com/v1/${photoName}/media` +
+        "?maxHeightPx=800&skipHttpRedirect=true",
+        {
+          method: "GET",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "X-Goog-User-Project": projectId,
+          },
+        }
+    );
+    if (!mediaRes.ok) {
+      const detail = await mediaRes.text();
+      console.warn(
+          "Places photo media failed",
+          mediaRes.status,
+          detail.slice(0, 400)
+      );
+      return null;
+    }
+    const mediaJson = await mediaRes.json();
+    const photoUri = (mediaJson.photoUri || "").toString().trim();
+    return photoUri.startsWith("http") ? photoUri : null;
+  } catch (error) {
+    console.warn("Places hero photo failed", error && error.message);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const fetchGooglePlacePhoto = async (resolvedUrl, placeName) => {
   const query = (placeName || placeNameFromGoogleUrl(resolvedUrl) || "").trim();
   if (!query || isGenericGoogleTitle(query)) return null;
+  const placesPhoto = await fetchPlacesHeroPhoto(query);
+  if (placesPhoto) return placesPhoto;
   const tbmUrl =
     `https://www.google.com/search?tbm=map&hl=it&gl=it&q=${encodeURIComponent(query)}`;
   const controller = new AbortController();
@@ -3663,9 +3764,9 @@ const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
     placeNameFromGoogleUrl(resolved) ||
     placeNameFromGoogleUrl(rawUrl) ||
     placeNameFromGoogleHtml(html);
-  let imageUrl = imageFromGoogleHtml(html, resolved) || null;
+  let imageUrl = await fetchGooglePlacePhoto(resolved, name);
   if (!imageUrl) {
-    imageUrl = await fetchGooglePlacePhoto(resolved, name);
+    imageUrl = imageFromGoogleHtml(html, resolved) || null;
   }
   const description = sharedText && sharedText !== rawUrl ?
     sharedText.substring(0, 2000) :
@@ -4631,6 +4732,25 @@ exports.ensureGlobalPost = onCall(
         ok: true,
         ...result,
       };
+    }
+);
+
+exports.lookupGooglePlacePhoto = onCall(
+    {
+      region: "us-central1",
+      timeoutSeconds: 20,
+      memory: "256MiB",
+    },
+    async (request) => {
+      if (!request.auth) {
+        throw new HttpsError("unauthenticated", "Login richiesto");
+      }
+      const query = ((request.data || {}).query || "").toString().trim();
+      if (!query) {
+        return {imageUrl: null};
+      }
+      const imageUrl = await fetchPlacesHeroPhoto(query);
+      return {imageUrl: imageUrl || null};
     }
 );
 
