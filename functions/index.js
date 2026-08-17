@@ -3412,25 +3412,45 @@ const googlePhotoUrlsInText = (text) => {
   return urls;
 };
 
+const isLogoLikeImage = (url) => {
+  const lower = (url || "").toLowerCase();
+  if (!url || isGenericGoogleImage(url)) return true;
+  return lower.includes("logo") ||
+    lower.includes("icon") ||
+    lower.includes("avatar") ||
+    lower.includes("favicon") ||
+    lower.includes("sprite") ||
+    lower.includes("aaaaaaaaaai") ||
+    lower.includes("/ogw/default") ||
+    lower.includes("w16383") ||
+    lower.includes("s44-") ||
+    lower.includes("=s44") ||
+    lower.includes("/s32") ||
+    lower.includes("/s48") ||
+    lower.includes("/s64") ||
+    lower.includes("/s96");
+};
+
+const imageIdentity = (url) => (url || "").split("?")[0].split("=")[0];
+
+const placePhotoScore = (url) => {
+  const lower = (url || "").toLowerCase();
+  if (lower.includes("docsubipk")) return 0;
+  if (lower.includes("/p/") || lower.includes("gps-cs-s")) return 1;
+  if (lower.includes("encrypted-tbn")) return 2;
+  if (lower.includes("sitesv")) return 5;
+  return 3;
+};
+
 const isUsableGooglePlacePhoto = (url) => {
   const lower = (url || "").toLowerCase();
-  if (!url || isGenericGoogleImage(url)) return false;
-  if (lower.includes("aaaaaaaaaai")) return false;
-  if (lower.includes("/ogw/default")) return false;
-  if (lower.includes("s44-") || lower.includes("=s44") || lower.includes("/s44")) {
-    return false;
-  }
-  if (lower.includes("material/system") ||
-      lower.includes("local/placeinfo") ||
-      lower.includes("staticmap")) {
-    return false;
-  }
+  if (!url || isLogoLikeImage(url)) return false;
+  if (lower.includes("sitesv")) return false;
   return lower.includes("googleusercontent.com") ||
     lower.includes("ggpht.com") ||
     lower.includes("encrypted-tbn") ||
     lower.includes("/p/") ||
     lower.includes("gps-cs-s") ||
-    lower.includes("sitesv") ||
     lower.includes("docsubipk");
 };
 
@@ -3582,18 +3602,25 @@ const fetchWebsitePreviewImage = async (website) => {
     clearTimeout(timer);
     if (!response.ok) return null;
     const html = (await response.text()).slice(0, 250000);
-    const imageUrl = absoluteShareUrl(
+    const baseUrl = response.url || website;
+    const og = absoluteShareUrl(
         extractMetaContent(html, ["og:image", "twitter:image", "og:image:url"]),
-        response.url || website
+        baseUrl
     );
-    if (!imageUrl) return null;
-    const lower = imageUrl.toLowerCase();
-    if (isGenericGoogleImage(imageUrl) ||
-        lower.includes("staticmap") ||
-        lower.includes("aaaaaaaaaai")) {
-      return null;
+    const ogId = og ? imageIdentity(og) : "";
+    const candidates = [];
+    const imgMatches = html.matchAll(
+        /<img[^>]+(?:src|data-src)=["']([^"']+)/gi
+    );
+    for (const match of imgMatches) {
+      const absolute = absoluteShareUrl(match[1], baseUrl);
+      if (!absolute || isLogoLikeImage(absolute)) continue;
+      if (ogId && imageIdentity(absolute) === ogId) continue;
+      if (!candidates.includes(absolute)) candidates.push(absolute);
     }
-    return imageUrl;
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => placePhotoScore(a) - placePhotoScore(b));
+    return candidates[0];
   } catch (_) {
     clearTimeout(timer);
     return null;

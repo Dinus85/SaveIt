@@ -1629,41 +1629,78 @@ class UrlMetadataService {
       if (response.statusCode != 200) return null;
       final finalUrl = response.request?.url.toString() ?? website;
       final document = html_parser.parse(response.body);
-      final image = _extractBestImage(document, finalUrl);
-      if (image == null) return null;
-      if (_isGenericGoogleImage(image) ||
-          image.toLowerCase().contains('staticmap') ||
-          image.toLowerCase().contains('aaaaaaaaaai')) {
-        return null;
+      final og = _getMetaProperty(document, 'og:image');
+      final ogId = og == null
+          ? null
+          : _imageIdentity(_makeAbsoluteUrl(og, finalUrl) ?? og);
+
+      final candidates = <String>[];
+      void add(String? raw) {
+        if (raw == null || raw.trim().isEmpty) return;
+        final absolute = _makeAbsoluteUrl(raw.trim(), finalUrl);
+        if (absolute == null) return;
+        if (_isLogoLikeImage(absolute)) return;
+        if (ogId != null && _imageIdentity(absolute) == ogId) return;
+        if (!candidates.contains(absolute)) candidates.add(absolute);
       }
-      return image;
+
+      for (final img in document.querySelectorAll('img')) {
+        add(img.attributes['src']);
+        add(img.attributes['data-src']);
+      }
+
+      if (candidates.isEmpty) return null;
+      candidates.sort(
+        (a, b) => _placePhotoScore(a).compareTo(_placePhotoScore(b)),
+      );
+      return candidates.first;
     } catch (e) {
       print('DEBUG: Place website image fetch failed: $e');
     }
     return null;
   }
 
+  static String _imageIdentity(String url) {
+    return url.split('?').first.split('=').first;
+  }
+
+  static int _placePhotoScore(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('docsubipk')) return 0;
+    if (lower.contains('/p/') || lower.contains('gps-cs-s')) return 1;
+    if (lower.contains('encrypted-tbn')) return 2;
+    if (lower.contains('sitesv')) return 5;
+    return 3;
+  }
+
+  static bool _isLogoLikeImage(String url) {
+    final lower = url.toLowerCase();
+    if (_isGenericGoogleImage(url)) return true;
+    return lower.contains('logo') ||
+        lower.contains('icon') ||
+        lower.contains('avatar') ||
+        lower.contains('favicon') ||
+        lower.contains('sprite') ||
+        lower.contains('aaaaaaaaaai') ||
+        lower.contains('/ogw/default') ||
+        lower.contains('w16383') ||
+        lower.contains('s44-') ||
+        lower.contains('=s44') ||
+        lower.contains('/s32') ||
+        lower.contains('/s48') ||
+        lower.contains('/s64') ||
+        lower.contains('/s96');
+  }
+
   static bool _isUsableGooglePlacePhoto(String url) {
     final lower = url.toLowerCase();
-    if (_isGenericGoogleImage(url)) return false;
-    if (lower.contains('aaaaaaaaaai')) return false;
-    if (lower.contains('/ogw/default')) return false;
-    if (lower.contains('s44-') ||
-        lower.contains('=s44') ||
-        lower.contains('/s44')) {
-      return false;
-    }
-    if (lower.contains('material/system') ||
-        lower.contains('local/placeinfo') ||
-        lower.contains('staticmap')) {
-      return false;
-    }
+    if (_isLogoLikeImage(url)) return false;
+    if (lower.contains('sitesv')) return false;
     return lower.contains('googleusercontent.com') ||
         lower.contains('ggpht.com') ||
         lower.contains('encrypted-tbn') ||
         lower.contains('/p/') ||
         lower.contains('gps-cs-s') ||
-        lower.contains('sitesv') ||
         lower.contains('docsubipk');
   }
 

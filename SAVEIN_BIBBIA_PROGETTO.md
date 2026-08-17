@@ -2072,6 +2072,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+109` — import Google: niente logo, prima foto del locale (17/08/2026)
+
+- L'anteprima non usa più l'`og:image` del sito (spesso il logo / copertina Google Sites). Scarta logo, icone e copertine e prende la prima foto vera nella pagina del posto.
+- **Azione**: deploy `functions:savePostFromShare`; Codemagic → TestFlight/Play **109**; collega alla versione App Store **1.1.11**.
+
 ### Build `1.1.11+108` — fix compile regex import Google (17/08/2026)
 
 - Corretti i `RegExp` in `url_metadata_service.dart` (stringhe raw Dart con `\'` che non compilavano). Stesso comportamento del 107: foto del posto, non mappa statica.
