@@ -1509,7 +1509,7 @@ class UrlMetadataService {
         placeNameFromGoogleUrl(url) ??
         (html == null ? null : _placeNameFromGoogleHtml(html));
     var imageUrl = html == null ? null : _imageFromGoogleHtml(html, resolved);
-    imageUrl ??= await _fetchGoogleMapsPreviewImage(
+    imageUrl ??= await _fetchGooglePlacePhoto(
       resolvedUrl: resolved,
       placeName: name,
     );
@@ -1531,42 +1531,140 @@ class UrlMetadataService {
     return text;
   }
 
-  static String _googleMapsLookupUrl(String resolvedUrl, String? placeName) {
-    final lower = resolvedUrl.toLowerCase();
-    if (lower.contains('/maps/place/')) return resolvedUrl;
-    if (placeName != null && placeName.trim().isNotEmpty) {
-      return 'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(placeName.trim())}';
-    }
-    if (lower.contains('google.com/maps') || lower.contains('maps.google')) {
-      return resolvedUrl;
-    }
-    return resolvedUrl;
-  }
-
-  static Future<String?> _fetchGoogleMapsPreviewImage({
+  static Future<String?> _fetchGooglePlacePhoto({
     required String resolvedUrl,
     required String? placeName,
   }) async {
-    final lower = resolvedUrl.toLowerCase();
-    if (lower.contains('/search?') &&
-        (placeName == null || placeName.trim().isEmpty) &&
-        !lower.contains('/maps/')) {
+    final query = (placeName ?? placeNameFromGoogleUrl(resolvedUrl) ?? '')
+        .trim();
+    if (query.isEmpty || isGenericImportTitle(query)) {
       return null;
     }
-    final mapsUrl = _googleMapsLookupUrl(resolvedUrl, placeName);
+
     try {
+      final tbmUrl =
+          'https://www.google.com/search?tbm=map&hl=it&gl=it&q=${Uri.encodeComponent(query)}';
       final response = await http
-          .get(Uri.parse(mapsUrl), headers: _browserHeaders)
-          .timeout(const Duration(seconds: 18));
-      if (response.statusCode != 200) return null;
-      final finalUrl = response.request?.url.toString() ?? mapsUrl;
-      final document = html_parser.parse(response.body);
-      final image = _extractBestImage(document, finalUrl);
-      if (image != null && !_isGenericGoogleImage(image)) return image;
+          .get(Uri.parse(tbmUrl), headers: _browserHeaders)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
+        final fromCard = _firstUsableGooglePlacePhoto(response.body);
+        if (fromCard != null) return fromCard;
+        final website = _websiteFromGoogleLocalCard(response.body);
+        if (website != null) {
+          final fromSite = await _fetchWebsitePreviewImage(website);
+          if (fromSite != null) return fromSite;
+        }
+      }
     } catch (e) {
-      print('DEBUG: Google Maps image fetch failed: $e');
+      print('DEBUG: Google place photo fetch failed: $e');
     }
     return null;
+  }
+
+  static String? _firstUsableGooglePlacePhoto(String text) {
+    for (final candidate in _googlePhotoUrlsInText(text)) {
+      if (_isUsableGooglePlacePhoto(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  static Iterable<String> _googlePhotoUrlsInText(String text) {
+    final decoded = text
+        .replaceAll(r'\/', '/')
+        .replaceAll(r'\u003d', '=')
+        .replaceAll(r'\u0026', '&')
+        .replaceAll('&amp;', '&');
+    final matches = RegExp(
+      r'https://(?:lh[0-9]\.)?(?:googleusercontent|ggpht)\.com/[^"\s\\<>]+',
+      caseSensitive: false,
+    ).allMatches(decoded);
+    final seen = <String>{};
+    final urls = <String>[];
+    for (final match in matches) {
+      var url = match.group(0)!;
+      url = url.replaceAll(RegExp(r'[\\),;\]]+$'), '');
+      if (url.endsWith('\\')) url = url.substring(0, url.length - 1);
+      if (seen.add(url)) urls.add(url);
+    }
+    return urls;
+  }
+
+  static String? _websiteFromGoogleLocalCard(String text) {
+    final decoded = text.replaceAll(r'\/', '/').replaceAll(r'\u003d', '=');
+    final matches = RegExp(
+      r'"(https://[^"]+)"\s*,\s*"[^"]+\.[^"]+"',
+    ).allMatches(decoded);
+    for (final match in matches) {
+      final url = match.group(1)!;
+      if (_isLikelyPlaceWebsite(url)) return url;
+    }
+    return null;
+  }
+
+  static bool _isLikelyPlaceWebsite(String url) {
+    final lower = url.toLowerCase();
+    if (!lower.startsWith('http')) return false;
+    const blocked = [
+      'gstatic.com',
+      'googleapis.com',
+      'google.com/maps',
+      'google.com/local',
+      'google.com/search',
+      'google.com/url',
+      'business.google.com',
+      'support.google.com',
+      'play.google.com',
+      'consent.google',
+      'accounts.google',
+    ];
+    return blocked.every((item) => !lower.contains(item));
+  }
+
+  static Future<String?> _fetchWebsitePreviewImage(String website) async {
+    try {
+      final response = await http
+          .get(Uri.parse(website), headers: _browserHeaders)
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return null;
+      final finalUrl = response.request?.url.toString() ?? website;
+      final document = html_parser.parse(response.body);
+      final image = _extractBestImage(document, finalUrl);
+      if (image == null) return null;
+      if (_isGenericGoogleImage(image) ||
+          image.toLowerCase().contains('staticmap') ||
+          image.toLowerCase().contains('aaaaaaaaaai')) {
+        return null;
+      }
+      return image;
+    } catch (e) {
+      print('DEBUG: Place website image fetch failed: $e');
+    }
+    return null;
+  }
+
+  static bool _isUsableGooglePlacePhoto(String url) {
+    final lower = url.toLowerCase();
+    if (_isGenericGoogleImage(url)) return false;
+    if (lower.contains('aaaaaaaaaai')) return false;
+    if (lower.contains('/ogw/default')) return false;
+    if (lower.contains('s44-') ||
+        lower.contains('=s44') ||
+        lower.contains('/s44')) {
+      return false;
+    }
+    if (lower.contains('material/system') ||
+        lower.contains('local/placeinfo') ||
+        lower.contains('staticmap')) {
+      return false;
+    }
+    return lower.contains('googleusercontent.com') ||
+        lower.contains('ggpht.com') ||
+        lower.contains('encrypted-tbn') ||
+        lower.contains('/p/') ||
+        lower.contains('gps-cs-s') ||
+        lower.contains('sitesv') ||
+        lower.contains('docsubipk');
   }
 
   /// Espande i link corti da cellulare (share.google / maps.app.goo.gl).
@@ -1801,29 +1899,9 @@ class UrlMetadataService {
   }
 
   static String? _imageFromGoogleHtml(String html, String baseUrl) {
-    final decoded = html.replaceAll('&amp;', '&');
-    final og = RegExp(
-          r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
-          caseSensitive: false,
-        ).firstMatch(html) ??
-        RegExp(
-          r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-          caseSensitive: false,
-        ).firstMatch(html);
-    if (og != null) {
-      final absolute = _makeAbsoluteUrl(og.group(1)!, baseUrl);
-      if (absolute != null && !_isGenericGoogleImage(absolute)) {
-        return absolute;
-      }
-    }
-    final staticMap = RegExp(
-      r'https://maps\.google\.com/maps/api/staticmap[^"\s<>]+',
-      caseSensitive: false,
-    ).firstMatch(decoded);
-    if (staticMap == null) return null;
-    final image = staticMap.group(0)!.replaceAll('&amp;', '&');
-    if (_isGenericGoogleImage(image)) return null;
-    return image;
+    final photo = _firstUsableGooglePlacePhoto(html);
+    if (photo == null) return null;
+    return _makeAbsoluteUrl(photo, baseUrl) ?? photo;
   }
 
   static String? _extractGoogleDestinationFromHtml(String html) {
@@ -2130,6 +2208,7 @@ class UrlMetadataService {
         lower.contains('maps.gstatic.com/mapfiles') ||
         lower.contains('maps/about/images') ||
         lower.contains('maps_512dp') ||
+        lower.contains('staticmap') ||
         lower.contains('favicon') ||
         lower.contains('google.com/images/branding');
   }

@@ -3247,6 +3247,7 @@ const isGenericGoogleImage = (url) => {
     lower.includes("maps.gstatic.com/mapfiles") ||
     lower.includes("maps/about/images") ||
     lower.includes("maps_512dp") ||
+    lower.includes("staticmap") ||
     lower.includes("favicon");
 };
 
@@ -3390,24 +3391,87 @@ const placeNameFromGoogleHtml = (html) => {
   return "";
 };
 
-const imageFromGoogleHtml = (html, baseUrl) => {
-  const decoded = (html || "").replace(/&amp;/g, "&");
-  const og = html.match(
-      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)/i
-  ) || html.match(
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
-  );
-  if (og && og[1]) {
-    const imageUrl = absoluteShareUrl(og[1].replace(/&amp;/g, "&"), baseUrl);
-    if (imageUrl && !isGenericGoogleImage(imageUrl)) return imageUrl;
+const googlePhotoUrlsInText = (text) => {
+  const decoded = (text || "")
+      .replace(/\\\//g, "/")
+      .replace(/\\u003d/gi, "=")
+      .replace(/\\u0026/gi, "&")
+      .replace(/&amp;/g, "&");
+  const matches = decoded.match(
+      /https:\/\/(?:lh[0-9]\.)?(?:googleusercontent|ggpht)\.com\/[^"\s\\<>]+/gi
+  ) || [];
+  const seen = new Set();
+  const urls = [];
+  for (let url of matches) {
+    url = url.replace(/[\\),;\]]+$/, "");
+    if (!seen.has(url)) {
+      seen.add(url);
+      urls.push(url);
+    }
   }
-  const staticMap = decoded.match(
-      /https:\/\/maps\.google\.com\/maps\/api\/staticmap[^"\s<>]+/i
-  );
-  if (staticMap && staticMap[0] && !isGenericGoogleImage(staticMap[0])) {
-    return staticMap[0];
+  return urls;
+};
+
+const isUsableGooglePlacePhoto = (url) => {
+  const lower = (url || "").toLowerCase();
+  if (!url || isGenericGoogleImage(url)) return false;
+  if (lower.includes("aaaaaaaaaai")) return false;
+  if (lower.includes("/ogw/default")) return false;
+  if (lower.includes("s44-") || lower.includes("=s44") || lower.includes("/s44")) {
+    return false;
+  }
+  if (lower.includes("material/system") ||
+      lower.includes("local/placeinfo") ||
+      lower.includes("staticmap")) {
+    return false;
+  }
+  return lower.includes("googleusercontent.com") ||
+    lower.includes("ggpht.com") ||
+    lower.includes("encrypted-tbn") ||
+    lower.includes("/p/") ||
+    lower.includes("gps-cs-s") ||
+    lower.includes("sitesv") ||
+    lower.includes("docsubipk");
+};
+
+const firstUsableGooglePlacePhoto = (text) => {
+  for (const candidate of googlePhotoUrlsInText(text)) {
+    if (isUsableGooglePlacePhoto(candidate)) return candidate;
   }
   return "";
+};
+
+const isLikelyPlaceWebsite = (url) => {
+  const lower = (url || "").toLowerCase();
+  if (!lower.startsWith("http")) return false;
+  const blocked = [
+    "gstatic.com",
+    "googleapis.com",
+    "google.com/maps",
+    "google.com/local",
+    "google.com/search",
+    "google.com/url",
+    "business.google.com",
+    "support.google.com",
+    "play.google.com",
+    "consent.google",
+    "accounts.google",
+  ];
+  return blocked.every((item) => !lower.includes(item));
+};
+
+const websiteFromGoogleLocalCard = (text) => {
+  const decoded = (text || "").replace(/\\\//g, "/").replace(/\\u003d/gi, "=");
+  const matches = decoded.matchAll(/"(https:\/\/[^"]+)"\s*,\s*"[^"]+\.[^"]+"/g);
+  for (const match of matches) {
+    if (isLikelyPlaceWebsite(match[1])) return match[1];
+  }
+  return "";
+};
+
+const imageFromGoogleHtml = (html, baseUrl) => {
+  const photo = firstUsableGooglePlacePhoto(html);
+  return photo ? (absoluteShareUrl(photo, baseUrl) || photo) : "";
 };
 
 const hasNamedMapsPlace = (url) =>
@@ -3505,25 +3569,11 @@ const unfurlGoogleShare = async (url) => {
   return {url: current, html: lastHtml};
 };
 
-const googleMapsLookupUrl = (resolvedUrl, placeName) => {
-  const lower = (resolvedUrl || "").toLowerCase();
-  if (lower.includes("/maps/place/")) return resolvedUrl;
-  if (placeName && placeName.trim()) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeName.trim())}`;
-  }
-  return resolvedUrl;
-};
-
-const fetchGoogleMapsPreviewImage = async (resolvedUrl, placeName) => {
-  const lower = (resolvedUrl || "").toLowerCase();
-  if (lower.includes("/search?") && !placeName && !lower.includes("/maps/")) {
-    return null;
-  }
-  const mapsUrl = googleMapsLookupUrl(resolvedUrl, placeName);
+const fetchWebsitePreviewImage = async (website) => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 18000);
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch(mapsUrl, {
+    const response = await fetch(website, {
       method: "GET",
       redirect: "follow",
       signal: controller.signal,
@@ -3531,12 +3581,46 @@ const fetchGoogleMapsPreviewImage = async (resolvedUrl, placeName) => {
     });
     clearTimeout(timer);
     if (!response.ok) return null;
-    const html = (await response.text()).slice(0, 350000);
+    const html = (await response.text()).slice(0, 250000);
     const imageUrl = absoluteShareUrl(
         extractMetaContent(html, ["og:image", "twitter:image", "og:image:url"]),
-        response.url || mapsUrl
+        response.url || website
     );
-    if (imageUrl && !isGenericGoogleImage(imageUrl)) return imageUrl;
+    if (!imageUrl) return null;
+    const lower = imageUrl.toLowerCase();
+    if (isGenericGoogleImage(imageUrl) ||
+        lower.includes("staticmap") ||
+        lower.includes("aaaaaaaaaai")) {
+      return null;
+    }
+    return imageUrl;
+  } catch (_) {
+    clearTimeout(timer);
+    return null;
+  }
+};
+
+const fetchGooglePlacePhoto = async (resolvedUrl, placeName) => {
+  const query = (placeName || placeNameFromGoogleUrl(resolvedUrl) || "").trim();
+  if (!query || isGenericGoogleTitle(query)) return null;
+  const tbmUrl =
+    `https://www.google.com/search?tbm=map&hl=it&gl=it&q=${encodeURIComponent(query)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(tbmUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: googleBrowserHeaders,
+    });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const body = await response.text();
+    const fromCard = firstUsableGooglePlacePhoto(body);
+    if (fromCard) return fromCard;
+    const website = websiteFromGoogleLocalCard(body);
+    if (website) return await fetchWebsitePreviewImage(website);
     return null;
   } catch (_) {
     clearTimeout(timer);
@@ -3554,7 +3638,7 @@ const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
     placeNameFromGoogleHtml(html);
   let imageUrl = imageFromGoogleHtml(html, resolved) || null;
   if (!imageUrl) {
-    imageUrl = await fetchGoogleMapsPreviewImage(resolved, name);
+    imageUrl = await fetchGooglePlacePhoto(resolved, name);
   }
   const description = sharedText && sharedText !== rawUrl ?
     sharedText.substring(0, 2000) :
