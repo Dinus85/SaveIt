@@ -1859,7 +1859,7 @@ class UrlMetadataService {
     if (fromUrl != null && fromUrl != url) return fromUrl;
     if (!url.toLowerCase().contains('consent.google')) return null;
     final match = RegExp(
-      r'continue=(https?[^&"\']+)',
+      'continue=(https?[^&"\']+)',
       caseSensitive: false,
     ).firstMatch(html.replaceAll('&amp;', '&'));
     if (match == null) return null;
@@ -1885,9 +1885,9 @@ class UrlMetadataService {
   static String? _placeNameFromGoogleHtml(String html) {
     final decoded = html.replaceAll(r'\/', '/').replaceAll('&amp;', '&');
     final patterns = [
-      RegExp(r'/maps/place/([^/@?&"\']+)'),
-      RegExp(r'/maps/preview/place\?[^"\']*[?&]q=([^&"\']+)'),
-      RegExp(r'[?&]q=([^&"\']+)'),
+      RegExp('/maps/place/([^/@?&"\']+)'),
+      RegExp('/maps/preview/place\\?[^"\']*[?&]q=([^&"\']+)'),
+      RegExp('[?&]q=([^&"\']+)'),
     ];
     for (final pattern in patterns) {
       for (final match in pattern.allMatches(decoded)) {

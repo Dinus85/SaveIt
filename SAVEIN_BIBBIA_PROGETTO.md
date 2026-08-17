@@ -2072,6 +2072,11 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.11+108` — fix compile regex import Google (17/08/2026)
+
+- Corretti i `RegExp` in `url_metadata_service.dart` (stringhe raw Dart con `\'` che non compilavano). Stesso comportamento del 107: foto del posto, non mappa statica.
+- **Azione**: Codemagic → TestFlight/Play **108**; collega alla versione App Store **1.1.11**.
+
 ### Build `1.1.11+107` — import Google: foto del posto al posto della mappa (17/08/2026)
 
 - L'anteprima di un ristorante Google non è più la mappa statica. Si usa la prima foto della scheda Google (`tbm=map`) o, se manca, l'`og:image` del sito del posto.
