@@ -3174,6 +3174,22 @@ const isGoogleMapsOrSearchUrl = (url) => {
     lower.includes("google.it/url");
 };
 
+const unwrapOutgoingGoogleUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    const host = (parsed.hostname || "").toLowerCase();
+    if (!host.includes("google.")) return url;
+    if (parsed.pathname !== "/url" && parsed.pathname !== "/url/") return url;
+    const dest = parsed.searchParams.get("q") ||
+      parsed.searchParams.get("url") ||
+      "";
+    if (!dest.startsWith("http://") && !dest.startsWith("https://")) return url;
+    return dest;
+  } catch (_) {
+    return url;
+  }
+};
+
 const isGoogleLocalPlaceUrl = (url) => {
   const lower = (url || "").toLowerCase();
   if (lower.includes("maps.app.goo.gl") ||
@@ -3823,7 +3839,10 @@ const fetchWikipediaPreview = async (title) => {
 
 const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
   const unfurled = await unfurlGoogleShare(rawUrl);
-  const resolved = unfurled.url;
+  const resolved = unwrapOutgoingGoogleUrl(unfurled.url);
+  if (!isGoogleMapsOrSearchUrl(resolved) && !isGoogleLocalPlaceUrl(resolved)) {
+    return fetchShareUrlMetadata(resolved, sharedText);
+  }
   const html = unfurled.html || "";
   const name = placeNameFromSharedText(sharedText, resolved) ||
     placeNameFromGoogleUrl(resolved) ||
@@ -3868,7 +3887,7 @@ const fetchShareUrlMetadata = async (rawUrl, sharedText = "") => {
     metadataProvider: "ios_share_extension",
   };
   try {
-    let workingUrl = (rawUrl || "").toString().trim();
+    let workingUrl = unwrapOutgoingGoogleUrl((rawUrl || "").toString().trim());
     if (isGoogleMapsOrSearchUrl(workingUrl)) {
       return await fetchGooglePlaceMetadata(workingUrl, sharedText);
     }

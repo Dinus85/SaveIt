@@ -38,6 +38,8 @@ class UrlMetadataService {
         url = 'https://$url';
       }
 
+      url = _unwrapOutgoingGoogleUrl(url);
+
       if (isGoogleMapsOrSearchUrl(url)) {
         try {
           return await _extractGooglePlaceMetadata(
@@ -179,6 +181,7 @@ class UrlMetadataService {
         !normalizedUrl.startsWith('https://')) {
       normalizedUrl = 'https://$normalizedUrl';
     }
+    normalizedUrl = _unwrapOutgoingGoogleUrl(normalizedUrl);
 
     final lookup =
         await GlobalPostLookupService.instance.lookupByUrl(normalizedUrl);
@@ -1503,7 +1506,10 @@ class UrlMetadataService {
     String? sharedText,
   }) async {
     final unfurled = await _unfurlGoogleShare(url);
-    final resolved = unfurled.url;
+    var resolved = _unwrapOutgoingGoogleUrl(unfurled.url);
+    if (!isGoogleMapsOrSearchUrl(resolved) && !_isGoogleLocalPlaceUrl(resolved)) {
+      return extractMetadata(resolved, sharedText: sharedText);
+    }
     final html = unfurled.html;
     final name = placeNameFromSharedText(sharedText, resolved) ??
         placeNameFromGoogleUrl(resolved) ??
@@ -2083,8 +2089,26 @@ class UrlMetadataService {
         lower.contains('google.it/url');
   }
 
-  /// Ristorante / negozio: Maps oppure share della scheda locale (`source=sh/x/loc`).
-  /// Un film da Google Search è `source=sh/x/kp` e non deve usare Places.
+  /// google.com/url?q=https://sito... → il sito vero, così Instagram/web
+  /// restano sul percorso normale e non passano da Wikipedia/Places.
+  static String _unwrapOutgoingGoogleUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final host = uri.host.toLowerCase();
+      if (!host.contains('google.')) return url;
+      if (uri.path != '/url' && uri.path != '/url/') return url;
+      final dest = uri.queryParameters['q'] ?? uri.queryParameters['url'] ?? '';
+      if (!dest.startsWith('http://') && !dest.startsWith('https://')) {
+        return url;
+      }
+      return dest;
+    } catch (_) {
+      return url;
+    }
+  }
+
+  /// Ristorante / negozio / luogo: Maps oppure share della scheda locale (`source=sh/x/loc`).
+  /// Film, persone e altre schede Google Search usano Wikipedia, non Places.
   static bool _isGoogleLocalPlaceUrl(String url) {
     final lower = url.toLowerCase();
     if (lower.contains('maps.app.goo.gl') ||
