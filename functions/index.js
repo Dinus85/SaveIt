@@ -3174,6 +3174,27 @@ const isGoogleMapsOrSearchUrl = (url) => {
     lower.includes("google.it/url");
 };
 
+const isGoogleLocalPlaceUrl = (url) => {
+  const lower = (url || "").toLowerCase();
+  if (lower.includes("maps.app.goo.gl") ||
+      lower.includes("goo.gl/maps") ||
+      lower.includes("maps.google.") ||
+      lower.includes("/maps/place/") ||
+      lower.includes("/maps/search/") ||
+      lower.includes("google.com/maps") ||
+      lower.includes("google.it/maps")) {
+    return true;
+  }
+  try {
+    const parsed = new URL(url);
+    const source = (parsed.searchParams.get("source") || "").toLowerCase();
+    const utm = (parsed.searchParams.get("utm_source") || "").toLowerCase();
+    return source.includes("/loc/") || utm.includes("sh/x/loc");
+  } catch (_) {
+    return false;
+  }
+};
+
 const decodePlaceName = (raw) => {
   let name = (raw || "").toString().replace(/\+/g, " ");
   try {
@@ -3756,6 +3777,50 @@ const fetchGooglePlacePhoto = async (resolvedUrl, placeName) => {
   }
 };
 
+const WIKIPEDIA_UA = "SaveIn/1.1 (https://savein.eu; support@savein.eu)";
+
+const fetchWikipediaPreview = async (title) => {
+  const query = (title || "").toString().trim();
+  if (!query || isGenericGoogleTitle(query)) {
+    return {imageUrl: null, extract: null};
+  }
+  for (const lang of ["it", "en"]) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(
+          `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`,
+          {
+            method: "GET",
+            signal: controller.signal,
+            headers: {
+              "User-Agent": WIKIPEDIA_UA,
+              Accept: "application/json",
+            },
+          }
+      );
+      clearTimeout(timer);
+      if (!response.ok) continue;
+      const data = await response.json();
+      const type = (data.type || "").toString().toLowerCase();
+      if (type === "disambiguation") continue;
+      const imageUrl =
+        ((data.originalimage || {}).source ||
+          (data.thumbnail || {}).source ||
+          "").toString().trim();
+      let extract = (data.extract || "").toString().trim();
+      if (extract.length > 400) extract = `${extract.slice(0, 400).trim()}…`;
+      const usableImage = imageUrl.startsWith("http") ? imageUrl : null;
+      if (usableImage || extract) {
+        return {imageUrl: usableImage, extract: extract || null};
+      }
+    } catch (_) {
+      clearTimeout(timer);
+    }
+  }
+  return {imageUrl: null, extract: null};
+};
+
 const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
   const unfurled = await unfurlGoogleShare(rawUrl);
   const resolved = unfurled.url;
@@ -3764,21 +3829,32 @@ const fetchGooglePlaceMetadata = async (rawUrl, sharedText = "") => {
     placeNameFromGoogleUrl(resolved) ||
     placeNameFromGoogleUrl(rawUrl) ||
     placeNameFromGoogleHtml(html);
-  let imageUrl = await fetchGooglePlacePhoto(resolved, name);
+  const usePlaces = isGoogleLocalPlaceUrl(resolved) ||
+    isGoogleLocalPlaceUrl(rawUrl);
+  let imageUrl = null;
+  let wikiExtract = "";
+  if (usePlaces) {
+    imageUrl = await fetchGooglePlacePhoto(resolved, name);
+  } else {
+    const wiki = await fetchWikipediaPreview(name);
+    imageUrl = wiki.imageUrl;
+    wikiExtract = wiki.extract || "";
+  }
   if (!imageUrl) {
     imageUrl = imageFromGoogleHtml(html, resolved) || null;
   }
-  const description = sharedText && sharedText !== rawUrl ?
-    sharedText.substring(0, 2000) :
-    "";
+  const description = wikiExtract ||
+    (sharedText && sharedText !== rawUrl ? sharedText.substring(0, 2000) : "");
   return {
     title: (name || placeNameFromSharedText(sharedText, rawUrl) ||
-      "Luogo su Google Maps").substring(0, 300),
+      (usePlaces ? "Luogo su Google Maps" : "Google")).substring(0, 300),
     description,
     imageUrl,
     creatorName: null,
     creatorUsername: null,
-    metadataProvider: "ios_share_extension_google_maps",
+    metadataProvider: usePlaces ?
+      "ios_share_extension_google_maps" :
+      "ios_share_extension_google_search",
   };
 };
 

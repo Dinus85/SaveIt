@@ -1509,19 +1509,30 @@ class UrlMetadataService {
         placeNameFromGoogleUrl(resolved) ??
         placeNameFromGoogleUrl(url) ??
         (html == null ? null : _placeNameFromGoogleHtml(html));
-    var imageUrl = await _fetchGooglePlacePhoto(
-      resolvedUrl: resolved,
-      placeName: name,
-    );
+    final usePlaces = _isGoogleLocalPlaceUrl(resolved) ||
+        _isGoogleLocalPlaceUrl(url);
+    String? imageUrl;
+    String? wikiExtract;
+    if (usePlaces) {
+      imageUrl = await _fetchGooglePlacePhoto(
+        resolvedUrl: resolved,
+        placeName: name,
+      );
+    } else {
+      final wiki = await _fetchWikipediaPreview(name);
+      imageUrl = wiki.imageUrl;
+      wikiExtract = wiki.extract;
+    }
     imageUrl ??= html == null ? null : _imageFromGoogleHtml(html, resolved);
-    final description = _descriptionFromSharedText(sharedText, resolved);
+    final description = wikiExtract ??
+        _descriptionFromSharedText(sharedText, resolved);
     return UrlMetadata(
       title: name ??
           placeNameFromSharedText(sharedText, url) ??
-          'Luogo su Google Maps',
+          (usePlaces ? 'Luogo su Google Maps' : 'Google'),
       description: description,
       imageUrl: imageUrl,
-      siteName: 'Google Maps',
+      siteName: usePlaces ? 'Google Maps' : 'Google',
     );
   }
 
@@ -1534,6 +1545,63 @@ class UrlMetadataService {
 
   static final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'us-central1');
+
+  static const Map<String, String> _wikipediaHeaders = {
+    'User-Agent': 'SaveIn/1.1 (https://savein.eu; support@savein.eu)',
+    'Accept': 'application/json',
+  };
+
+  static Future<({String? imageUrl, String? extract})> _fetchWikipediaPreview(
+    String? title,
+  ) async {
+    final query = (title ?? '').trim();
+    if (query.isEmpty || isGenericImportTitle(query)) {
+      return (imageUrl: null, extract: null);
+    }
+    for (final lang in ['it', 'en']) {
+      try {
+        final uri = Uri.parse(
+          'https://$lang.wikipedia.org/api/rest_v1/page/summary/${Uri.encodeComponent(query)}',
+        );
+        final response = await http
+            .get(uri, headers: _wikipediaHeaders)
+            .timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200 || response.body.isEmpty) continue;
+        final data = json.decode(response.body);
+        if (data is! Map) continue;
+        final type = (data['type'] ?? '').toString().toLowerCase();
+        if (type == 'disambiguation') continue;
+        String? imageUrl;
+        final original = data['originalimage'];
+        if (original is Map && original['source'] != null) {
+          imageUrl = original['source'].toString().trim();
+        }
+        imageUrl ??= () {
+          final thumb = data['thumbnail'];
+          if (thumb is Map && thumb['source'] != null) {
+            return thumb['source'].toString().trim();
+          }
+          return null;
+        }();
+        var extract = (data['extract'] ?? '').toString().trim();
+        if (extract.length > 400) {
+          extract = '${extract.substring(0, 400).trim()}…';
+        }
+        if (imageUrl != null && !imageUrl.startsWith('http')) {
+          imageUrl = null;
+        }
+        if (imageUrl != null || extract.isNotEmpty) {
+          return (
+            imageUrl: imageUrl,
+            extract: extract.isEmpty ? null : extract,
+          );
+        }
+      } catch (e) {
+        print('DEBUG: Wikipedia preview failed ($lang): $e');
+      }
+    }
+    return (imageUrl: null, extract: null);
+  }
 
   static Future<String?> _lookupPlacesHeroPhoto(String query) async {
     try {
@@ -2013,6 +2081,29 @@ class UrlMetadataService {
         lower.contains('google.it/search') ||
         lower.contains('google.com/url') ||
         lower.contains('google.it/url');
+  }
+
+  /// Ristorante / negozio: Maps oppure share della scheda locale (`source=sh/x/loc`).
+  /// Un film da Google Search è `source=sh/x/kp` e non deve usare Places.
+  static bool _isGoogleLocalPlaceUrl(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('maps.app.goo.gl') ||
+        lower.contains('goo.gl/maps') ||
+        lower.contains('maps.google.') ||
+        lower.contains('/maps/place/') ||
+        lower.contains('/maps/search/') ||
+        lower.contains('google.com/maps') ||
+        lower.contains('google.it/maps')) {
+      return true;
+    }
+    try {
+      final uri = Uri.parse(url);
+      final source = (uri.queryParameters['source'] ?? '').toLowerCase();
+      final utm = (uri.queryParameters['utm_source'] ?? '').toLowerCase();
+      return source.contains('/loc/') || utm.contains('sh/x/loc');
+    } catch (_) {
+      return false;
+    }
   }
 
   static bool isGenericImportTitle(String? title) {
