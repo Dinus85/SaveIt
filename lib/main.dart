@@ -229,6 +229,10 @@ void main() async {
   await FirebaseAnalytics.instance.setAnalyticsCollectionEnabled(true);
   unawaited(FirebaseAnalytics.instance.logAppOpen());
   AppNotificationService.registerBackgroundHandler();
+  AppNotificationService.focusIncomingShare =
+      SharedItemsPage.focusIncomingShare;
+  AppNotificationService.showSharedItemPrompt =
+      SharedItemsPage.showPendingSharedItemsPrompt;
 
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,

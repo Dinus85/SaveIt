@@ -23,12 +23,26 @@ class AppNotificationService {
       StreamController<DashboardNotificationPayload>.broadcast();
   static final List<DashboardNotificationPayload> _pendingOpenedPayloads =
       <DashboardNotificationPayload>[];
+  static final StreamController<SharedItemPushPayload>
+      _sharedItemOpenController =
+      StreamController<SharedItemPushPayload>.broadcast();
+  static final List<SharedItemPushPayload> _pendingSharedItemPayloads =
+      <SharedItemPushPayload>[];
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription<String>? _tokenRefreshSubscription;
   StreamSubscription<RemoteMessage>? _messageOpenedSubscription;
+  StreamSubscription<RemoteMessage>? _foregroundMessageSubscription;
   bool _messageOpenedHandlersReady = false;
+  bool _foregroundPresentationConfigured = false;
+
+  static void Function(String? shareId)? focusIncomingShare;
+  static Future<bool> Function(
+    BuildContext context, {
+    required bool isDarkTheme,
+    String? shareId,
+  })? showSharedItemPrompt;
 
   static void registerBackgroundHandler() {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -42,6 +56,17 @@ class AppNotificationService {
       _pendingOpenedPayloads,
     );
     _pendingOpenedPayloads.clear();
+    return pending;
+  }
+
+  Stream<SharedItemPushPayload> get sharedItemOpenedStream =>
+      _sharedItemOpenController.stream;
+
+  List<SharedItemPushPayload> takePendingSharedItemPayloads() {
+    final pending = List<SharedItemPushPayload>.from(
+      _pendingSharedItemPayloads,
+    );
+    _pendingSharedItemPayloads.clear();
     return pending;
   }
 
@@ -63,11 +88,21 @@ class AppNotificationService {
   void _registerMessageOpenedHandlers() {
     if (_messageOpenedHandlersReady) return;
     _messageOpenedHandlersReady = true;
+    unawaited(_configureForegroundPresentation());
 
     _messageOpenedSubscription =
         FirebaseMessaging.onMessageOpenedApp.listen((message) {
       debugPrint('Push opened app: ${message.data}');
       _handleNotificationPayload(message.data);
+    });
+
+    _foregroundMessageSubscription =
+        FirebaseMessaging.onMessage.listen((message) {
+      debugPrint('Push received in foreground: ${message.data}');
+      final type = (message.data['type'] ?? '').toString();
+      if (type == 'shared_item') {
+        _handleNotificationPayload(message.data);
+      }
     });
 
     unawaited(_messaging
@@ -87,9 +122,27 @@ class AppNotificationService {
     }));
   }
 
+  Future<void> _configureForegroundPresentation() async {
+    if (_foregroundPresentationConfigured) return;
+    _foregroundPresentationConfigured = true;
+    try {
+      await _messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } catch (e) {
+      debugPrint('Foreground notification presentation skipped: $e');
+    }
+  }
+
   void _handleNotificationPayload(Map<String, dynamic> data) {
     debugPrint('Handling notification payload: $data');
     final type = (data['type'] ?? '').toString();
+    if (type == 'shared_item') {
+      _emitSharedItemPayload(data);
+      return;
+    }
     if (type != 'dashboard_notification') return;
 
     final title = (data['title'] ??
@@ -114,6 +167,19 @@ class AppNotificationService {
       _pendingOpenedPayloads.add(payload);
     }
     _dashboardNotificationOpenController.add(payload);
+  }
+
+  void _emitSharedItemPayload(Map<String, dynamic> data) {
+    final payload = SharedItemPushPayload(
+      shareId: (data['shareId'] ?? '').toString().trim(),
+      senderName: (data['senderName'] ?? '').toString().trim(),
+      message: (data['message'] ?? '').toString().trim(),
+      itemType: (data['itemType'] ?? '').toString().trim(),
+    );
+    if (!_sharedItemOpenController.hasListener) {
+      _pendingSharedItemPayloads.add(payload);
+    }
+    _sharedItemOpenController.add(payload);
   }
 
   Future<void> _requestPermissionIfNeeded() async {
@@ -215,17 +281,21 @@ class AppNotificationService {
     _tokenRefreshSubscription = null;
     await _messageOpenedSubscription?.cancel();
     _messageOpenedSubscription = null;
+    await _foregroundMessageSubscription?.cancel();
+    _foregroundMessageSubscription = null;
     _messageOpenedHandlersReady = false;
   }
 }
 
 class AppNotificationListener extends StatefulWidget {
   final String userId;
+  final bool isDarkTheme;
   final Widget child;
 
   const AppNotificationListener({
     super.key,
     required this.userId,
+    required this.isDarkTheme,
     required this.child,
   });
 
@@ -237,6 +307,7 @@ class AppNotificationListener extends StatefulWidget {
 class _AppNotificationListenerState extends State<AppNotificationListener> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subscription;
   StreamSubscription<DashboardNotificationPayload>? _pushOpenSubscription;
+  StreamSubscription<SharedItemPushPayload>? _sharePushSubscription;
   final Set<String> _shownNotificationIds = <String>{};
   final Set<String> _shownCampaignIds = <String>{};
   bool _dialogShowing = false;
@@ -259,10 +330,16 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
 
   Future<void> _initialize() async {
     _pushOpenSubscription?.cancel();
+    _sharePushSubscription?.cancel();
     _pushOpenSubscription = AppNotificationService
         .instance.dashboardNotificationOpenedStream
         .listen(_handlePushOpenedPayload, onError: (Object error) {
       debugPrint('Push notification open stream failed: $error');
+    });
+    _sharePushSubscription = AppNotificationService
+        .instance.sharedItemOpenedStream
+        .listen(_handleSharedItemPush, onError: (Object error) {
+      debugPrint('Share push open stream failed: $error');
     });
     _subscription = AppNotificationService.instance
         .unreadNotificationsStream(widget.userId)
@@ -274,6 +351,11 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
     final pending = AppNotificationService.instance.takePendingOpenedPayloads();
     for (final payload in pending) {
       unawaited(_handlePushOpenedPayload(payload));
+    }
+    final pendingShares =
+        AppNotificationService.instance.takePendingSharedItemPayloads();
+    for (final payload in pendingShares) {
+      unawaited(_handleSharedItemPush(payload));
     }
   }
 
@@ -313,6 +395,22 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
     if (_shownNotificationIds.contains(doc.id)) return;
     _shownNotificationIds.add(doc.id);
     _showNotificationDialog(doc);
+  }
+
+  Future<void> _handleSharedItemPush(SharedItemPushPayload payload) async {
+    if (!mounted) return;
+    AppNotificationService.focusIncomingShare?.call(payload.shareId);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (!mounted) return;
+    try {
+      await AppNotificationService.showSharedItemPrompt?.call(
+        context,
+        isDarkTheme: widget.isDarkTheme,
+        shareId: payload.shareId,
+      );
+    } catch (e) {
+      debugPrint('Shared item push prompt failed: $e');
+    }
   }
 
   Future<void> _handlePushOpenedPayload(
@@ -417,6 +515,7 @@ class _AppNotificationListenerState extends State<AppNotificationListener> {
   void dispose() {
     _subscription?.cancel();
     _pushOpenSubscription?.cancel();
+    _sharePushSubscription?.cancel();
     super.dispose();
   }
 
@@ -433,5 +532,19 @@ class DashboardNotificationPayload {
     required this.title,
     required this.body,
     required this.campaignId,
+  });
+}
+
+class SharedItemPushPayload {
+  final String shareId;
+  final String senderName;
+  final String message;
+  final String itemType;
+
+  const SharedItemPushPayload({
+    required this.shareId,
+    required this.senderName,
+    required this.message,
+    required this.itemType,
   });
 }

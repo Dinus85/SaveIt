@@ -174,6 +174,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         // Nessuna migrazione necessaria, mostra app normale
         return AppNotificationListener(
           userId: user.id,
+          isDarkTheme: isDarkTheme,
           child: _CrossPromoNotificationGate(
             child: _buildSuccessTransition(user),
           ),

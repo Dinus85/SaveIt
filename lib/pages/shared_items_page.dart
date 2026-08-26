@@ -13,31 +13,79 @@ import 'package:savein/widgets/free_limit_dialog.dart';
 class SharedItemsPage extends StatefulWidget {
   final bool isDarkTheme;
   static final Set<String> _importsInProgress = <String>{};
+  static String? _focusShareId;
+  static bool _promptOpen = false;
 
   const SharedItemsPage({
     Key? key,
     required this.isDarkTheme,
   }) : super(key: key);
 
+  static void focusIncomingShare(String? shareId) {
+    final id = (shareId ?? '').trim();
+    if (id.isNotEmpty) {
+      _focusShareId = id;
+    }
+  }
+
+  static List<Map<String, dynamic>> _pendingSharedItems(
+    List<Map<String, dynamic>> items,
+  ) {
+    return items
+        .where((item) =>
+            !_importsInProgress.contains(item['id']?.toString() ?? ''))
+        .toList();
+  }
+
+  static Map<String, dynamic>? _itemById(
+    List<Map<String, dynamic>> items,
+    String shareId,
+  ) {
+    for (final item in items) {
+      if (item['id']?.toString() == shareId) return item;
+    }
+    return null;
+  }
+
   static Future<bool> showPendingSharedItemsPrompt(
     BuildContext context, {
     required bool isDarkTheme,
+    String? shareId,
   }) async {
+    focusIncomingShare(shareId);
+    if (_promptOpen) return false;
+    _promptOpen = true;
     try {
-      final items = await DataService.instance.getSharedItems();
-      final pendingItems = items
-          .where((item) =>
-              !_importsInProgress.contains(item['id']?.toString() ?? ''))
-          .toList();
-      if (!context.mounted || pendingItems.isEmpty) return false;
+      final wanted = (_focusShareId ?? '').trim();
+      _focusShareId = null;
+
+      var items = _pendingSharedItems(
+        await DataService.instance.getSharedItems(),
+      );
+      Map<String, dynamic>? target;
+      if (wanted.isNotEmpty) {
+        target = _itemById(items, wanted);
+        if (target == null) {
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+          if (!context.mounted) return false;
+          items = _pendingSharedItems(
+            await DataService.instance.getSharedItems(),
+          );
+          target = _itemById(items, wanted);
+        }
+      }
+      target ??= items.isEmpty ? null : items.first;
+      if (!context.mounted || target == null) return false;
       return await _showImportPrompt(
             context,
-            item: pendingItems.first,
+            item: target,
             isDarkTheme: isDarkTheme,
           ) ??
           false;
     } catch (_) {
       return false;
+    } finally {
+      _promptOpen = false;
     }
   }
 

@@ -5217,9 +5217,9 @@ exports.shareItemWithUser = onCall(
         );
       }
 
-      const ownerName = request.auth.token.name ||
-        request.auth.token.email ||
-        "Un utente";
+      const senderDoc = await db.collection("users").doc(request.auth.uid).get();
+      const senderData = senderDoc.exists ? (senderDoc.data() || {}) : {};
+      const ownerName = resolveShareSenderName(request.auth, senderData);
       const ownerEmail = (request.auth.token.email || "").toString();
       const recipientData = recipientDoc.data() || {};
       const resourceTitle = (
@@ -5261,7 +5261,7 @@ exports.shareItemWithUser = onCall(
         }
       }
 
-      await recipientDoc.ref.collection("shared_items").add({
+      const shareRef = await recipientDoc.ref.collection("shared_items").add({
         resourceId,
         type,
         ownerId: request.auth.uid,
@@ -5288,21 +5288,53 @@ exports.shareItemWithUser = onCall(
       });
 
       const itemLabel = type === "folder" ? "una cartella" : "un post";
-      const pushTitle = "Nuovo contenuto su SaveIn!";
-      const pushBody = message ||
-        `${ownerName} ti ha condiviso ${itemLabel}`;
+      const messagePreview = previewShareMessage(message);
+      const pushTitle = `${ownerName} ti ha inviato ${itemLabel}`;
+      const pushBody = messagePreview ||
+        resourceTitle ||
+        "Apri per salvare o rifiutare.";
       await sendSharePushToUser({
         userId: recipientId,
         title: pushTitle,
         body: pushBody,
         type,
+        shareId: shareRef.id,
+        senderName: ownerName,
+        message: messagePreview,
       });
 
       return {ok: true};
     }
 );
 
-async function sendSharePushToUser({userId, title, body, type}) {
+function resolveShareSenderName(auth, senderData) {
+  const profileName = (senderData?.name || "").toString().trim();
+  if (profileName) return profileName;
+  const username = (senderData?.username || "").toString().trim().replace(/^@/, "");
+  if (username) return username;
+  const tokenName = (auth?.token?.name || "").toString().trim();
+  if (tokenName) return tokenName;
+  const email = (auth?.token?.email || "").toString().trim();
+  if (email) return email;
+  return "Un utente";
+}
+
+function previewShareMessage(message) {
+  const text = (message || "").toString().trim();
+  if (!text) return "";
+  if (text.length <= 140) return text;
+  return `${text.slice(0, 137).trim()}...`;
+}
+
+async function sendSharePushToUser({
+  userId,
+  title,
+  body,
+  type,
+  shareId,
+  senderName,
+  message,
+}) {
   try {
     const tokensSnapshot = await db.collection("users")
         .doc(userId)
@@ -5322,12 +5354,20 @@ async function sendSharePushToUser({userId, title, body, type}) {
           priority: "high",
           notification: {clickAction: "FLUTTER_NOTIFICATION_CLICK"},
         },
+        apns: {
+          payload: {
+            aps: {sound: "default"},
+          },
+        },
         data: {
           type: "shared_item",
           route: "home",
-          title,
-          body,
-          itemType: type,
+          title: String(title || ""),
+          body: String(body || ""),
+          itemType: String(type || ""),
+          shareId: String(shareId || ""),
+          senderName: String(senderName || ""),
+          message: String(message || ""),
         },
       });
     }
