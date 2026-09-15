@@ -5,6 +5,7 @@ import 'package:savein/models/folder.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import '../services/folder_service.dart'; // Import per MockPost
 import '../data_service.dart'; // Import per contatti
+import '../models/shared_contact.dart';
 import 'folder_management.dart';
 
 // Helper class per i dialoghi dell'app
@@ -300,13 +301,84 @@ class DialogHelpers {
     );
   }
 
+  static Future<String?> _promptContactName(
+    BuildContext context, {
+    required bool isDarkTheme,
+    required String email,
+    String initialName = '',
+  }) {
+    final backgroundColor = isDarkTheme ? Colors.grey.shade900 : Colors.white;
+    final textColor = isDarkTheme ? Colors.white : Colors.black87;
+    final fieldColor =
+        isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade100;
+    final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
+    final controller = TextEditingController(text: initialName);
+
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: backgroundColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Nome del contatto',
+          style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              email,
+              style: TextStyle(color: hintColor, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              style: TextStyle(color: textColor),
+              decoration: InputDecoration(
+                hintText: 'Es. Marco',
+                hintStyle: TextStyle(color: hintColor),
+                filled: true,
+                fillColor: fieldColor,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Annulla', style: TextStyle(color: hintColor)),
+          ),
+          TextButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(dialogContext, name);
+            },
+            child: const Text(
+              'Salva',
+              style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Dialog per condividere un elemento (post o cartella)
   static void showShareItemDialog(
     BuildContext context,
     bool isDarkTheme,
     String type, // 'post' o 'folder'
     String title,
-    Future<void> Function(String email, String message) onShare, {
+    Future<void> Function(String email, String message, String contactName)
+        onShare, {
     String? systemShareContent,
     Future<String> Function()? systemShareContentBuilder,
     Future<bool> Function()? canStartShare,
@@ -320,10 +392,11 @@ class DialogHelpers {
     final hintColor = isDarkTheme ? Colors.grey.shade400 : Colors.grey.shade600;
 
     final TextEditingController controller = TextEditingController();
+    final TextEditingController nameController = TextEditingController();
     final TextEditingController messageController = TextEditingController();
     bool isLoading = false;
     String? error;
-    List<String>? contacts;
+    List<SharedContact>? contacts;
     bool showContacts = false;
 
     showDialog(
@@ -494,6 +567,23 @@ class DialogHelpers {
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: nameController,
+                style: TextStyle(color: textColor),
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  hintText: 'Nome del contatto (es. Marco)',
+                  hintStyle: TextStyle(color: hintColor),
+                  filled: true,
+                  fillColor: fieldColor,
+                  prefixIcon: Icon(Icons.person_outline, color: hintColor),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: messageController,
@@ -525,7 +615,7 @@ class DialogHelpers {
                       ? Padding(
                           padding: const EdgeInsets.all(16.0),
                           child: Text(
-                            'Nessun contatto salvato',
+                            'Nessun contatto salvato. Invia e aggiungi un nome per ritrovarlo.',
                             style: TextStyle(color: hintColor, fontSize: 13),
                           ),
                         )
@@ -537,16 +627,71 @@ class DialogHelpers {
                             color: hintColor.withOpacity(0.2),
                           ),
                           itemBuilder: (context, index) {
-                            final email = contacts![index];
+                            final contact = contacts![index];
                             return ListTile(
                               visualDensity: VisualDensity.compact,
+                              leading: CircleAvatar(
+                                radius: 16,
+                                backgroundColor: Colors.blue.withOpacity(0.15),
+                                child: Text(
+                                  contact.displayName.isNotEmpty
+                                      ? contact.displayName[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(
+                                    color: Colors.blue,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
                               title: Text(
-                                email,
+                                contact.displayName,
                                 style:
                                     TextStyle(color: textColor, fontSize: 14),
                               ),
+                              subtitle: contact.subtitle.isEmpty
+                                  ? null
+                                  : Text(
+                                      contact.subtitle,
+                                      style: TextStyle(
+                                        color: hintColor,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                              trailing: IconButton(
+                                icon: Icon(
+                                  Icons.edit_outlined,
+                                  size: 18,
+                                  color: hintColor,
+                                ),
+                                tooltip: 'Cambia nome',
+                                onPressed: () async {
+                                  final renamed =
+                                      await _promptContactName(
+                                    context,
+                                    isDarkTheme: isDarkTheme,
+                                    email: contact.email,
+                                    initialName: contact.name,
+                                  );
+                                  if (renamed == null) return;
+                                  await DataService.instance.saveSharedContact(
+                                    contact.email,
+                                    name: renamed,
+                                  );
+                                  setDialogState(() {
+                                    contacts![index] = SharedContact(
+                                      email: contact.email,
+                                      name: renamed,
+                                    );
+                                    if (controller.text.trim().toLowerCase() ==
+                                        contact.email) {
+                                      nameController.text = renamed;
+                                    }
+                                  });
+                                },
+                              ),
                               onTap: () {
-                                controller.text = email;
+                                controller.text = contact.email;
+                                nameController.text = contact.name;
                                 setDialogState(() => showContacts = false);
                               },
                             );
@@ -586,7 +731,11 @@ class DialogHelpers {
                       });
 
                       try {
-                        await onShare(email, messageController.text.trim());
+                        await onShare(
+                          email,
+                          messageController.text.trim(),
+                          nameController.text.trim(),
+                        );
                         if (context.mounted) {
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(

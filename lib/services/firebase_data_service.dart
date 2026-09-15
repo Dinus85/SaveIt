@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:savein/models.dart';
+import 'package:savein/models/shared_contact.dart';
 
 /// Exception personalizzata per errori Firebase
 class FirebaseDataException implements Exception {
@@ -246,16 +247,26 @@ class FirebaseDataService {
   // OPERAZIONI CONTACTS (PER CONDIVISIONE)
   // ============================================================================
 
-  /// Salva un'email nei contatti dell'utente
-  Future<void> saveContact(String email) async {
+  /// Salva un'email nei contatti dell'utente, con nome opzionale.
+  Future<void> saveContact(String email, {String? name}) async {
     try {
       final normalizedEmail = email.trim().toLowerCase();
       if (normalizedEmail.isEmpty) return;
 
-      await _contactsCollection.doc(normalizedEmail).set({
+      final data = <String, dynamic>{
         'email': normalizedEmail,
         'lastSharedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      };
+      final trimmedName = name?.trim() ?? '';
+      if (trimmedName.isNotEmpty) {
+        data['name'] = trimmedName.length > 80
+            ? trimmedName.substring(0, 80).trim()
+            : trimmedName;
+      }
+
+      await _contactsCollection
+          .doc(normalizedEmail)
+          .set(data, SetOptions(merge: true));
 
       if (kDebugMode) print('DEBUG: Contatto $normalizedEmail salvato');
     } catch (e) {
@@ -264,14 +275,20 @@ class FirebaseDataService {
   }
 
   /// Ottiene la lista dei contatti salvati ordinati per data decrescente
-  Future<List<String>> getContacts() async {
+  Future<List<SharedContact>> getContacts() async {
     try {
       final snapshot = await _contactsCollection
           .orderBy('lastSharedAt', descending: true)
           .limit(50)
           .get();
 
-      return snapshot.docs.map((doc) => doc.id).toList();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return SharedContact(
+          email: (data['email'] ?? doc.id).toString().trim().toLowerCase(),
+          name: (data['name'] ?? '').toString().trim(),
+        );
+      }).toList();
     } catch (e) {
       if (kDebugMode) print('ERRORE getContacts: $e');
       return [];

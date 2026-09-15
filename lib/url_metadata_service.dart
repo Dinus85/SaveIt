@@ -1341,12 +1341,35 @@ class UrlMetadataService {
     }
 
     const supportedPrefixes = {'p', 'reel', 'reels', 'tv'};
-    final prefix = normalizedSegments.first.toLowerCase();
-    if (!supportedPrefixes.contains(prefix)) {
+    var start = 0;
+    if (normalizedSegments.first.toLowerCase() == 'share' &&
+        normalizedSegments.length >= 3) {
+      start = 1;
+    }
+
+    String? prefix;
+    String? shortcode;
+    if (start < normalizedSegments.length &&
+        supportedPrefixes.contains(normalizedSegments[start].toLowerCase()) &&
+        start + 1 < normalizedSegments.length) {
+      prefix = normalizedSegments[start].toLowerCase();
+      shortcode = normalizedSegments[start + 1];
+    } else if (start + 2 < normalizedSegments.length &&
+        supportedPrefixes
+            .contains(normalizedSegments[start + 1].toLowerCase())) {
+      prefix = normalizedSegments[start + 1].toLowerCase();
+      shortcode = normalizedSegments[start + 2];
+    }
+
+    if (prefix == null || shortcode == null) {
+      return null;
+    }
+    if (shortcode.toLowerCase() == 'embed') {
       return null;
     }
 
-    return normalizedSegments.take(2).toList();
+    final kind = prefix == 'reels' ? 'reel' : prefix;
+    return <String>[kind, shortcode];
   }
 
   static String? _extractInstagramEmbedImage(

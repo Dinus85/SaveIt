@@ -628,12 +628,13 @@ class MockFolderCard extends StatelessWidget {
         isDarkTheme,
         'folder',
         folder.name,
-        (email, message) async {
+        (email, message, contactName) async {
           final folderToShare = await resolveFolderToShare();
           await DataService.instance.shareFolder(
             folderToShare,
             email,
             message: message,
+            contactName: contactName,
           );
         },
         canStartShare: () async {

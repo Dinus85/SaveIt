@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:savein/data_service.dart';
+import 'package:savein/models/shared_contact.dart';
 import 'package:savein/services/auth_service.dart';
 
 class BlockedSendersDialog extends StatefulWidget {
@@ -56,7 +57,7 @@ class _BlockedSendersDialogState extends State<BlockedSendersDialog> {
       if (!mounted) return;
 
       final blocked = results[0] as List<Map<String, dynamic>>;
-      final contacts = results[1] as List<String>;
+      final contacts = results[1] as List<SharedContact>;
       final sharedItems = results[2] as List<Map<String, dynamic>>;
       final me = AuthService().currentUser;
       final myId = me?.id ?? '';
@@ -110,8 +111,8 @@ class _BlockedSendersDialogState extends State<BlockedSendersDialog> {
           name: item['ownerName']?.toString() ?? '',
         );
       }
-      for (final email in contacts) {
-        addKnown(id: '', email: email, name: '');
+      for (final contact in contacts) {
+        addKnown(id: '', email: contact.email, name: contact.name);
       }
 
       setState(() {

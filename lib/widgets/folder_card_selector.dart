@@ -49,6 +49,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
   // 🔥 FIX: Usa il percorso completo come chiave per supportare cartelle con lo stesso nome in posizioni diverse
   Map<String, String> _temporaryFolderPaths =
       {}; // Key: fullPath (es: "Home › A › B"), Value: parentPath (es: "Home › A")
+  final ScrollController _folderGridController = ScrollController();
 
   late Color _mainBackgroundColor;
   late Color _textColor;
@@ -236,6 +237,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         _searchController.clear();
         _isSearching = false;
       });
+      _resetFolderGridScroll();
       return;
     }
 
@@ -281,6 +283,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         _searchController.clear();
         _isSearching = false;
       });
+      _resetFolderGridScroll();
     } catch (e) {
       final fallbackPath = _pathSegmentsFor(folder);
       final newPath = fallbackPath.isNotEmpty
@@ -295,7 +298,15 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
         _searchController.clear();
         _isSearching = false;
       });
+      _resetFolderGridScroll();
     }
+  }
+
+  void _resetFolderGridScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_folderGridController.hasClients) return;
+      _folderGridController.jumpTo(0);
+    });
   }
 
   List<MockFolder> _combineChildrenWithTemporary(
@@ -745,6 +756,8 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
       child: _currentFolders.isEmpty
           ? _buildEmptyState()
           : GridView.builder(
+              key: ValueKey('folder-grid-${_currentPath.join('/')}'),
+              controller: _folderGridController,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 crossAxisSpacing: 12,
@@ -1811,6 +1824,7 @@ class _FolderCardSelectorState extends State<FolderCardSelector> {
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _folderGridController.dispose();
     super.dispose();
   }
 }

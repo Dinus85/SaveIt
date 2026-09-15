@@ -3180,7 +3180,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           {
             'id': 'manual_tags',
             'name': 'Tag manuali',
-            'desc': 'Possibilità di aggiungere hashtag personalizzati ai post.'
+            'desc':
+                'Possibilità di aggiungere e rimuovere hashtag personalizzati sui post, anche dopo il salvataggio.'
           },
           {
             'id': 'share_folder',

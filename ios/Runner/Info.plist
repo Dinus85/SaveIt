@@ -64,6 +64,13 @@
 	<array>
 		<string>https</string>
 		<string>http</string>
+		<string>instagram</string>
+		<string>tiktok</string>
+		<string>snssdk1233</string>
+		<string>snssdk1180</string>
+		<string>musically</string>
+		<string>vnd.youtube</string>
+		<string>youtube</string>
 	</array>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Usiamo l'identificatore pubblicitario solo per mostrare annunci più pertinenti. Puoi rifiutare e continuare a usare l'app.</string>

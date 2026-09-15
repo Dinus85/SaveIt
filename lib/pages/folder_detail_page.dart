@@ -26,6 +26,7 @@ import 'package:savein/widgets/custom_bottom_nav.dart';
 import 'package:savein/data_service.dart';
 import 'package:savein/widgets/reminder_dialog.dart';
 import 'package:savein/widgets/banner_ad_widget.dart';
+import 'package:savein/widgets/post_puzzle_style.dart';
 import 'package:savein/services/plan_limits_service.dart';
 
 // Pagina dettaglio cartella CON APERTURA REALE DEI POST E SELEZIONE MULTIPLA
@@ -1067,7 +1068,9 @@ class _FolderDetailPageState extends State<FolderDetailPage>
 
           if (hasPosts)
             SliverPadding(
-              padding: EdgeInsets.zero,
+              padding: _isPinterestView
+                  ? const EdgeInsets.fromLTRB(10, 8, 10, 8)
+                  : EdgeInsets.zero,
               sliver: MultiSelectPostManager(
                 scrollable: false,
                 asSliver: true,
@@ -1088,6 +1091,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                     onTap: onTap,
                     onLongPress: onLongPress,
                     margin: _isPinterestView ? EdgeInsets.zero : null,
+                    puzzleStyle: _isPinterestView,
                     child: _isPinterestView
                         ? _buildPinterestPostCard(post, themeColors)
                         : _buildPostCard(post, themeColors),
@@ -1272,11 +1276,9 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                 Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    if (_accessService.canManageManualTags)
-                      GestureDetector(
-                        onTap: () =>
-                            _showEditHashtagsDialog(post, themeColors),
-                        child: Container(
+                    GestureDetector(
+                      onTap: () => _showEditHashtagsDialog(post, themeColors),
+                      child: Container(
                           width: 28,
                           height: 28,
                           decoration: BoxDecoration(
@@ -1433,38 +1435,48 @@ class _FolderDetailPageState extends State<FolderDetailPage>
     return buildCard();
   }
 
-  // 🆕 NUOVO: Card post in stile Pinterest
+  // Card post stile ricette SmartChef: tilt e angoli diversi per ogni post.
   Widget _buildPinterestPostCard(MockPost post, ThemeColors themeColors) {
     final highlightPost = _showReminderHighlight &&
         widget.highlightPostId != null &&
         widget.highlightPostId == post.id;
+    final style = PostPuzzleStyle.forId(post.id);
 
     Widget buildCard({double? pulseValue}) {
       final pulse = pulseValue ?? 0.0;
-      final BoxDecoration baseDecoration =
-          ThemeHelpers.getCardDecoration(widget.isDarkTheme);
-      final BoxDecoration decoration = highlightPost
-          ? baseDecoration.copyWith(
-              color: Colors.orange.withOpacity(0.18 + pulse * 0.22),
-              border: Border.all(
-                color: Colors.orange.withOpacity(0.7 + pulse * 0.3),
-                width: 2.5 + pulse * 1.5,
-              ),
-            )
-          : baseDecoration;
+      final cardColor = highlightPost
+          ? Colors.orange.withOpacity(0.18 + pulse * 0.22)
+          : (widget.isDarkTheme ? const Color(0xFF2A2A2A) : Colors.white);
+      final borderColor = highlightPost
+          ? Colors.orange.withOpacity(0.7 + pulse * 0.3)
+          : Colors.black;
+      final borderWidth = highlightPost ? 2.2 + pulse * 1.2 : 1.1;
 
-      return Container(
-        key: highlightPost ? _highlightedPostKey : null,
-        decoration: decoration,
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Immagine (Pinterest style: occupa tutta la larghezza)
+      return Transform.rotate(
+        angle: style.tilt,
+        child: Container(
+          key: highlightPost ? _highlightedPostKey : null,
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: style.radius,
+            border: Border.all(color: borderColor, width: borderWidth),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 7,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Stack(
               children: [
                 AspectRatio(
-                  aspectRatio: 1.0, // Rapporto fisso per ora, o dinamico se possibile
+                  aspectRatio: style.imageAspect,
                   child: _buildPostImage(post, themeColors, isPinterest: true),
                 ),
                 // Bottoni sopra l'immagine in alto a destra
@@ -1473,6 +1485,12 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                   right: 8,
                   child: Row(
                     children: [
+                      _buildPinterestSmallAction(
+                        icon: Icons.tag,
+                        onTap: () => _showEditHashtagsDialog(post, themeColors),
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 4),
                       _buildPinterestSmallAction(
                         icon: Icons.share,
                         onTap: () => _sharePost(post),
@@ -1582,7 +1600,8 @@ class _FolderDetailPageState extends State<FolderDetailPage>
             ),
           ],
         ),
-      );
+      ),
+    );
     }
 
     if (highlightPost) {
@@ -1640,10 +1659,14 @@ class _FolderDetailPageState extends State<FolderDetailPage>
   }
 
   // ✅ DIALOG SENZA PULSANTI: Salvataggio immediato e fix overflow
-  void _showEditHashtagsDialog(MockPost post, ThemeColors themeColors) {
-    if (!_accessService.canManageManualTags) {
-      return;
-    }
+  Future<void> _showEditHashtagsDialog(
+      MockPost post, ThemeColors themeColors) async {
+    final allowed = await _accessService.guardFeatureUse(
+      context,
+      'manual_tags',
+      'Tag',
+    );
+    if (!allowed || !mounted) return;
 
     final TextEditingController hashtagController = TextEditingController();
     List<String> currentTags =
@@ -2808,6 +2831,16 @@ class _FolderDetailPageState extends State<FolderDetailPage>
             ),
 
             _buildActionOption(
+              Icons.tag,
+              'Modifica tag',
+              Colors.teal,
+              () {
+                Navigator.pop(context);
+                _showEditHashtagsDialog(post, themeColors);
+              },
+            ),
+
+            _buildActionOption(
               Icons.drive_file_move_outline,
               'Sposta Post',
               Colors.blue,
@@ -3021,13 +3054,14 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       widget.isDarkTheme,
       'post',
       post.title,
-      (email, message) async {
+      (email, message, contactName) async {
         final realPosts = await DataService.instance.getPosts();
         final postToShare = realPosts.firstWhere((p) => p.id == post.id);
         await DataService.instance.sharePost(
           postToShare,
           email,
           message: message,
+          contactName: contactName,
         );
       },
       canStartShare: () async {

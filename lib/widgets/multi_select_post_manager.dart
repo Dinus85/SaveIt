@@ -208,8 +208,8 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
           crossAxisCount:
               (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount)
                   .crossAxisCount,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
           childCount: _visualItemCount(widget.posts.length, bannerEveryN),
           itemBuilder: (context, index) {
             final postIndex = _postIndexForVisual(index, bannerEveryN);
@@ -247,8 +247,8 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
             .crossAxisCount;
     return SliverMasonryGrid.count(
       crossAxisCount: crossAxisCount,
-      mainAxisSpacing: 12,
-      crossAxisSpacing: 12,
+      mainAxisSpacing: 16,
+      crossAxisSpacing: 16,
       itemBuilder: (context, index) => _buildPostAt(startIndex + index),
       childCount: posts.length,
     );
@@ -286,8 +286,8 @@ class _MultiSelectPostManagerState extends State<MultiSelectPostManager> {
         crossAxisCount:
             (widget.gridDelegate as SliverSimpleGridDelegateWithFixedCrossAxisCount)
                 .crossAxisCount,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
+        mainAxisSpacing: 16,
+        crossAxisSpacing: 16,
         itemCount: widget.posts.length,
         shrinkWrap: !widget.scrollable,
         physics: widget.scrollable ? null : const NeverScrollableScrollPhysics(),
@@ -736,6 +736,7 @@ class SelectablePostTile extends StatelessWidget {
   final VoidCallback onLongPress;
   final Widget child;
   final EdgeInsets? margin; // 🆕 NUOVO
+  final bool puzzleStyle;
 
   const SelectablePostTile({
     Key? key,
@@ -746,10 +747,42 @@ class SelectablePostTile extends StatelessWidget {
     required this.onLongPress,
     required this.child,
     this.margin, // 🆕 NUOVO
+    this.puzzleStyle = false,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    if (puzzleStyle) {
+      return GestureDetector(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Stack(
+          children: [
+            child,
+            if (isSelected)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: Colors.blue,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.check,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,

@@ -422,8 +422,8 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.14+116`** (ago 2026). Include push tap su post/cartella inviati da un utente, sblocco mittenti da Account, import ogni 5 + interstitial di sessione anche da share, fail-open se inventario ads vuoto, testi intuitivi per profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT. Import Google: foto Places per ristoranti/luoghi; Wikipedia per le altre schede Google; social e siti web invariati.
-- **App Store iOS (26/08/2026)**: versione **1.1.13** è **chiusa** (Codemagic 115 rifiutato: Apple 90186/90062). Prossima versione store: **1.1.14** (build **116**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13 in App Store Connect.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.15+117`** (15/09/2026). Tag sui post salvati (puzzle + menu) e apertura social sul post cliccato (`SocialDeepLinkOpener`). Include anche push tap su post/cartella, sblocco mittenti, import ogni 5 + interstitial di sessione da share, fail-open ads, profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT. Import Google: foto Places per luoghi; Wikipedia per altre schede Google; social e siti invariati.
+- **App Store iOS (15/09/2026)**: versione **1.1.13** è **chiusa**. Versione store da creare: **1.1.15** (build **117**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect se 1.1.14 è già chiusa o non va usata.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1156,7 +1156,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.14+116`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa, errore 90186/90062): crea versione **1.1.14** e collega la build **116**.
+- Versione app corrente (repo): **`1.1.15+117`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **117**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2013,6 +2013,7 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 ### Build `1.1.5+79` — Vista Pinterest per i Post (03/08/2026)
 
 - **Vista Pinterest**: aggiunta la possibilità per l'utente di scegliere tra la classica vista a elenco e una vista a griglia (Pinterest-style) per i post all'interno delle cartelle.
+- **Card puzzle (set 2026)**: in griglia i post sono come le ricette salvate SmartChef (angoli irregolari, altezza immagine variabile) e leggermente inclinati in diagonale in modo stabile per `post.id` (`PostPuzzleStyle`). Il picker cartelle all'import riparte sempre dall'alto quando si apre una cartella.
 - **Dati post**: la vista Pinterest non è solo una galleria di immagini, ma mostra sotto ogni post i relativi dati: titolo, dominio, descrizione (se presente), data di salvataggio, breadcrumb della cartella e l'icona del reminder.
 - **Persistenza**: la scelta della modalità di visualizzazione viene salvata localmente tramite `SharedPreferences` e applicata automaticamente a tutte le cartelle.
 - **UI/UX**: aggiunto pulsante di switch (icona lista/griglia) nell'header della cartella (vicino al tasto logout). La griglia utilizza `SliverMasonryGrid` per un layout fluido.
@@ -2021,8 +2022,9 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 ### Build `1.1.5+78` — Contatti salvati per condivisione (03/08/2026)
 
 - **Feature contatti**: quando l'utente condivide un post o una cartella tramite email, l'indirizzo email viene salvato automaticamente nei "Contatti".
+- **Nome contatto (set 2026)**: nel dialog di invio si può scrivere un nome (es. Marco) insieme all'email. La rubrica mostra il nome, non l'email; l'email resta in piccolo sotto. Si può rinominare dalla lista (icona matita). Campo Firestore `name` su `users/{uid}/contacts/{email}` (merge, non cancella il nome se si reinvia senza scriverlo).
 - **UI Condivisione**: aggiunto pulsante (icona rubrica) nel popup di condivisione per visualizzare e selezionare velocemente le email usate in passato.
-- **DataService**: nuovi metodi `getSharedContacts()` e `saveSharedContact(email)`.
+- **DataService**: metodi `getSharedContacts()` (lista `SharedContact`) e `saveSharedContact(email, {name})`.
 - **Firebase**: collezione `users/{uid}/contacts/{email}` con campo `lastSharedAt` per ordinamento (mostra gli ultimi 50 contatti).
 
 ### Build `1.1.5+77` — nuovo train App Store (02/08/2026)
@@ -2072,6 +2074,14 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.15+117` — tag sui post salvati + apertura social sul post cliccato (15/09/2026)
+
+- Vista puzzle (default) e menu `...` del post: si possono **aggiungere e togliere tag** anche dopo il salvataggio, non solo in import. Dialog `Modifica Hashtags` con salvataggio immediato (`updatePostTags`). Piano Free: resta il gate dashboard `manual_tags`.
+- Tap su un post: non usa più `LaunchMode.platformDefault` sull'URL grezzo (Instagram/TikTok a freddo aprivano il primo reel). `SocialDeepLinkOpener` normalizza il link (redirect `vm.tiktok.com` / `instagram.com/share/`), preferisce lo scheme nativo (`instagram://media?id=`, `tiktok://aweme/detail/`) e `LaunchMode.externalNonBrowserApplication` sul path canonico `/p/{shortcode}/`.
+- Android `<queries>` e iOS `LSApplicationQueriesSchemes` per Instagram/TikTok/YouTube.
+- `pubspec.yaml` **1.1.15+117** (versione App Store **1.1.15**, build **117**).
+- **Azione**: Codemagic → TestFlight/Play **117**; in App Store Connect **crea versione 1.1.15** e collega la build **117**. Non toccare 1.1.13.
 
 ### Build `1.1.14+116` — nuova versione store dopo 1.1.13 chiusa (26/08/2026)
 

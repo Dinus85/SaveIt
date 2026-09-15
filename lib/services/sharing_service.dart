@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
 import 'package:receive_intent/receive_intent.dart' as receive_intent;
 import 'package:savein/models.dart';
 import 'package:savein/data_service.dart';
@@ -13,6 +12,7 @@ import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/interstitial_ad_service.dart';
 import 'package:savein/widgets/folder_card_selector.dart';
 import 'package:savein/pages/folder_detail_page.dart';
+import 'package:savein/services/social_deep_link_opener.dart';
 
 class SharedContent {
   final String url;
@@ -580,15 +580,9 @@ class SharingService {
       }
       if (!context.mounted) return;
 
-      final Uri uri = Uri.parse(url);
-
       print('DEBUG: Tentativo apertura URL: $url');
 
-      // ✅ Prova direttamente ad aprire - Android gestirà l'app corretta
-      await launchUrl(
-        uri,
-        mode: LaunchMode.platformDefault,
-      );
+      await SocialDeepLinkOpener.open(url);
 
       print('DEBUG: URL aperto con successo');
 

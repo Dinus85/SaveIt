@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:savein/models.dart';
+import 'package:savein/models/shared_contact.dart';
 import 'package:savein/services/firebase_data_service.dart';
 import 'package:savein/services/auth_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
@@ -1759,6 +1760,7 @@ class DataService {
     SavedPost post,
     String recipientEmail, {
     String message = '',
+    String contactName = '',
   }) async {
     return ScreenAwakeService.keepAwake(() async {
       await _ensureShareFeatureEnabled('share_post', 'Condivisione Post');
@@ -1792,8 +1794,7 @@ class DataService {
           'isShared': postToShare.isShared,
         },
       );
-      // 🔥 Salva il contatto dopo la condivisione riuscita
-      await saveSharedContact(recipientEmail);
+      await saveSharedContact(recipientEmail, name: contactName);
 
       await PlanLimitsService.recordFeatureSuccess('share_post');
     });
@@ -1804,6 +1805,7 @@ class DataService {
     Folder folder,
     String recipientEmail, {
     String message = '',
+    String contactName = '',
   }) async {
     return ScreenAwakeService.keepAwake(() async {
       await _ensureShareFeatureEnabled('share_folder', 'Condivisione Cartella');
@@ -1841,8 +1843,8 @@ class DataService {
     return await _firebaseService.getSharedItems();
   }
 
-  /// Ottiene la lista delle email con cui l'utente ha già condiviso
-  Future<List<String>> getSharedContacts() async {
+  /// Ottiene i contatti con cui l'utente ha già condiviso
+  Future<List<SharedContact>> getSharedContacts() async {
     try {
       return await _firebaseService.getContacts();
     } catch (e) {
@@ -1851,10 +1853,10 @@ class DataService {
     }
   }
 
-  /// Salva un contatto email
-  Future<void> saveSharedContact(String email) async {
+  /// Salva un contatto email, con nome opzionale per la rubrica.
+  Future<void> saveSharedContact(String email, {String? name}) async {
     try {
-      await _firebaseService.saveContact(email);
+      await _firebaseService.saveContact(email, name: name);
     } catch (e) {
       if (kDebugMode) print('DEBUG: Errore saveSharedContact: $e');
     }
