@@ -17,19 +17,51 @@ class SocialDeepLinkOpener {
     final url = _ensureHttp(rawUrl.trim());
     if (url.isEmpty) return;
 
-    final candidates = await _buildCandidates(url);
-    for (final uri in candidates) {
-      if (await _tryLaunch(uri, LaunchMode.externalNonBrowserApplication)) {
-        return;
-      }
+    var working = _unwrapRedirector(url);
+    if (_needsResolve(working)) {
+      working = await _followRedirects(working);
     }
+
+    final instagram = _parseInstagram(working);
+    if (instagram != null) {
+      await _openInstagram(instagram);
+      return;
+    }
+
+    final candidates = await _buildCandidates(working, originalUrl: url);
     for (final uri in candidates) {
       if (await _tryLaunch(uri, LaunchMode.externalApplication)) {
         return;
       }
     }
+    for (final uri in candidates) {
+      if (await _tryLaunch(uri, LaunchMode.externalNonBrowserApplication)) {
+        return;
+      }
+    }
 
     await launchUrl(Uri.parse(url), mode: LaunchMode.platformDefault);
+  }
+
+  /// Instagram: niente `instagram://media?id=` (l'ID dal shortcode è spesso
+  /// sbagliato → "contenuto non più disponibile") e niente `/p/` sui reel
+  /// (Instagram web/app rispondono che il post non esiste e finisce nel browser).
+  static Future<void> _openInstagram(_InstagramTarget target) async {
+    final path = switch (target.kind) {
+      'reel' || 'reels' => 'reel',
+      'tv' => 'tv',
+      _ => 'p',
+    };
+    final canonical = Uri.parse(
+      'https://www.instagram.com/$path/${target.shortcode}/',
+    );
+    if (await _tryLaunch(canonical, LaunchMode.externalApplication)) {
+      return;
+    }
+    if (await _tryLaunch(canonical, LaunchMode.platformDefault)) {
+      return;
+    }
+    await launchUrl(canonical, mode: LaunchMode.externalApplication);
   }
 
   static Future<bool> _tryLaunch(Uri uri, LaunchMode mode) async {
@@ -40,12 +72,10 @@ class SocialDeepLinkOpener {
     }
   }
 
-  static Future<List<Uri>> _buildCandidates(String url) async {
-    var working = _unwrapRedirector(url);
-    if (_needsResolve(working)) {
-      working = await _followRedirects(working);
-    }
-
+  static Future<List<Uri>> _buildCandidates(
+    String working, {
+    required String originalUrl,
+  }) async {
     final uris = <Uri>[];
     void add(Uri? uri) {
       if (uri == null) return;
@@ -53,27 +83,6 @@ class SocialDeepLinkOpener {
         return;
       }
       uris.add(uri);
-    }
-
-    final instagram = _parseInstagram(working);
-    if (instagram != null) {
-      if (!kIsWeb &&
-          instagram.shortcode.length >= 8 &&
-          instagram.shortcode.length <= 15) {
-        final mediaId = _instagramShortcodeToMediaId(instagram.shortcode);
-        if (mediaId != null) {
-          add(Uri.parse('instagram://media?id=$mediaId'));
-        }
-        if (instagram.isReel) {
-          add(Uri.parse('instagram://reel?id=${instagram.shortcode}'));
-        }
-      }
-      // /p/ apre il media anche per i reel; /reel/ a freddo spesso va al Reels tab.
-      add(Uri.parse('https://www.instagram.com/p/${instagram.shortcode}/'));
-      if (instagram.isReel) {
-        add(Uri.parse(
-            'https://www.instagram.com/reel/${instagram.shortcode}/'));
-      }
     }
 
     final tiktokVideoId = _parseTikTokVideoId(working);
@@ -95,7 +104,7 @@ class SocialDeepLinkOpener {
     }
 
     add(_stripTracking(working));
-    add(Uri.parse(_ensureHttp(url)));
+    add(Uri.parse(_ensureHttp(originalUrl)));
     return uris;
   }
 
@@ -204,26 +213,11 @@ class SocialDeepLinkOpener {
 
       return _InstagramTarget(
         shortcode: shortcode,
-        isReel: kind == 'reel' || kind == 'reels',
+        kind: kind,
       );
     } catch (_) {
       return null;
     }
-  }
-
-  /// Instagram shortcode → media id numerico per `instagram://media?id=`.
-  static String? _instagramShortcodeToMediaId(String shortcode) {
-    const alphabet =
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-    var id = BigInt.zero;
-    final base = BigInt.from(64);
-    for (final unit in shortcode.codeUnits) {
-      final index = alphabet.indexOf(String.fromCharCode(unit));
-      if (index < 0) return null;
-      id = id * base + BigInt.from(index);
-    }
-    if (id == BigInt.zero) return null;
-    return id.toString();
   }
 
   static String? _parseTikTokVideoId(String url) {
@@ -293,10 +287,10 @@ class SocialDeepLinkOpener {
 
 class _InstagramTarget {
   final String shortcode;
-  final bool isReel;
+  final String kind;
 
   const _InstagramTarget({
     required this.shortcode,
-    required this.isReel,
+    required this.kind,
   });
 }

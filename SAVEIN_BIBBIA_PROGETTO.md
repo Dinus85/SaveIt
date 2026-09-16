@@ -422,8 +422,8 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.15+117`** (15/09/2026). Tag sui post salvati (puzzle + menu) e apertura social sul post cliccato (`SocialDeepLinkOpener`). Include anche push tap su post/cartella, sblocco mittenti, import ogni 5 + interstitial di sessione da share, fail-open ads, profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT. Import Google: foto Places per luoghi; Wikipedia per altre schede Google; social e siti invariati.
-- **App Store iOS (15/09/2026)**: versione **1.1.13** è **chiusa**. Versione store da creare: **1.1.15** (build **117**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect se 1.1.14 è già chiusa o non va usata.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.15+118`** (16/09/2026). Tag sui post salvati (puzzle + menu) e apertura social sul post cliccato. Instagram apre `/reel/` o `/p/` nell'app, senza `instagram://media?id=` inventato. Include anche push tap su post/cartella, sblocco mittenti, import ogni 5 + interstitial di sessione da share, fail-open ads, profondità cartelle, pin native, mediation AppLovin/Meta, UMP + ATT. Import Google: foto Places per luoghi; Wikipedia per altre schede Google; social e siti invariati.
+- **App Store iOS (15/09/2026)**: versione **1.1.13** è **chiusa**. Versione store da creare: **1.1.15** (build **118**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect se 1.1.14 è già chiusa o non va usata.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -1156,7 +1156,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.15+117`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **117**.
+- Versione app corrente (repo): **`1.1.15+118`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **118**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2075,10 +2075,17 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.15+118` — Instagram apre il post nell'app, non "non disponibile" (16/09/2026)
+
+- Il tap su un reel/post Instagram non usa più `instagram://media?id=` calcolato dallo shortcode (ID sbagliato → "contenuto non più disponibile") né riscrive i reel come `/p/` (Instagram lo tratta come post inesistente e spesso apre il browser).
+- Apre `https://www.instagram.com/reel|p|tv/{shortcode}/` con `LaunchMode.externalApplication` così va all'app Instagram. TikTok/YouTube invariati.
+- `pubspec.yaml` **1.1.15+118**.
+- **Azione**: Codemagic → TestFlight/Play **118**; collega alla versione App Store **1.1.15**.
+
 ### Build `1.1.15+117` — tag sui post salvati + apertura social sul post cliccato (15/09/2026)
 
 - Vista puzzle (default) e menu `...` del post: si possono **aggiungere e togliere tag** anche dopo il salvataggio, non solo in import. Dialog `Modifica Hashtags` con salvataggio immediato (`updatePostTags`). Piano Free: resta il gate dashboard `manual_tags`.
-- Tap su un post: non usa più `LaunchMode.platformDefault` sull'URL grezzo (Instagram/TikTok a freddo aprivano il primo reel). `SocialDeepLinkOpener` normalizza il link (redirect `vm.tiktok.com` / `instagram.com/share/`), preferisce lo scheme nativo (`instagram://media?id=`, `tiktok://aweme/detail/`) e `LaunchMode.externalNonBrowserApplication` sul path canonico `/p/{shortcode}/`.
+- Tap su un post: `SocialDeepLinkOpener` (redirect short link). **Nota 16/09**: `instagram://media?id=` e `/p/` sui reel sono stati rimossi in **118** (Instagram mostrava “non disponibile” / browser). TikTok resta con scheme nativo.
 - Android `<queries>` e iOS `LSApplicationQueriesSchemes` per Instagram/TikTok/YouTube.
 - `pubspec.yaml` **1.1.15+117** (versione App Store **1.1.15**, build **117**).
 - **Azione**: Codemagic → TestFlight/Play **117**; in App Store Connect **crea versione 1.1.15** e collega la build **117**. Non toccare 1.1.13.
