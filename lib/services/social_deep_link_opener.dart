@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -6,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 /// sul contenuto cliccato, non sul primo reel del feed.
 class SocialDeepLinkOpener {
   SocialDeepLinkOpener._();
+
+  static const _nativeLinks = MethodChannel('eu.savein.app/native_links');
 
   static const _browserHeaders = {
     'User-Agent':
@@ -43,9 +46,10 @@ class SocialDeepLinkOpener {
     await launchUrl(Uri.parse(url), mode: LaunchMode.platformDefault);
   }
 
-  /// Instagram: niente `instagram://media?id=` (l'ID dal shortcode è spesso
-  /// sbagliato → "contenuto non più disponibile") e niente `/p/` sui reel
-  /// (Instagram web/app rispondono che il post non esiste e finisce nel browser).
+  /// Instagram: niente `instagram://media?id=` (ID dal shortcode sbagliato →
+  /// "non disponibile"). HTTPS con `externalApplication` apre Chrome/Safari
+  /// perché il browser è un'app esterna valida. Prima si forza il package
+  /// Instagram su Android e i Universal Link (no browser) su iOS.
   static Future<void> _openInstagram(_InstagramTarget target) async {
     final path = switch (target.kind) {
       'reel' || 'reels' => 'reel',
@@ -55,13 +59,36 @@ class SocialDeepLinkOpener {
     final canonical = Uri.parse(
       'https://www.instagram.com/$path/${target.shortcode}/',
     );
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      for (final packageName in const [
+        'com.instagram.android',
+        'com.instagram.lite',
+      ]) {
+        try {
+          final opened = await _nativeLinks.invokeMethod<bool>(
+            'openInPackage',
+            {
+              'url': canonical.toString(),
+              'package': packageName,
+            },
+          );
+          if (opened == true) return;
+        } on MissingPluginException {
+          break;
+        } catch (_) {}
+      }
+    }
+
+    if (await _tryLaunch(canonical, LaunchMode.externalNonBrowserApplication)) {
+      return;
+    }
+
+    // Instagram non installata: solo allora il browser.
     if (await _tryLaunch(canonical, LaunchMode.externalApplication)) {
       return;
     }
-    if (await _tryLaunch(canonical, LaunchMode.platformDefault)) {
-      return;
-    }
-    await launchUrl(canonical, mode: LaunchMode.externalApplication);
+    await launchUrl(canonical, mode: LaunchMode.platformDefault);
   }
 
   static Future<bool> _tryLaunch(Uri uri, LaunchMode mode) async {

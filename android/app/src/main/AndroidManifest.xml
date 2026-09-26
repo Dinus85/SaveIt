@@ -79,6 +79,7 @@
 
     <queries>
         <package android:name="com.instagram.android" />
+        <package android:name="com.instagram.lite" />
         <package android:name="com.zhiliaoapp.musically" />
         <package android:name="com.google.android.youtube" />
         <intent>
