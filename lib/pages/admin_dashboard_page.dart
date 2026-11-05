@@ -1776,121 +1776,208 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  List<({String label, IconData icon, bool selected, VoidCallback onPressed})>
+  _adminNavItems() {
+    void open(_AdminDashboardSection section) {
+      setState(() {
+        _activeSection = section;
+      });
+    }
+
+    return [
+      (
+        label: 'Home dashboard',
+        icon: Icons.dashboard_outlined,
+        selected:
+            _activeSection == _AdminDashboardSection.users ||
+            _activeSection == _AdminDashboardSection.userDetail ||
+            _activeSection == _AdminDashboardSection.userPosts ||
+            _activeSection == _AdminDashboardSection.userFolders,
+        onPressed: _goToDashboardHome,
+      ),
+      (
+        label: 'Banner promo',
+        icon: Icons.campaign_outlined,
+        selected: _activeSection == _AdminDashboardSection.promos,
+        onPressed: _openCentralPromoAdmin,
+      ),
+      (
+        label: 'Limiti Funzioni',
+        icon: Icons.tune,
+        selected: _activeSection == _AdminDashboardSection.planLimits,
+        onPressed: () => open(_AdminDashboardSection.planLimits),
+      ),
+      (
+        label: 'Versione app',
+        icon: Icons.system_update_outlined,
+        selected: _activeSection == _AdminDashboardSection.versionControl,
+        onPressed: () => open(_AdminDashboardSection.versionControl),
+      ),
+      (
+        label: 'Statistiche globali',
+        icon: Icons.bar_chart,
+        selected: _activeSection == _AdminDashboardSection.globalStats,
+        onPressed: () => open(_AdminDashboardSection.globalStats),
+      ),
+      (
+        label: 'Costi/Ricavi',
+        icon: Icons.euro,
+        selected: _activeSection == _AdminDashboardSection.finance,
+        onPressed: () => open(_AdminDashboardSection.finance),
+      ),
+      (
+        label: 'Notifiche',
+        icon: Icons.notifications_outlined,
+        selected: _activeSection == _AdminDashboardSection.notifications,
+        onPressed: _openNotificationsSection,
+      ),
+      (
+        label: 'Accessi',
+        icon: Icons.login,
+        selected: _activeSection == _AdminDashboardSection.accesses,
+        onPressed: () {
+          setState(() {
+            _activeSection = _AdminDashboardSection.accesses;
+            _accessesPage = 0;
+          });
+        },
+      ),
+      (
+        label: 'Storico invii',
+        icon: Icons.history,
+        selected: _activeSection == _AdminDashboardSection.shareAudit,
+        onPressed: () => open(_AdminDashboardSection.shareAudit),
+      ),
+    ];
+  }
+
   Widget _buildAdminHeader() {
+    final items = _adminNavItems();
     return Material(
       color: Colors.white,
       elevation: 1,
       shadowColor: const Color(0x22000000),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.asset(
-                'assets/icon/app_icon_phone.png',
-                width: 44,
-                height: 44,
-                fit: BoxFit.cover,
-              ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 900;
+          final logo = ClipRRect(
+            borderRadius: BorderRadius.circular(compact ? 10 : 12),
+            child: Image.asset(
+              'assets/icon/app_icon_phone.png',
+              width: compact ? 36 : 44,
+              height: compact ? 36 : 44,
+              fit: BoxFit.cover,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+          );
+
+          if (compact) {
+            final current = items.firstWhere(
+              (item) => item.selected,
+              orElse: () => items.first,
+            );
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+              child: Row(
                 children: [
-              _AdminNavButton(
-                label: 'Home dashboard',
-                selected: _activeSection == _AdminDashboardSection.users ||
-                    _activeSection == _AdminDashboardSection.userDetail ||
-                    _activeSection == _AdminDashboardSection.userPosts ||
-                    _activeSection == _AdminDashboardSection.userFolders,
-                onPressed: _goToDashboardHome,
+                  logo,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      current.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Menu',
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => _showAdminNavSheet(items),
+                  ),
+                  IconButton(
+                    tooltip: 'Logout',
+                    icon: const Icon(Icons.logout),
+                    onPressed: () async {
+                      await AuthService().logout();
+                    },
+                  ),
+                ],
               ),
-              _AdminNavButton(
-                label: 'Banner promo',
-                selected: _activeSection == _AdminDashboardSection.promos,
-                onPressed: _openCentralPromoAdmin,
-              ),
-              _AdminNavButton(
-                label: 'Limiti Funzioni',
-                selected: _activeSection == _AdminDashboardSection.planLimits,
-                onPressed: () {
-                  setState(() {
-                    _activeSection = _AdminDashboardSection.planLimits;
-                  });
-                },
-              ),
-              _AdminNavButton(
-                label: 'Versione app',
-                selected:
-                    _activeSection == _AdminDashboardSection.versionControl,
-                onPressed: () {
-                  setState(() {
-                    _activeSection = _AdminDashboardSection.versionControl;
-                  });
-                },
-              ),
-              _AdminNavButton(
-                label: 'Statistiche globali',
-                selected: _activeSection == _AdminDashboardSection.globalStats,
-                onPressed: () {
-                  setState(() {
-                    _activeSection = _AdminDashboardSection.globalStats;
-                  });
-                },
-              ),
-              _AdminNavButton(
-                label: 'Costi/Ricavi',
-                selected: _activeSection == _AdminDashboardSection.finance,
-                onPressed: () {
-                  setState(() {
-                    _activeSection = _AdminDashboardSection.finance;
-                  });
-                },
-              ),
-              _AdminNavButton(
-                label: 'Notifiche',
-                selected:
-                    _activeSection == _AdminDashboardSection.notifications,
-                onPressed: _openNotificationsSection,
-              ),
-              _AdminNavButton(
-                label: 'Accessi',
-                selected: _activeSection == _AdminDashboardSection.accesses,
-                onPressed: () {
-                  setState(() {
-                    _activeSection = _AdminDashboardSection.accesses;
-                    _accessesPage = 0;
-                  });
-                },
-              ),
-              _AdminNavButton(
-                label: 'Storico invii',
-                selected: _activeSection == _AdminDashboardSection.shareAudit,
-                onPressed: () {
-                  setState(() {
-                    _activeSection = _AdminDashboardSection.shareAudit;
-                  });
-                },
-              ),
-            ],
-              ),
+            );
+          }
+
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                logo,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      for (final item in items)
+                        _AdminNavButton(
+                          label: item.label,
+                          selected: item.selected,
+                          onPressed: item.onPressed,
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () async {
+                    await AuthService().logout();
+                  },
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Logout'),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            TextButton.icon(
-              onPressed: () async {
-                await AuthService().logout();
-              },
-              icon: const Icon(Icons.logout),
-              label: const Text('Logout'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
+    );
+  }
+
+  Future<void> _showAdminNavSheet(
+    List<({String label, IconData icon, bool selected, VoidCallback onPressed})>
+    items,
+  ) {
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final item in items)
+                  ListTile(
+                    leading: Icon(item.icon),
+                    title: Text(item.label),
+                    selected: item.selected,
+                    selectedTileColor: const Color(0x14000000),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      item.onPressed();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

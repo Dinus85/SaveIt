@@ -2076,6 +2076,10 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Dashboard web admin — menu mobile friendly (05/11/2026)
+- `lib/pages/admin_dashboard_page.dart`: voci menu centralizzate in `_adminNavItems()`. Sotto **900 px** di larghezza l'header diventa compatto (logo, nome sezione attiva, icona ☰ e icona Logout); il ☰ apre un bottom sheet (`_showAdminNavSheet`) con le voci e la sezione attiva evidenziata. Da desktop resta la riga di pulsanti `_AdminNavButton` in `Wrap`.
+- Solo web: deploy con `flutter build web --release` + `firebase deploy --only hosting` (fatto). Nessuna nuova build mobile.
+
 ### Build `1.1.15+120` / `1.1.15+121` — ripristino anteprime, titolo e creator TikTok (05/11/2026)
 
 - TikTok ha iniziato a reindirizzare i link corti (`vm.tiktok.com` / `vt.tiktok.com`) a `/login?redirect_url=...` per gli User-Agent generici e a svuotare `thumbnail_url` / `title` nell'endpoint `/oembed` in Europa, facendo salvare i post come `Vm.tiktok.com` senza immagine.
