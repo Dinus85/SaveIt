@@ -75,9 +75,22 @@ class GlobalPostLookupResult {
         normalized != 'google' &&
         normalized != 'google search' &&
         normalized != 'google maps' &&
+        normalized != 'tiktok' &&
+        normalized != 'tiktok.com' &&
+        normalized != 'www.tiktok.com' &&
+        normalized != 'vm.tiktok.com' &&
+        normalized != 'vt.tiktok.com' &&
+        normalized != 'm.tiktok.com' &&
+        normalized != 'log in | tiktok' &&
+        normalized != 'login | tiktok' &&
+        normalized != 'log in to tiktok' &&
         !normalized.startsWith('google search');
     final hasPreview = imageUrl?.isNotEmpty == true ||
         previewStorageUrl?.isNotEmpty == true;
+    final checkUrl = (url ?? normalizedUrl ?? '').toLowerCase();
+    if (checkUrl.contains('tiktok.com')) {
+      return hasTitle && hasPreview;
+    }
     final hasDescription = description?.isNotEmpty == true;
     return hasTitle && (hasPreview || hasDescription);
   }

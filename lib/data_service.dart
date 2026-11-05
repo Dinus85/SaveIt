@@ -1238,18 +1238,30 @@ class DataService {
         PostPreviewUrlUtils.isStablePreviewStorageUrl(post.previewStorageUrl)
             ? post.previewStorageUrl!.trim()
             : null;
-    if ((imageUrl?.isNotEmpty != true) && stableRemote == null) {
+    final lowerPostUrl = post.url.trim().toLowerCase();
+    final canRecoverFromUrl = lowerPostUrl.contains('tiktok.com') ||
+        lowerPostUrl.contains('instagram.com');
+    if ((imageUrl?.isNotEmpty != true) &&
+        stableRemote == null &&
+        !canRecoverFromUrl) {
       return post.previewStorageUrl;
     }
 
     try {
       final cache = const PostPreviewCache();
-      await cache.ensureCachedPreview(
-        postId: post.id,
-        imageUrl: stableRemote,
-        fallbackImageUrl: stableRemote == null ? imageUrl : null,
-      );
+      if ((imageUrl?.isNotEmpty == true) || stableRemote != null) {
+        await cache.ensureCachedPreview(
+          postId: post.id,
+          imageUrl: stableRemote,
+          fallbackImageUrl: stableRemote == null ? imageUrl : null,
+        );
+      }
       var localPath = await cache.getCachedPreviewPath(post.id);
+      String? recoveredImageUrl;
+      String? recoveredTitle;
+      String? recoveredDescription;
+      String? recoveredCreatorName;
+      String? recoveredCreatorUsername;
 
       if (localPath == null && post.url.trim().isNotEmpty) {
         try {
@@ -1257,6 +1269,11 @@ class DataService {
               await UrlMetadataService.extractMetadata(post.url.trim());
           final freshImage = metadata.imageUrl?.trim();
           if (freshImage != null && freshImage.isNotEmpty) {
+            recoveredImageUrl = freshImage;
+            recoveredTitle = metadata.title?.trim();
+            recoveredDescription = metadata.description?.trim();
+            recoveredCreatorName = metadata.creatorName?.trim();
+            recoveredCreatorUsername = metadata.creatorUsername?.trim();
             await cache.ensureCachedPreview(
               postId: post.id,
               imageUrl: freshImage,
@@ -1274,13 +1291,32 @@ class DataService {
         postId: post.id,
         localPath: localPath,
         sourceUrl: post.url,
-        imageUrl: post.imageUrl,
+        imageUrl: recoveredImageUrl ?? post.imageUrl,
       );
       if (!PostPreviewUrlUtils.isStablePreviewStorageUrl(uploadedRemoteUrl)) {
         return post.previewStorageUrl;
       }
 
+      final shouldReplaceTitle = recoveredTitle != null &&
+          recoveredTitle.isNotEmpty &&
+          UrlMetadataService.isGenericImportTitle(post.title);
+      final shouldReplaceDesc = recoveredDescription != null &&
+          recoveredDescription.isNotEmpty &&
+          (post.description.trim().isEmpty ||
+              post.description.trim() == post.url.trim());
+
       final updatedPost = post.copyWith(
+        title: shouldReplaceTitle ? recoveredTitle : post.title,
+        description: shouldReplaceDesc ? recoveredDescription : post.description,
+        imageUrl: (post.imageUrl?.trim().isNotEmpty == true)
+            ? post.imageUrl
+            : recoveredImageUrl,
+        creatorName: (post.creatorName?.trim().isNotEmpty == true)
+            ? post.creatorName
+            : recoveredCreatorName,
+        creatorUsername: (post.creatorUsername?.trim().isNotEmpty == true)
+            ? post.creatorUsername
+            : recoveredCreatorUsername,
         previewStorageUrl: uploadedRemoteUrl!.trim(),
         updatedAt: DateTime.now(),
       );
@@ -1326,7 +1362,10 @@ class DataService {
             final hasStable = PostPreviewUrlUtils.isStablePreviewStorageUrl(
               post.previewStorageUrl,
             );
-            if (!hasImage && !hasStable) {
+            final lowerPostUrl = post.url.trim().toLowerCase();
+            final canRecoverFromUrl = lowerPostUrl.contains('tiktok.com') ||
+                lowerPostUrl.contains('instagram.com');
+            if (!hasImage && !hasStable && !canRecoverFromUrl) {
               continue;
             }
 

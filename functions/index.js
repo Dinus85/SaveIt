@@ -2876,9 +2876,21 @@ const ensureGlobalPost = async ({source, ownerId}) => {
       ) {
         patch.title = sourceTitle;
       }
-      if (!(existing.description || "").toString().trim() &&
-          (safeSource.description || "").toString().trim()) {
-        patch.description = safeSource.description.toString().trim();
+      const existingDescription = (existing.description || "").toString().trim();
+      const sourceDescription = (safeSource.description || "").toString().trim();
+      if (
+        sourceDescription &&
+        (!existingDescription ||
+          existingDescription === (existing.url || "").toString().trim() ||
+          existingDescription === (existing.normalizedUrl || "").toString().trim())
+      ) {
+        patch.description = sourceDescription;
+      }
+      if (!existing.creatorName && safeSource.creatorName) {
+        patch.creatorName = safeSource.creatorName;
+      }
+      if (!existing.creatorUsername && safeSource.creatorUsername) {
+        patch.creatorUsername = safeSource.creatorUsername;
       }
       transaction.set(ref, patch, {merge: true});
       const mergedTitle = patch.title || existing.title ||
@@ -4125,10 +4137,12 @@ const isTikTokVideoUrl = (url) => {
   try {
     const parsed = new URL(url);
     if (!parsed.hostname.toLowerCase().includes("tiktok.com")) return false;
-    return parsed.pathname.toLowerCase().includes("/video/");
+    const lowerPath = parsed.pathname.toLowerCase();
+    return lowerPath.includes("/video/") || lowerPath.includes("/photo/");
   } catch (_) {
     const lower = (url || "").toLowerCase();
-    return lower.includes("tiktok.com") && lower.includes("/video/");
+    return lower.includes("tiktok.com") &&
+      (lower.includes("/video/") || lower.includes("/photo/"));
   }
 };
 
@@ -4138,29 +4152,51 @@ const isInvalidTikTokTitle = (title) => {
   return normalized === "log in | tiktok" ||
     normalized === "login | tiktok" ||
     normalized === "tiktok" ||
-    normalized === "log in to tiktok";
+    normalized === "log in to tiktok" ||
+    normalized === "tiktok - make your day" ||
+    normalized === "tiktok.com" ||
+    normalized === "www.tiktok.com" ||
+    normalized === "vm.tiktok.com" ||
+    normalized === "vt.tiktok.com" ||
+    normalized === "m.tiktok.com" ||
+    normalized.startsWith("log in or sign up for an account on tiktok");
+};
+
+const unwrapTikTokLoginRedirect = (url) => {
+  const trimmed = (url || "").toString().trim();
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    const redirectParam = parsed.searchParams.get("redirect_url");
+    if (redirectParam && redirectParam.trim()) {
+      return redirectParam.trim();
+    }
+  } catch (_) {}
+  return trimmed;
 };
 
 const resolveTikTokShareUrl = async (url) => {
+  const unwrapped = unwrapTikTokLoginRedirect(url);
+  if (isTikTokVideoUrl(unwrapped)) return unwrapped;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(url, {
+    const response = await fetch(unwrapped, {
       method: "GET",
       redirect: "follow",
       signal: controller.signal,
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; SaveIn!/1.0; +https://savein.eu)",
-        "Accept": "text/html",
+          "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Accept": "text/html,application/xhtml+xml",
       },
     });
     clearTimeout(timer);
-    const finalUrl = (response.url || "").toString();
-    if (finalUrl.includes("/video/")) return finalUrl;
-    return url;
+    const finalUrl = unwrapTikTokLoginRedirect((response.url || "").toString());
+    if (isTikTokVideoUrl(finalUrl)) return finalUrl;
+    return unwrapped;
   } catch (_) {
-    return url;
+    return unwrapped;
   }
 };
 
@@ -4173,10 +4209,77 @@ const fetchTikTokOEmbedMetadata = async (url) => {
     creatorUsername: null,
   };
   if (!isAnyTikTokUrl(url)) return empty;
+  let workingUrl = unwrapTikTokLoginRedirect(url);
+  let crawlerTitle = "";
+  let crawlerDescription = "";
+  let crawlerImage = null;
+  let crawlerCreatorName = null;
+  let crawlerUsername = null;
+
   try {
-    let normalized = url;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(workingUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+    });
+    clearTimeout(timer);
+    const finalUrl = unwrapTikTokLoginRedirect((response.url || workingUrl).toString());
+    if (isTikTokVideoUrl(finalUrl)) workingUrl = finalUrl;
+    if (response.ok) {
+      const html = (await response.text()).slice(0, 350000);
+      const ogUrl = unwrapTikTokLoginRedirect(extractMetaContent(html, ["og:url"]));
+      if (isTikTokVideoUrl(ogUrl)) workingUrl = ogUrl;
+      const rawOgTitle =
+        extractMetaContent(html, ["og:title", "twitter:title", "lark:url:video_title"]) ||
+        decodeHtmlEntities(((html.match(/<title[^>]*>([^<]+)<\/title>/i) || [])[1] || ""));
+      if (rawOgTitle && !isInvalidTikTokTitle(rawOgTitle)) {
+        crawlerTitle = rawOgTitle;
+        const prefixMatch = rawOgTitle.match(/^TikTok\s*[·•|-]\s*(.+)$/i);
+        if (prefixMatch && prefixMatch[1]) {
+          crawlerCreatorName = prefixMatch[1].trim();
+        }
+      }
+      const rawOgDesc = extractMetaContent(html, [
+        "og:description",
+        "twitter:description",
+        "description",
+      ]);
+      if (rawOgDesc && !isInvalidTikTokTitle(rawOgDesc)) {
+        crawlerDescription = rawOgDesc;
+      }
+      const rawOgImage = extractMetaContent(html, [
+        "og:image",
+        "twitter:image",
+        "lark:url:video_cover_image_url",
+      ]);
+      if (rawOgImage && !rawOgImage.toLowerCase().includes("login")) {
+        crawlerImage = rawOgImage;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const parts = new URL(workingUrl).pathname.split("/").filter(Boolean);
+    if (parts[0] && parts[0].startsWith("@")) {
+      crawlerUsername = parts[0].replace(/^@/, "");
+    }
+  } catch (_) {}
+
+  let oEmbedTitle = "";
+  let oEmbedImage = null;
+  let oEmbedCreatorName = null;
+  let oEmbedUsername = null;
+  try {
+    let normalized = workingUrl;
     try {
-      const parsed = new URL(url);
+      const parsed = new URL(workingUrl);
       parsed.search = "";
       parsed.hash = "";
       normalized = parsed.toString();
@@ -4184,7 +4287,7 @@ const fetchTikTokOEmbedMetadata = async (url) => {
     const oEmbedUrl =
       `https://www.tiktok.com/oembed?url=${encodeURIComponent(normalized)}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 6000);
     const response = await fetch(oEmbedUrl, {
       method: "GET",
       redirect: "follow",
@@ -4196,37 +4299,82 @@ const fetchTikTokOEmbedMetadata = async (url) => {
       },
     });
     clearTimeout(timer);
-    if (!response.ok) return empty;
-    const data = await response.json();
-    const title = (data && data.title || "").toString().trim();
-    const imageUrl = (data && data.thumbnail_url || "").toString().trim() ||
-      null;
-    const creatorName = (data && data.author_name || "").toString().trim() ||
-      null;
-    let creatorUsername = null;
-    const authorUrl = (data && data.author_url || "").toString().trim();
-    if (authorUrl) {
-      try {
-        const parts = new URL(authorUrl).pathname.split("/").filter(Boolean);
-        if (parts[0] && parts[0].startsWith("@")) {
-          creatorUsername = parts[0].replace(/^@/, "");
-        }
-      } catch (_) {}
+    if (response.ok) {
+      const data = await response.json();
+      oEmbedTitle = (data && data.title || "").toString().trim();
+      oEmbedImage = (data && data.thumbnail_url || "").toString().trim() || null;
+      oEmbedCreatorName = (data && data.author_name || "").toString().trim() || null;
+      const authorUrl = (data && data.author_url || "").toString().trim();
+      if (authorUrl) {
+        try {
+          const parts = new URL(authorUrl).pathname.split("/").filter(Boolean);
+          if (parts[0] && parts[0].startsWith("@")) {
+            oEmbedUsername = parts[0].replace(/^@/, "");
+          }
+        } catch (_) {}
+      }
     }
-    return {
-      title: isInvalidTikTokTitle(title) ? "" : title.substring(0, 300),
-      description: isInvalidTikTokTitle(title) ? "" : title.substring(0, 2000),
-      imageUrl,
-      creatorName,
-      creatorUsername,
-    };
-  } catch (error) {
-    console.warn("fetchTikTokOEmbedMetadata failed", {
-      url,
-      message: error && error.message,
-    });
-    return empty;
+  } catch (_) {}
+
+  let apiTitle = "";
+  let apiImage = null;
+  let apiCreatorName = null;
+  let apiUsername = null;
+  if (isInvalidTikTokTitle(oEmbedTitle) || (!oEmbedImage && !crawlerImage)) {
+    try {
+      let cleanTarget = workingUrl;
+      try {
+        const parsed = new URL(workingUrl);
+        parsed.search = "";
+        parsed.hash = "";
+        cleanTarget = parsed.toString();
+      } catch (_) {}
+      const apiUrl =
+        `https://www.tikwm.com/api/?url=${encodeURIComponent(cleanTarget)}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": DESKTOP_GOOGLE_UA,
+          "Accept": "application/json",
+        },
+      });
+      clearTimeout(timer);
+      if (response.ok) {
+        const body = await response.json();
+        const item = body && body.data ? body.data : null;
+        if (item && typeof item === "object") {
+          apiTitle = (item.title || "").toString().trim();
+          apiImage = (item.cover || item.origin_cover || "").toString().trim() || null;
+          if (item.author && typeof item.author === "object") {
+            apiCreatorName = (item.author.nickname || "").toString().trim() || null;
+            apiUsername = (item.author.unique_id || "").toString().trim().replace(/^@/, "") || null;
+          }
+        }
+      }
+    } catch (_) {}
   }
+
+  const caption = !isInvalidTikTokTitle(oEmbedTitle) ?
+    oEmbedTitle :
+    (!isInvalidTikTokTitle(apiTitle) ? apiTitle : "");
+  const finalTitle = caption ||
+    (!isInvalidTikTokTitle(crawlerTitle) ? crawlerTitle : "");
+  const finalDescription = caption || crawlerDescription || finalTitle;
+  const finalImage = oEmbedImage || crawlerImage || apiImage || null;
+  const finalCreatorName = oEmbedCreatorName || apiCreatorName || crawlerCreatorName || null;
+  const finalUsername = oEmbedUsername || apiUsername || crawlerUsername || null;
+
+  return {
+    title: finalTitle.substring(0, 300),
+    description: finalDescription.substring(0, 2000),
+    imageUrl: finalImage,
+    creatorName: finalCreatorName,
+    creatorUsername: finalUsername,
+  };
 };
 
 const isThinShareTitle = (title, hostname) => {

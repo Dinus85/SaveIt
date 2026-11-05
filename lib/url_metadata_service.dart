@@ -27,6 +27,14 @@ class UrlMetadataService {
     'Cookie': 'CONSENT=YES+',
   };
 
+  static const Map<String, String> _socialCrawlerHeaders = {
+    'User-Agent':
+        'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+    'Accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+  };
+
   // Extract metadata from URL with enhanced image extraction
   static Future<UrlMetadata> extractMetadata(
     String url, {
@@ -59,8 +67,9 @@ class UrlMetadataService {
       }
 
       // TikTok: intercetta prima dello scraping HTML perché TikTok
-      // risponde sempre con la pagina di login ai bot.
-      // Risolviamo il redirect (vm.tiktok.com → URL completo) e usiamo oEmbed.
+      // risponde sempre con la pagina di login ai bot standard.
+      // Risolviamo il redirect (vm.tiktok.com → URL completo) e recuperiamo
+      // anteprima, titolo e creator via OpenGraph social crawler + oEmbed + fallback API.
       if (_isAnyTikTokUrl(url)) {
         try {
           final resolvedUrl = await _resolveTikTokUrl(url);
@@ -68,9 +77,12 @@ class UrlMetadataService {
             resolvedUrl,
             _fallbackMetadata(resolvedUrl),
           );
-          if (tikTokResult.hasValidData) return tikTokResult;
+          if (_hasUsableTikTokImage(tikTokResult.imageUrl) ||
+              !_isInvalidTikTokTitle(tikTokResult.title)) {
+            return tikTokResult;
+          }
         } catch (_) {
-          // Se oEmbed fallisce procedi con lo scraping normale
+          // Se fallisce procedi con lo scraping normale
         }
       }
 
@@ -1173,62 +1185,203 @@ class UrlMetadataService {
     String url,
     UrlMetadata baseMetadata,
   ) async {
-    final oEmbedUrl = _buildTikTokOEmbedUrl(url);
-    if (oEmbedUrl == null) {
+    if (!_isAnyTikTokUrl(url)) {
       return baseMetadata;
     }
 
+    String workingUrl = _unwrapTikTokLoginRedirect(url);
+    String? crawlerTitle;
+    String? crawlerDescription;
+    String? crawlerImage;
+    String? crawlerCreatorName;
+    String? crawlerUsername = _extractUsernameFromUrl(workingUrl);
+
+    // 1. Scraping OpenGraph con User-Agent social crawler (facebookexternalhit):
+    // TikTok risolve direttamente vm.tiktok.com -> /@user/video/... senza redirect a /login
+    // ed espone og:image (thumbnail CDN), og:title ("TikTok · Creator") e og:url.
     try {
       final response = await http
-          .get(Uri.parse(oEmbedUrl), headers: _defaultHeaders)
-          .timeout(Duration(seconds: _timeoutSeconds));
-
-      if (response.statusCode != 200) {
-        return baseMetadata;
-      }
-
-      final data = json.decode(response.body);
-      if (data is! Map<String, dynamic>) {
-        return baseMetadata;
-      }
-
-      final oEmbedTitle = (data['title'] as String?)?.trim();
-      final oEmbedThumbnail = (data['thumbnail_url'] as String?)?.trim();
-      final oEmbedAuthorName = (data['author_name'] as String?)?.trim();
-      final oEmbedAuthorUrl = (data['author_url'] as String?)?.trim();
-
-      final resolvedTitle = !_isInvalidTikTokTitle(oEmbedTitle)
-          ? oEmbedTitle
-          : (!_isInvalidTikTokTitle(baseMetadata.title)
-              ? baseMetadata.title
-              : null);
-
-      final resolvedDescription =
-          (baseMetadata.description?.isNotEmpty == true &&
-                  !_isInvalidTikTokTitle(baseMetadata.description))
-              ? baseMetadata.description
-              : (!_isInvalidTikTokTitle(oEmbedTitle) ? oEmbedTitle : null);
-
-      final resolvedImage = _hasUsableTikTokImage(oEmbedThumbnail)
-          ? oEmbedThumbnail
-          : (_hasUsableTikTokImage(baseMetadata.imageUrl)
-              ? baseMetadata.imageUrl
-              : null);
-
-      return baseMetadata.copyWith(
-        title: resolvedTitle,
-        description: resolvedDescription,
-        imageUrl: resolvedImage,
-        creatorName: _cleanCreatorName(oEmbedAuthorName),
-        creatorUsername:
-            _normalizeCreatorUsername(oEmbedAuthorUrl ?? oEmbedAuthorName),
-        siteName: baseMetadata.siteName ?? 'TikTok',
-        extractedHashtags: baseMetadata.extractedHashtags,
+          .get(Uri.parse(workingUrl), headers: _socialCrawlerHeaders)
+          .timeout(const Duration(seconds: 8));
+      final finalUrl = _unwrapTikTokLoginRedirect(
+        response.request?.url.toString() ?? workingUrl,
       );
+      if (_isTikTokVideoUrl(finalUrl)) {
+        workingUrl = finalUrl;
+      }
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
+        final document = html_parser.parse(response.body);
+        final ogUrl = _unwrapTikTokLoginRedirect(
+          _getMetaProperty(document, 'og:url') ?? '',
+        );
+        if (_isTikTokVideoUrl(ogUrl)) {
+          workingUrl = ogUrl;
+        }
+        crawlerUsername ??= _extractUsernameFromUrl(workingUrl);
+
+        final rawOgTitle = (_getMetaProperty(document, 'og:title') ??
+                _getMetaProperty(document, 'twitter:title') ??
+                _getMetaName(document, 'lark:url:video_title') ??
+                document.querySelector('title')?.text)
+            ?.trim();
+        if (rawOgTitle != null && !_isInvalidTikTokTitle(rawOgTitle)) {
+          crawlerTitle = rawOgTitle;
+          final prefixMatch = RegExp(
+            r'^TikTok\s*[·•|-]\s*(.+)$',
+            caseSensitive: false,
+          ).firstMatch(rawOgTitle);
+          if (prefixMatch != null) {
+            crawlerCreatorName = _cleanCreatorName(prefixMatch.group(1));
+          }
+        }
+
+        final rawOgDesc = (_getMetaProperty(document, 'og:description') ??
+                _getMetaProperty(document, 'twitter:description') ??
+                _getMetaName(document, 'description'))
+            ?.trim();
+        if (rawOgDesc != null && !_isInvalidTikTokTitle(rawOgDesc)) {
+          crawlerDescription = rawOgDesc;
+        }
+
+        final rawOgImage = (_getMetaProperty(document, 'og:image') ??
+                _getMetaProperty(document, 'twitter:image') ??
+                _getMetaName(document, 'lark:url:video_cover_image_url'))
+            ?.replaceAll('&amp;', '&')
+            .trim();
+        if (_hasUsableTikTokImage(rawOgImage)) {
+          crawlerImage = rawOgImage;
+        }
+      }
     } catch (e) {
-      print('TikTok oEmbed fallback failed: $e');
-      return baseMetadata;
+      print('TikTok social crawler metadata failed: $e');
     }
+
+    // 2. oEmbed pubblico TikTok (quando espone title / thumbnail_url / author_name)
+    String? oEmbedTitle;
+    String? oEmbedThumbnail;
+    String? oEmbedAuthorName;
+    String? oEmbedAuthorUrl;
+    final oEmbedUrl = _buildTikTokOEmbedUrl(workingUrl);
+    if (oEmbedUrl != null) {
+      try {
+        final response = await http
+            .get(Uri.parse(oEmbedUrl), headers: _defaultHeaders)
+            .timeout(const Duration(seconds: 6));
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data is Map<String, dynamic>) {
+            oEmbedTitle = (data['title'] as String?)?.trim();
+            oEmbedThumbnail = (data['thumbnail_url'] as String?)?.trim();
+            oEmbedAuthorName = (data['author_name'] as String?)?.trim();
+            oEmbedAuthorUrl = (data['author_url'] as String?)?.trim();
+          }
+        }
+      } catch (e) {
+        print('TikTok oEmbed fallback failed: $e');
+      }
+    }
+
+    // 3. Fallback API pubblica TikTok (tikwm) se oEmbed in EU non restituisce caption o thumbnail
+    String? apiTitle;
+    String? apiThumbnail;
+    String? apiAuthorName;
+    String? apiAuthorUsername;
+    final hasCaptionAlready = !_isInvalidTikTokTitle(oEmbedTitle);
+    final hasThumbAlready = _hasUsableTikTokImage(oEmbedThumbnail) ||
+        _hasUsableTikTokImage(crawlerImage);
+    if (!hasCaptionAlready || !hasThumbAlready) {
+      try {
+        final cleanTarget = Uri.parse(workingUrl)
+            .replace(queryParameters: null, fragment: null)
+            .toString();
+        final apiUri = Uri.https('www.tikwm.com', '/api/', {
+          'url': cleanTarget,
+        });
+        final apiResp = await http
+            .get(apiUri, headers: _browserHeaders)
+            .timeout(const Duration(seconds: 6));
+        if (apiResp.statusCode == 200) {
+          final body = json.decode(apiResp.body);
+          if (body is Map && body['data'] is Map) {
+            final item = Map<String, dynamic>.from(body['data'] as Map);
+            apiTitle = item['title']?.toString().trim();
+            apiThumbnail = (item['cover'] ?? item['origin_cover'])
+                ?.toString()
+                .trim();
+            if (item['author'] is Map) {
+              final author = Map<String, dynamic>.from(item['author'] as Map);
+              apiAuthorName = author['nickname']?.toString().trim();
+              apiAuthorUsername = author['unique_id']?.toString().trim();
+            }
+          }
+        }
+      } catch (e) {
+        print('TikTok API fallback failed: $e');
+      }
+    }
+
+    final caption = !_isInvalidTikTokTitle(oEmbedTitle)
+        ? oEmbedTitle
+        : (!_isInvalidTikTokTitle(apiTitle) ? apiTitle : null);
+
+    final resolvedTitle = caption ??
+        (!_isInvalidTikTokTitle(crawlerTitle)
+            ? crawlerTitle
+            : (!_isInvalidTikTokTitle(baseMetadata.title)
+                ? baseMetadata.title
+                : 'TikTok'));
+
+    final baseDesc = baseMetadata.description?.trim();
+    final hasUsableBaseDesc = baseDesc != null &&
+        baseDesc.isNotEmpty &&
+        baseDesc != url &&
+        baseDesc != workingUrl &&
+        !_isInvalidTikTokTitle(baseDesc);
+
+    final resolvedDescription = caption ??
+        crawlerDescription ??
+        (hasUsableBaseDesc ? baseDesc : resolvedTitle);
+
+    String? resolvedImage;
+    for (final candidate in <String?>[
+      oEmbedThumbnail,
+      crawlerImage,
+      apiThumbnail,
+      baseMetadata.imageUrl,
+    ]) {
+      if (_hasUsableTikTokImage(candidate)) {
+        resolvedImage = candidate;
+        break;
+      }
+    }
+
+    final resolvedCreatorName = _cleanCreatorName(oEmbedAuthorName) ??
+        _cleanCreatorName(apiAuthorName) ??
+        crawlerCreatorName ??
+        baseMetadata.creatorName;
+
+    final resolvedCreatorUsername = _normalizeCreatorUsername(
+          oEmbedAuthorUrl ??
+              apiAuthorUsername ??
+              crawlerUsername ??
+              oEmbedAuthorName,
+        ) ??
+        baseMetadata.creatorUsername;
+
+    final extractedHashtags = combineHashtags([
+      baseMetadata.extractedHashtags,
+      if (caption != null) _extractHashtagsFromText(caption),
+    ]);
+
+    return baseMetadata.copyWith(
+      title: resolvedTitle,
+      description: resolvedDescription,
+      imageUrl: resolvedImage,
+      creatorName: resolvedCreatorName,
+      creatorUsername: resolvedCreatorUsername,
+      siteName: 'TikTok',
+      extractedHashtags: extractedHashtags,
+    );
   }
 
   static bool _isInstagramPostUrl(String url) {
@@ -1266,28 +1419,50 @@ class UrlMetadataService {
         return false;
       }
 
-      return uri.pathSegments
-          .any((segment) => segment.toLowerCase() == 'video');
+      return uri.pathSegments.any((segment) {
+        final s = segment.toLowerCase();
+        return s == 'video' || s == 'photo';
+      });
     } catch (_) {
       final lowerUrl = url.toLowerCase();
-      return lowerUrl.contains('tiktok.com') && lowerUrl.contains('/video/');
+      return lowerUrl.contains('tiktok.com') &&
+          (lowerUrl.contains('/video/') || lowerUrl.contains('/photo/'));
     }
   }
 
-  /// Segue i redirect di un link TikTok corto (vm.tiktok.com) per ottenere
-  /// l'URL completo contenente /video/. Se non riesce, restituisce l'URL originale.
+  static String _unwrapTikTokLoginRedirect(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return trimmed;
+    try {
+      final uri = Uri.parse(trimmed);
+      final redirectParam = uri.queryParameters['redirect_url'];
+      if (redirectParam != null && redirectParam.trim().isNotEmpty) {
+        return redirectParam.trim();
+      }
+    } catch (_) {}
+    return trimmed;
+  }
+
+  /// Segue i redirect di un link TikTok corto (vm.tiktok.com / vt.tiktok.com) per ottenere
+  /// l'URL completo contenente /video/ o /photo/. Se non riesce, restituisce l'URL originale.
   static Future<String> _resolveTikTokUrl(String url) async {
+    final unwrapped = _unwrapTikTokLoginRedirect(url);
+    if (_isTikTokVideoUrl(unwrapped)) {
+      return unwrapped;
+    }
     try {
       final response = await http
-          .get(Uri.parse(url), headers: _defaultHeaders)
+          .get(Uri.parse(unwrapped), headers: _socialCrawlerHeaders)
           .timeout(const Duration(seconds: 8));
-      final finalUrl = response.request?.url.toString();
-      if (finalUrl != null && finalUrl.contains('/video/')) {
+      final finalUrl = _unwrapTikTokLoginRedirect(
+        response.request?.url.toString() ?? '',
+      );
+      if (finalUrl.isNotEmpty && _isTikTokVideoUrl(finalUrl)) {
         return finalUrl;
       }
-      return url;
+      return unwrapped;
     } catch (_) {
-      return url;
+      return unwrapped;
     }
   }
 
@@ -1422,7 +1597,14 @@ class UrlMetadataService {
     return normalized == 'log in | tiktok' ||
         normalized == 'login | tiktok' ||
         normalized == 'tiktok' ||
-        normalized == 'log in to tiktok';
+        normalized == 'log in to tiktok' ||
+        normalized == 'tiktok - make your day' ||
+        normalized == 'tiktok.com' ||
+        normalized == 'www.tiktok.com' ||
+        normalized == 'vm.tiktok.com' ||
+        normalized == 'vt.tiktok.com' ||
+        normalized == 'm.tiktok.com' ||
+        normalized.startsWith('log in or sign up for an account on tiktok');
   }
 
   static bool _hasUsableTikTokImage(String? imageUrl) {
@@ -2175,6 +2357,16 @@ class UrlMetadataService {
       'goo.gl',
       'post salvato',
       'luogo su google maps',
+      'tiktok',
+      'tiktok.com',
+      'www.tiktok.com',
+      'vm.tiktok.com',
+      'vt.tiktok.com',
+      'm.tiktok.com',
+      'log in | tiktok',
+      'login | tiktok',
+      'log in to tiktok',
+      'tiktok - make your day',
     };
     if (generic.contains(value)) return true;
     if (value.startsWith('google search')) return true;
@@ -2279,10 +2471,12 @@ class UrlMetadataService {
     String url,
     String? sharedText,
   ) {
+    final isGoogle = isGoogleMapsOrSearchUrl(url);
     final fromShare = placeNameFromSharedText(sharedText, url);
-    final title = fromShare ??
-        _cleanGoogleTitle(metadata.title) ??
-        placeNameFromGoogleUrl(url);
+    final cleanedExistingTitle = _cleanGoogleTitle(metadata.title);
+    final title = (isGoogle || isGenericImportTitle(cleanedExistingTitle))
+        ? (fromShare ?? cleanedExistingTitle ?? placeNameFromGoogleUrl(url))
+        : (cleanedExistingTitle ?? fromShare ?? placeNameFromGoogleUrl(url));
     var description = metadata.description?.trim();
     if (description != null &&
         (isGenericImportTitle(description) ||

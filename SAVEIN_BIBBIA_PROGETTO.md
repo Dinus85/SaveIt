@@ -422,8 +422,8 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.15+119`** (26/09/2026). Tap Instagram: forza l’app (`com.instagram.android`) su Android e Universal Link senza browser su iOS; il browser solo se Instagram non c’è. Include tag sui post, apertura sul post cliccato, push, import ogni 5, ads, cartelle, pin native, mediation, UMP + ATT. Import Google: foto Places / Wikipedia.
-- **App Store iOS (15/09/2026)**: versione **1.1.13** è **chiusa**. Versione store da creare: **1.1.15** (build **119**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect se 1.1.14 è già chiusa o non va usata.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.15+120`** (05/11/2026). Ripristinata anteprima, titolo, descrizione e creator per i post TikTok (unwrap redirect `/login?redirect_url=...`, OpenGraph via `facebookexternalhit/1.1` + oEmbed + fallback `tikwm`, auto-riparazione su Firestore/Storage). Include tap Instagram nell’app, tag sui post, apertura sul post cliccato, push, import ogni 5, ads, cartelle, pin native, mediation, UMP + ATT. Import Google: foto Places / Wikipedia.
+- **App Store iOS (15/09/2026)**: versione **1.1.13** è **chiusa**. Versione store da creare: **1.1.15** (build **120**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect se 1.1.14 è già chiusa o non va usata.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
 - **Android toolchain (22/07/2026)**: Gradle **8.14.3**, AGP **8.11.1**, Kotlin **2.2.20** (`android/settings.gradle`, `gradle-wrapper.properties`).
 - **Fix SHA Android App Links (giu 2026)**: aggiornato solo Firebase/Hosting — **non** richiede nuova `.aab` né nuovo build iOS. Dopo il deploy Firebase: reinstallare SaveIn! dal link test interno Play e ritestare `https://savein.eu/s/test`. **Verificato OK** su test interno Play (lug 2026).
@@ -635,7 +635,7 @@ SaveIn **non** integra SociaVault al 13/07/2026. L'estrazione avviene cosi:
    - se miss: **`extractMetadata(url)`** — HTTP GET pagina + Open Graph + fallback embed/oEmbed
    - Google Maps/Search/`share.google` da cellulare: unfurl hop-by-hop (redirect `intent://` Android + consenso), nome da testo condiviso/`q=`/`/maps/place/`; anteprima = prima foto del posto (scheda Google / sito), mai la mappa statica
 3. Instagram: pagina embed se manca `og:image`
-4. TikTok: redirect `vm.tiktok.com` + oEmbed pubblico
+4. TikTok: redirect `vm.tiktok.com` / `vt.tiktok.com` (con unwrap di `/login?redirect_url=...`) + OpenGraph (`facebookexternalhit/1.1`) + oEmbed pubblico + fallback API (`tikwm`)
 5. Hashtag: testo condiviso + parsing HTML
 6. Salvataggio → `ensureGlobalPost` + cache anteprima locale/remota
 
@@ -1156,7 +1156,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.15+119`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **119**.
+- Versione app corrente (repo): **`1.1.15+120`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **120**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2074,6 +2074,14 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.15+120` — ripristino anteprime, titolo e creator TikTok (05/11/2026)
+
+- TikTok ha iniziato a reindirizzare i link corti (`vm.tiktok.com` / `vt.tiktok.com`) a `/login?redirect_url=...` per gli User-Agent generici e a svuotare `thumbnail_url` / `title` nell'endpoint `/oembed` in Europa, facendo salvare i post come `Vm.tiktok.com` senza immagine.
+- `lib/url_metadata_service.dart` e `functions/index.js`: unwrap automatico di `redirect_url`, estrazione combinata tramite OpenGraph con User-Agent social crawler (`facebookexternalhit/1.1`), `/oembed` e fallback `tikwm` (copertina, caption, hashtag e `@username`).
+- `lib/services/global_post_lookup_service.dart`, `lib/models.dart` e `lib/data_service.dart`: i post TikTok in `global_posts` senza `imageUrl` o con titolo `Vm.tiktok.com` non bloccano più il nuovo scraping e vengono auto-riparati in background al lancio dell'app. Riparati anche su Firestore i post TikTok già salvati.
+- `pubspec.yaml` **1.1.15+120**.
+- **Azione**: deploy `functions:savePostFromShare,ensureGlobalPost`; Codemagic → TestFlight/Play **120**.
 
 ### Build `1.1.15+119` — Instagram nell'app, non nel browser (26/09/2026)
 

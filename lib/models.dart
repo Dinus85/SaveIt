@@ -417,21 +417,25 @@ class UrlMetadata {
     String? title,
     String? description,
     String? imageUrl,
+    String? previewStorageUrl,
     String? creatorName,
     String? creatorUsername,
     String? siteName,
     String? favicon,
     List<String>? extractedHashtags,
+    bool? fromGlobalCache,
   }) {
     return UrlMetadata(
       title: title ?? this.title,
       description: description ?? this.description,
       imageUrl: imageUrl ?? this.imageUrl,
+      previewStorageUrl: previewStorageUrl ?? this.previewStorageUrl,
       creatorName: creatorName ?? this.creatorName,
       creatorUsername: creatorUsername ?? this.creatorUsername,
       siteName: siteName ?? this.siteName,
       favicon: favicon ?? this.favicon,
       extractedHashtags: extractedHashtags ?? this.extractedHashtags,
+      fromGlobalCache: fromGlobalCache ?? this.fromGlobalCache,
     );
   }
 }
