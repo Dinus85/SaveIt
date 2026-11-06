@@ -2076,6 +2076,18 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
+### Build `1.1.15+122` — diagnostica AdMob + Consent Mode GDPR (06/11/2026)
+- **Problema**: AdMob → SaveIn iOS: **0 richieste in 28 giorni** con utenti Free attivi; banner "Account AdMob non attivo da più di 5 mesi" (disattivazione a 6 mesi). App AdMob verificata/Pronta, unità iOS corrette (`…/9950660131` interstitial, `…/4315988838` banner), `app-ads.txt` ok, regole `config/plan_limits` attive, consenso UMP utenti `canRequestAds: true`. Causa non visibile dal codice → serve diagnostica sul device.
+- `lib/services/ads_diagnostics_service.dart` (`AdsDiagnostics.log`): scrive eventi in **`users/{uid}/ad_diagnostics`** (event, details, platform, appVersion, appUserLoaded, effectiveRole, createdAt; max 80 per sessione). Eventi: `init_start`, `consent_gathered`, `init_done` (stato adapter), `init_error`, `session_ad_check`/`session_ad_skip`, `interstitial_skip|request|loaded|load_error|show_error|timeout`, `banner_skip|request|loaded|load_error`.
+- **Consent Mode**: in `main.dart` default Firebase Analytics **denied**; `AdsConsentService._applyAnalyticsConsent` mette granted se UMP `notRequired` (fuori UE) o `obtained` + `canRequestAds`.
+- Account test: `tester1@tester.com` è **premium permanente** (`premiumSource: app_review_demo`) → niente ads per design. `pasidino@gmail.com` ha `role: premium` ma `premiumUntil` 03/08/2026 scaduto → effettivo Free.
+- **Azione**: Codemagic → TestFlight **122**, aprire l'app con utente Free, poi leggere `users/{uid}/ad_diagnostics`.
+
+### Google Ads — campagna app iOS (05/11/2026)
+- Account Google Ads "SaveIn SmartChef" (ocid `8441903261`), campagna App **SaveIn!** (iOS, Italia, italiano, 10 €/giorno). Era bloccata "configurazione errata" per conversione installazione mancante.
+- Fix: Firebase ↔ Google Ads già collegato; Google Play collegato; in Firebase app iOS impostati **App Store ID `6785451010`** e **Team ID `YK58B78J96`**; importata conversione `first_open` stream **SaveIn! iOS** (categoria Download) e selezionata in Offerte. Consigliato togliere CPI target 0,19 € (troppo basso).
+- Stream GA4: SaveIn! iOS `15346329781`; ignorare stream vecchi SaveIt (`com.example.saveit`).
+
 ### Dashboard web admin — menu mobile friendly (05/11/2026)
 - `lib/pages/admin_dashboard_page.dart`: voci menu centralizzate in `_adminNavItems()`. Sotto **900 px** di larghezza l'header diventa compatto (logo, nome sezione attiva, icona ☰ e icona Logout); il ☰ apre un bottom sheet (`_showAdminNavSheet`) con le voci e la sezione attiva evidenziata. Da desktop resta la riga di pulsanti `_AdminNavButton` in `Wrap`.
 - Solo web: deploy con `flutter build web --release` + `firebase deploy --only hosting` (fatto). Nessuna nuova build mobile.

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -217,18 +218,40 @@ class AdsConsentService {
     }
   }
 
-  /// Scrive `consents.admob` su Firestore per la dashboard admin.
+  /// Scrive `consents.admob` su Firestore per la dashboard admin e allinea
+  /// il Consent Mode di Firebase Analytics.
   Future<void> syncAdmobConsentToFirestore() async {
     if (kIsWeb) return;
     try {
       final can = await ConsentInformation.instance.canRequestAds();
       final status = await ConsentInformation.instance.getConsentStatus();
+      await _applyAnalyticsConsent(canRequestAds: can, status: status);
       await AuthService().syncAdmobConsentToFirestore(
         canRequestAds: can,
         status: status.name,
       );
     } catch (e) {
       debugPrint('UMP syncAdmobConsentToFirestore skip: $e');
+    }
+  }
+
+  /// Fuori UE (`notRequired`) o dopo il form con ads consentite: granted.
+  /// Le scelte granulari TCF vengono comunque lette da Analytics.
+  Future<void> _applyAnalyticsConsent({
+    required bool canRequestAds,
+    required ConsentStatus status,
+  }) async {
+    final granted = status == ConsentStatus.notRequired ||
+        (status == ConsentStatus.obtained && canRequestAds);
+    try {
+      await FirebaseAnalytics.instance.setConsent(
+        analyticsStorageConsentGranted: granted,
+        adStorageConsentGranted: granted,
+        adUserDataConsentGranted: granted,
+        adPersonalizationSignalsConsentGranted: granted,
+      );
+    } catch (e) {
+      debugPrint('Analytics consent update skip: $e');
     }
   }
 

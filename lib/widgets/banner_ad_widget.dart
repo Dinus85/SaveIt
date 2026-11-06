@@ -4,6 +4,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../services/interstitial_ad_service.dart';
 import '../services/access_control_service.dart';
 import '../services/ads_consent_service.dart';
+import '../services/ads_diagnostics_service.dart';
 import '../services/plan_limits_service.dart';
 
 /// Banner pubblicitario orizzontale mostrato solo agli utenti Free.
@@ -73,6 +74,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget>
       final canRequest = await AdsConsentService.instance.canRequestAds();
       if (!canRequest) {
         debugPrint('BannerAd skip: UMP canRequestAds=false');
+        AdsDiagnostics.log('banner_skip', {'reason': 'consent'});
         return;
       }
 
@@ -82,6 +84,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget>
       if (kDebugMode) {
         debugPrint('BannerAd loading unit=$adUnitId');
       }
+      AdsDiagnostics.log('banner_request', {'unit': adUnitId});
 
       final banner = BannerAd(
         adUnitId: adUnitId,
@@ -90,6 +93,9 @@ class _BannerAdWidgetState extends State<BannerAdWidget>
         request: AdsConsentService.instance.buildAdRequest(),
         listener: BannerAdListener(
           onAdLoaded: (ad) {
+            AdsDiagnostics.log('banner_loaded', {
+              'adapter': ad.responseInfo?.mediationAdapterClassName,
+            });
             if (!mounted) {
               ad.dispose();
               return;
@@ -101,6 +107,11 @@ class _BannerAdWidgetState extends State<BannerAdWidget>
           },
           onAdFailedToLoad: (ad, error) {
             debugPrint('BannerAd load error: $error');
+            AdsDiagnostics.log('banner_load_error', {
+              'code': error.code,
+              'domain': error.domain,
+              'message': error.message,
+            });
             ad.dispose();
             if (mounted) {
               setState(() {
@@ -116,6 +127,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget>
       await banner.load();
     } catch (e) {
       debugPrint('BannerAd skip: AdMob non inizializzato ($e)');
+      AdsDiagnostics.log('banner_skip', {'reason': 'init_error'});
     } finally {
       _loading = false;
     }

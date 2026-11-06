@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_service.dart';
 import 'access_control_service.dart';
 import 'ads_consent_service.dart';
+import 'ads_diagnostics_service.dart';
 import 'ads_ids.dart';
 import 'plan_limits_service.dart';
 
@@ -71,9 +72,17 @@ class InterstitialAdService {
 
     _initializing = () async {
       try {
+        AdsDiagnostics.log('init_start');
         // Consenso UMP all'avvio (form se richiesto), poi MobileAds.
-        await AdsConsentService.instance.gatherConsent();
-        await MobileAds.instance.initialize();
+        final canRequest = await AdsConsentService.instance.gatherConsent();
+        AdsDiagnostics.log('consent_gathered', {'canRequestAds': canRequest});
+        final status = await MobileAds.instance.initialize();
+        AdsDiagnostics.log('init_done', {
+          'adapters': {
+            for (final entry in status.adapterStatuses.entries)
+              entry.key: entry.value.state.name,
+          },
+        });
         // In debug forza ads non personalizzate: evita blocchi ATT/privacy in test.
         if (kDebugMode) {
           await MobileAds.instance.updateRequestConfiguration(
@@ -92,6 +101,7 @@ class InterstitialAdService {
         }
       } catch (e, st) {
         debugPrint('AdMob initialize error: $e\n$st');
+        AdsDiagnostics.log('init_error', {'error': e.toString()});
         rethrow;
       } finally {
         _initializing = null;
@@ -105,16 +115,27 @@ class InterstitialAdService {
   /// Nello stesso resume/avvio mostra al massimo un interstitial (priorità: giornaliero).
   Future<bool> showSessionAdsIfNeeded({bool ignoreSuppress = false}) async {
     if (!ignoreSuppress && suppressSessionAds) return false;
-    if (!_shouldUseAds) return false;
+    if (!_shouldUseAds) {
+      AdsDiagnostics.log('session_ad_skip', {'reason': 'not_free'});
+      return false;
+    }
 
     final userId = _currentUserId;
     if (userId == null) return false;
 
     final prefs = await SharedPreferences.getInstance();
 
-    if (PlanLimitsService.dailyOpenInterstitialEnabled()) {
+    final dailyEnabled = PlanLimitsService.dailyOpenInterstitialEnabled();
+    final lastDaily = prefs.getString(_dailyOpenAdKey(userId));
+    AdsDiagnostics.log('session_ad_check', {
+      'dailyEnabled': dailyEnabled,
+      'lastDailyShown': lastDaily,
+      'idleHours': PlanLimitsService.idleInterstitialHours(),
+    });
+
+    if (dailyEnabled) {
       final today = _todayKey();
-      final lastShown = prefs.getString(_dailyOpenAdKey(userId));
+      final lastShown = lastDaily;
       if (lastShown != today) {
         final shown = await _showInterstitial();
         if (shown) {
@@ -525,12 +546,14 @@ class InterstitialAdService {
   }) async {
     if (!_shouldUseAds || _isShowingAd) {
       lastFailureReason = _isShowingAd ? 'busy' : 'not_free';
+      AdsDiagnostics.log('interstitial_skip', {'reason': lastFailureReason});
       return false;
     }
 
     final adUnitId = _interstitialAdUnitId;
     if (adUnitId == null) {
       lastFailureReason = 'unsupported_platform';
+      AdsDiagnostics.log('interstitial_skip', {'reason': lastFailureReason});
       return false;
     }
 
@@ -539,6 +562,7 @@ class InterstitialAdService {
     } catch (e) {
       debugPrint('InterstitialAd skip: AdMob non inizializzato ($e)');
       lastFailureReason = 'init_error';
+      AdsDiagnostics.log('interstitial_skip', {'reason': lastFailureReason});
       return false;
     }
 
@@ -551,8 +575,13 @@ class InterstitialAdService {
     if (!canRequest) {
       debugPrint('InterstitialAd skip: UMP canRequestAds=false');
       lastFailureReason = 'consent';
+      AdsDiagnostics.log('interstitial_skip', {'reason': lastFailureReason});
       return false;
     }
+    AdsDiagnostics.log('interstitial_request', {
+      'unit': adUnitId,
+      'npa': forceNonPersonalized,
+    });
 
     final completer = Completer<bool>();
     _isShowingAd = true;
@@ -572,6 +601,9 @@ class InterstitialAdService {
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
           lastFailureReason = null;
+          AdsDiagnostics.log('interstitial_loaded', {
+            'adapter': ad.responseInfo?.mediationAdapterClassName,
+          });
           ad.fullScreenContentCallback = FullScreenContentCallback(
             onAdDismissedFullScreenContent: (ad) {
               ad.dispose();
@@ -583,6 +615,10 @@ class InterstitialAdService {
             onAdFailedToShowFullScreenContent: (ad, error) {
               debugPrint('InterstitialAd show error: $error');
               lastFailureReason = 'show_error';
+              AdsDiagnostics.log('interstitial_show_error', {
+                'code': error.code,
+                'message': error.message,
+              });
               ad.dispose();
               _isShowingAd = false;
               if (!completer.isCompleted) {
@@ -598,6 +634,11 @@ class InterstitialAdService {
             'InterstitialAd load error: code=${error.code} domain=${error.domain} message=${error.message}',
           );
           lastFailureReason = 'no_fill';
+          AdsDiagnostics.log('interstitial_load_error', {
+            'code': error.code,
+            'domain': error.domain,
+            'message': error.message,
+          });
           _isShowingAd = false;
           if (!completer.isCompleted) {
             completer.complete(false);
@@ -610,6 +651,7 @@ class InterstitialAdService {
       const Duration(seconds: 20),
       onTimeout: () {
         lastFailureReason = 'timeout';
+        AdsDiagnostics.log('interstitial_timeout');
         _isShowingAd = false;
         return false;
       },
