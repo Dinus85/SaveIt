@@ -422,7 +422,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.15+121`** (05/11/2026). Ripristinata anteprima, titolo, descrizione e creator per i post TikTok (unwrap redirect `/login?redirect_url=...`, OpenGraph via `facebookexternalhit/1.1` + oEmbed + fallback `tikwm`, auto-riparazione su Firestore/Storage). Include tap Instagram nell’app, tag sui post, apertura sul post cliccato, push, import ogni 5, ads, cartelle, pin native, mediation, UMP + ATT. Import Google: foto Places / Wikipedia.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.16+122`** (06/11/2026): diagnostica AdMob + Consent Mode. 1.1.15 (121) già in distribuzione. Ripristinata anteprima, titolo, descrizione e creator per i post TikTok (unwrap redirect `/login?redirect_url=...`, OpenGraph via `facebookexternalhit/1.1` + oEmbed + fallback `tikwm`, auto-riparazione su Firestore/Storage). Include tap Instagram nell’app, tag sui post, apertura sul post cliccato, push, import ogni 5, ads, cartelle, pin native, mediation, UMP + ATT. Import Google: foto Places / Wikipedia.
 - **Account Codemagic iOS**: l'account Codemagic che contiene lo storico delle build e il workflow già configurato (**`IOS APP OK`**, app ID `6a577ff23921b247fbf17788`) è **`pasidino@gmail.com`** (NON `dinopasi@hotmail.it`, che ha solo un `Default Workflow` vuoto del 29/06/2026 con "Start your first build").
 - **App Store iOS (05/11/2026)**: versione **1.1.13** è **Pronta per la distribuzione** (chiusa). Versione store da creare col tasto `+` accanto ad "App iOS": **1.1.15** (build **121**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
@@ -1157,7 +1157,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.15+121`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **121**.
+- Versione app corrente (repo): **`1.1.16+122`** (1.1.15 già in distribuzione; crea versione **1.1.16** in App Store Connect). Precedente: **`1.1.15+121`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **121**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2076,12 +2076,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
 
-### Build `1.1.15+122` — diagnostica AdMob + Consent Mode GDPR (06/11/2026)
+### Build `1.1.16+122` — diagnostica AdMob + Consent Mode GDPR (06/11/2026)
 - **Problema**: AdMob → SaveIn iOS: **0 richieste in 28 giorni** con utenti Free attivi; banner "Account AdMob non attivo da più di 5 mesi" (disattivazione a 6 mesi). App AdMob verificata/Pronta, unità iOS corrette (`…/9950660131` interstitial, `…/4315988838` banner), `app-ads.txt` ok, regole `config/plan_limits` attive, consenso UMP utenti `canRequestAds: true`. Causa non visibile dal codice → serve diagnostica sul device.
 - `lib/services/ads_diagnostics_service.dart` (`AdsDiagnostics.log`): scrive eventi in **`users/{uid}/ad_diagnostics`** (event, details, platform, appVersion, appUserLoaded, effectiveRole, createdAt; max 80 per sessione). Eventi: `init_start`, `consent_gathered`, `init_done` (stato adapter), `init_error`, `session_ad_check`/`session_ad_skip`, `interstitial_skip|request|loaded|load_error|show_error|timeout`, `banner_skip|request|loaded|load_error`.
 - **Consent Mode**: in `main.dart` default Firebase Analytics **denied**; `AdsConsentService._applyAnalyticsConsent` mette granted se UMP `notRequired` (fuori UE) o `obtained` + `canRequestAds`.
 - Account test: `tester1@tester.com` è **premium permanente** (`premiumSource: app_review_demo`) → niente ads per design. `pasidino@gmail.com` ha `role: premium` ma `premiumUntil` 03/08/2026 scaduto → effettivo Free.
-- **Azione**: Codemagic → TestFlight **122**, aprire l'app con utente Free, poi leggere `users/{uid}/ad_diagnostics`.
+- Versione **1.1.15** già in distribuzione su App Store → nuova versione store **1.1.16** (build **122**).
+- **Azione**: Codemagic → TestFlight **122**; in App Store Connect crea versione **1.1.16** e collega la build 122; aprire l'app con utente Free, poi leggere `users/{uid}/ad_diagnostics`.
 
 ### Google Ads — campagna app iOS (05/11/2026)
 - Account Google Ads "SaveIn SmartChef" (ocid `8441903261`), campagna App **SaveIn!** (iOS, Italia, italiano, 10 €/giorno). Era bloccata "configurazione errata" per conversione installazione mancante.
