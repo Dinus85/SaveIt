@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import '../services/auth_service.dart';
 import '../utils/theme_helpers.dart';
 import 'help_center_page.dart';
+import '../widgets/savein_page_title.dart';
 
 class ContactPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -73,10 +74,12 @@ class _ContactPageState extends State<ContactPage> {
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,
         titleSpacing: 16,
-        title: Text(
+        title: SaveInPageTitle(
+          title: Text(
           'Contattaci',
           style: TextStyle(
             color: themeColors.titleColor,
@@ -84,11 +87,11 @@ class _ContactPageState extends State<ContactPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
+        ),
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: themeColors.iconColor, size: 28),
           onPressed: () => Navigator.pop(context),
         ),
-        toolbarHeight: 80,
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),

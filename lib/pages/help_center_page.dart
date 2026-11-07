@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../utils/constants.dart';
 import '../utils/theme_helpers.dart';
 import 'contact_page.dart';
+import '../widgets/savein_page_title.dart';
 
 class HelpCenterPage extends StatelessWidget {
   final bool isDarkTheme;
@@ -15,10 +16,12 @@ class HelpCenterPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,
         titleSpacing: 16,
-        title: Text(
+        title: SaveInPageTitle(
+          title: Text(
           'Centro Assistenza',
           style: TextStyle(
             color: themeColors.titleColor,
@@ -26,11 +29,11 @@ class HelpCenterPage extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
+        ),
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: themeColors.iconColor, size: 28),
           onPressed: () => Navigator.pop(context),
         ),
-        toolbarHeight: 80,
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),

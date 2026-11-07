@@ -494,8 +494,9 @@ class _FolderDetailPageState extends State<FolderDetailPage>
         'DEBUG: Ricerca nella cartella ${_currentFolder.name} per "$query" ha restituito ${_searchResults.length} risultati');
   }
 
+  /// Percorso completo dalla Home alla cartella aperta: "Home › Feste › Natale".
   String _buildBreadcrumb(MockFolder folder) {
-    List<String> path = [];
+    final path = <String>[];
     MockFolder? current = folder.parent;
 
     while (current != null) {
@@ -505,11 +506,7 @@ class _FolderDetailPageState extends State<FolderDetailPage>
       current = current.parent;
     }
 
-    if (path.isEmpty) {
-      return 'Cartella principale';
-    }
-
-    return path.join(' > ');
+    return ['Home', ...path, folder.name].join(' › ');
   }
 
   String _buildPostBreadcrumb(MockFolder? sourceFolder) {
@@ -763,57 +760,15 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                 padding: EdgeInsets.zero,
                 constraints: BoxConstraints(),
               ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _isSearching
-                    ? Text(
-                        'Ricerca per',
-                        style: TextStyle(
-                          color: themeColors.titleColor,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _currentFolder.name,
-                            style: TextStyle(
-                              color: themeColors.titleColor,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          if (_currentFolder.level > 0) ...[
-                            SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.folder_outlined,
-                                  color: themeColors.iconColor,
-                                  size: 14,
-                                ),
-                                SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    _buildBreadcrumb(_currentFolder),
-                                    style: TextStyle(
-                                      color: themeColors.textColor
-                                          .withOpacity(0.8),
-                                      fontSize: 12,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
+              SizedBox(width: 8),
+              Image.asset(
+                'assets/icon/SaveIn!.png',
+                height: 48,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
               ),
-              if (!_isSearching) ...[
+              Spacer(),
+              if (!_isSearching)
                 IconButton(
                   icon: Icon(
                     _isPinterestView ? Icons.view_list_rounded : Icons.grid_view_rounded,
@@ -823,15 +778,64 @@ class _FolderDetailPageState extends State<FolderDetailPage>
                   onPressed: _toggleViewMode,
                   tooltip: _isPinterestView ? 'Vista elenco' : 'Vista Pinterest',
                 ),
-                if (AuthService().currentUser != null)
-                  LogoutButton(
-                    onLogoutComplete: () {},
-                    isDarkTheme: widget.isDarkTheme,
-                    onThemeChanged: widget.onThemeChanged,
-                  ),
-              ],
+              if (AuthService().currentUser != null && !_isSearching)
+                LogoutButton(
+                  onLogoutComplete: () {},
+                  isDarkTheme: widget.isDarkTheme,
+                  onThemeChanged: widget.onThemeChanged,
+                ),
             ],
           ),
+          SizedBox(height: 12),
+          if (_isSearching)
+            Text(
+              'Ricerca per',
+              style: TextStyle(
+                color: themeColors.titleColor,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            )
+          else
+            Row(
+              children: [
+                Icon(
+                  _currentFolder.isSpecial
+                      ? Icons.folder_special
+                      : Icons.folder_rounded,
+                  color: _currentFolder.color,
+                  size: 36,
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _currentFolder.name,
+                        style: TextStyle(
+                          color: themeColors.titleColor,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        _buildBreadcrumb(_currentFolder),
+                        style: TextStyle(
+                          color: themeColors.textColor.withOpacity(0.75),
+                          fontSize: 13,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../utils/theme_helpers.dart';
 import '../services/remote_content_service.dart';
+import '../widgets/savein_page_title.dart';
 
 class PrivacyPolicyPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -59,16 +60,19 @@ class _PrivacyPolicyPageState extends State<PrivacyPolicyPage> {
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,
         titleSpacing: 16,
-        title: Text(
+        title: SaveInPageTitle(
+          title: Text(
           _content?.title ?? 'Privacy Policy',
           style: TextStyle(
             color: themeColors.titleColor,
             fontSize: 24,
             fontWeight: FontWeight.bold,
           ),
+        ),
         ),
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: themeColors.iconColor, size: 28),
@@ -138,7 +142,6 @@ class _PrivacyPolicyPageState extends State<PrivacyPolicyPage> {
             ],
           ),
         ],
-        toolbarHeight: 80,
       ),
       body: _buildBody(themeColors),
       bottomNavigationBar: SafeArea(

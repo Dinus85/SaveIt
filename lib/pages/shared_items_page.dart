@@ -9,6 +9,7 @@ import 'package:savein/services/folder_service.dart';
 import 'package:savein/utils/theme_helpers.dart';
 import 'package:savein/widgets/blocked_senders_dialog.dart';
 import 'package:savein/widgets/free_limit_dialog.dart';
+import '../widgets/savein_page_title.dart';
 
 class SharedItemsPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -125,12 +126,15 @@ class _SharedItemsPageState extends State<SharedItemsPage> {
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       appBar: AppBar(
-        title: Text(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
+        title: SaveInPageTitle(
+          title: Text(
           'Condivisi con me',
           style: TextStyle(
             color: themeColors.titleColor,
             fontWeight: FontWeight.bold,
           ),
+        ),
         ),
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,

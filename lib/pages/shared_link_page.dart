@@ -5,6 +5,7 @@ import '../services/access_control_service.dart';
 import '../services/share_link_service.dart';
 import '../utils/theme_helpers.dart';
 import '../widgets/free_limit_dialog.dart';
+import '../widgets/savein_page_title.dart';
 
 class SharedLinkPage extends StatefulWidget {
   final String token;
@@ -133,13 +134,16 @@ class _SharedLinkPageState extends State<SharedLinkPage> {
     return Scaffold(
       backgroundColor: colors.mainBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
         backgroundColor: colors.mainBackgroundColor,
         elevation: 0,
         iconTheme: IconThemeData(color: colors.iconColor),
-        title: Text(
+        title: SaveInPageTitle(
+          title: Text(
           'Condivisione SaveIn',
           style:
               TextStyle(color: colors.titleColor, fontWeight: FontWeight.bold),
+        ),
         ),
       ),
       body: _loading

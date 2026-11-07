@@ -9,6 +9,7 @@ import '../services/folder_service.dart';   // NUOVO: Service cartelle
 import '../advanced_analytics_service.dart';          // NUOVO: Service avanzato
 import '../advanced_analytics_models.dart';           // NUOVO: Modelli avanzati
 import 'dart:math' as math;
+import '../widgets/savein_page_title.dart';
 
 class SimpleStatsPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -126,10 +127,12 @@ class _SimpleStatsPageState extends State<SimpleStatsPage> with TickerProviderSt
 
   PreferredSizeWidget _buildAppBar(ThemeColors themeColors) {
     return AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
       backgroundColor: themeColors.mainBackgroundColor,
       elevation: 0,
       titleSpacing: 16,
-      title: Text(
+      title: SaveInPageTitle(
+          title: Text(
         'Statistiche',
         style: TextStyle(
           color: themeColors.titleColor,
@@ -137,11 +140,11 @@ class _SimpleStatsPageState extends State<SimpleStatsPage> with TickerProviderSt
           fontWeight: FontWeight.bold,
         ),
       ),
+        ),
       leading: IconButton(
         icon: Icon(Icons.arrow_back, color: themeColors.iconColor, size: 28),
         onPressed: () => Navigator.pop(context),
       ),
-      toolbarHeight: 80,
       actions: [
         IconButton(
           icon: Icon(Icons.refresh, color: themeColors.iconColor),

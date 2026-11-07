@@ -27,6 +27,7 @@ import 'package:savein/services/folder_service.dart';
 import 'package:savein/services/plan_limits_service.dart';
 import 'package:savein/services/ads_consent_service.dart';
 import 'package:savein/widgets/blocked_senders_dialog.dart';
+import '../widgets/savein_page_title.dart';
 
 // Helper class per validazione password
 class PasswordValidator {
@@ -3682,16 +3683,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,
         titleSpacing: 16,
-        title: Text(
+        title: SaveInPageTitle(
+          title: Text(
           'Modifica Profilo',
           style: TextStyle(
             color: ThemeHelpers.getTitleColor(widget.isDarkTheme),
             fontSize: 24,
             fontWeight: FontWeight.bold,
           ),
+        ),
         ),
         leading: IconButton(
           icon: Icon(Icons.arrow_back,
@@ -3712,7 +3716,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
             ),
         ],
-        toolbarHeight: 80,
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),

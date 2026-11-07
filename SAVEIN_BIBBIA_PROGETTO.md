@@ -422,7 +422,7 @@ flutter build web --release; if ($LASTEXITCODE -eq 0) { $env:FUNCTIONS_DISCOVERY
 ```
 
 Build mobile:
-- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.16+122`** (06/11/2026): diagnostica AdMob + Consent Mode. 1.1.15 (121) già in distribuzione. Ripristinata anteprima, titolo, descrizione e creator per i post TikTok (unwrap redirect `/login?redirect_url=...`, OpenGraph via `facebookexternalhit/1.1` + oEmbed + fallback `tikwm`, auto-riparazione su Firestore/Storage). Include tap Instagram nell’app, tag sui post, apertura sul post cliccato, push, import ogni 5, ads, cartelle, pin native, mediation, UMP + ATT. Import Google: foto Places / Wikipedia.
+- Versione mobile corrente in repo: `pubspec.yaml` **`1.1.16+123`** (07/11/2026): logo SaveIn! ovunque, percorso cartella, anteprime HD + diagnostica AdMob + Consent Mode. 1.1.15 (121) già in distribuzione. Ripristinata anteprima, titolo, descrizione e creator per i post TikTok (unwrap redirect `/login?redirect_url=...`, OpenGraph via `facebookexternalhit/1.1` + oEmbed + fallback `tikwm`, auto-riparazione su Firestore/Storage). Include tap Instagram nell’app, tag sui post, apertura sul post cliccato, push, import ogni 5, ads, cartelle, pin native, mediation, UMP + ATT. Import Google: foto Places / Wikipedia.
 - **Account Codemagic iOS**: l'account Codemagic che contiene lo storico delle build e il workflow già configurato (**`IOS APP OK`**, app ID `6a577ff23921b247fbf17788`) è **`pasidino@gmail.com`** (NON `dinopasi@hotmail.it`, che ha solo un `Default Workflow` vuoto del 29/06/2026 con "Start your first build").
 - **App Store iOS (05/11/2026)**: versione **1.1.13** è **Pronta per la distribuzione** (chiusa). Versione store da creare col tasto `+` accanto ad "App iOS": **1.1.15** (build **121**). iOS `CFBundleShortVersionString` / Share Extension `MARKETING_VERSION` arrivano da `pubspec` (`FLUTTER_BUILD_NAME`). Non usare 1.1.11/1.1.12/1.1.13/1.1.14 in App Store Connect.
 - **SDK locale / CI (22/07/2026)**: Flutter **3.44.7** (Dart 3.12). Su Codemagic usare Flutter **≥ 3.38** (consigliato **3.44.x**), altrimenti `in_app_purchase_android` ≥ 0.5 non risolve.
@@ -1157,7 +1157,7 @@ Output: `build\app\outputs\bundle\release\app-release.aab`
 - App creata su Play Console: `SaveIn!` — package `eu.savein.app`
 - Canali attivi: **test interno** e/o **test chiuso** (non produzione)
 - Release di test interno storica: build **`1.0.0+14`** — fix buffering cartelle, tutorial/notifiche post-login, sync startup cartelle
-- Versione app corrente (repo): **`1.1.16+122`** (1.1.15 già in distribuzione; crea versione **1.1.16** in App Store Connect). Precedente: **`1.1.15+121`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **121**.
+- Versione app corrente (repo): **`1.1.16+123`** (1.1.15 già in distribuzione; crea versione **1.1.16** in App Store Connect). Precedente: **`1.1.15+121`** — da pubblicare su TestFlight / test Play. In App Store Connect **non** collegare a **1.1.13** (già chiusa): **crea versione 1.1.15** e collega la build **121**.
 - **Android App Links**: SHA Play App Signing allineato su Firebase (giu 2026); verificato live su `https://savein.eu/.well-known/assetlinks.json`; **test link OK** da install Play (lug 2026)
 - Configurazione app: in corso (scheda store, classificazione, privacy)
 - **Test chiuso: NON completato** — richiede almeno 12 tester per 14 giorni
@@ -2075,6 +2075,13 @@ titolo/cover/creator in cartella destinazione (anche cross-device).
 - Se l'app si apre da un import alla prima apertura del giorno o dopo 3 ore di inattività, mostra l'interstitial di sessione come un'apertura normale.
 - Fail-open se inventario vuoto resta.
 - **Azione**: Codemagic → TestFlight/Play **94**; in App Store Connect crea versione **1.1.11**.
+
+### Build `1.1.16+123` — logo SaveIn! ovunque, percorso cartella, anteprime HD (07/11/2026)
+- **Header cartella** (`folder_detail_page.dart` → `_buildHeaderWithSearch`): riga 1 = freccia indietro, logo `SaveIn!.png` (h 48), vista griglia/elenco, menu account. Riga 2 = icona cartella (colore della cartella, `folder_special` per le speciali) + nome (22 bold) + percorso completo `Home › Feste › Natale` (`_buildBreadcrumb`).
+- **Logo nelle pagine secondarie**: nuovo `lib/widgets/savein_page_title.dart` (`SaveInPageTitle`, logo h 36 + titolo pagina sotto, `toolbarHeight: 104`) applicato agli AppBar di: Condivisi con me, Modifica Profilo, Condivisione SaveIn, Statistiche, Centro Assistenza, Contattaci, Termini, Privacy, Marketing.
+- **Anteprime post HD**: `post_preview_cache_io.dart` e `post_preview_remote_storage_io.dart` → lato max **1080 px** (prima 512), JPEG qualità 82→55 (prima 68→38), target **~300 KB** (prima 100 KB), fallback 860/720 px (prima 384/320). Solo nuovi salvataggi; anteprime esistenti invariate (URL CDN social scadono).
+- Grafiche asset: `SaveIn!.png` 2172×724 e `app_logo_internal.png` 252×621 già adeguate; `home.png`/`account.png`/`tre_puntini_nero.png` 50×50 non usate nel codice.
+- Include la build 122 (diagnostica AdMob + Consent Mode). Store: versione **1.1.16**, build **123**.
 
 ### Build `1.1.16+122` — diagnostica AdMob + Consent Mode GDPR (06/11/2026)
 - **Problema**: AdMob → SaveIn iOS: **0 richieste in 28 giorni** con utenti Free attivi; banner "Account AdMob non attivo da più di 5 mesi" (disattivazione a 6 mesi). App AdMob verificata/Pronta, unità iOS corrette (`…/9950660131` interstitial, `…/4315988838` banner), `app-ads.txt` ok, regole `config/plan_limits` attive, consenso UMP utenti `canRequestAds: true`. Causa non visibile dal codice → serve diagnostica sul device.

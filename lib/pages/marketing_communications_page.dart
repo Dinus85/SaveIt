@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../utils/theme_helpers.dart';
 import '../services/remote_content_service.dart';
+import '../widgets/savein_page_title.dart';
 
 class MarketingCommunicationsPage extends StatefulWidget {
   final bool isDarkTheme;
@@ -55,16 +56,19 @@ class _MarketingCommunicationsPageState extends State<MarketingCommunicationsPag
     return Scaffold(
       backgroundColor: themeColors.mainBackgroundColor,
       appBar: AppBar(
+        toolbarHeight: SaveInPageTitle.toolbarHeight,
         backgroundColor: themeColors.mainBackgroundColor,
         elevation: 0,
         titleSpacing: 16,
-        title: Text(
+        title: SaveInPageTitle(
+          title: Text(
           _content?.title ?? 'Marketing e Comunicazioni',
           style: TextStyle(
             color: themeColors.titleColor,
             fontSize: 22,
             fontWeight: FontWeight.bold,
           ),
+        ),
         ),
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: themeColors.iconColor, size: 28),
@@ -121,7 +125,6 @@ class _MarketingCommunicationsPageState extends State<MarketingCommunicationsPag
             ],
           ),
         ],
-        toolbarHeight: 80,
       ),
       body: _buildBody(themeColors),
       bottomNavigationBar: SafeArea(

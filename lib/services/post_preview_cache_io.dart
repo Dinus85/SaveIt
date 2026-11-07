@@ -13,9 +13,9 @@ import 'package:path_provider/path_provider.dart';
 class PostPreviewCache {
   const PostPreviewCache();
 
-  // Target "thumbnail" per UI: piccola ma dignitosa.
-  static const int _maxDimension = 512;
-  static const int _targetMaxBytes = 100 * 1024; // ~100KB
+  // Target per UI: nitida anche a tutto schermo su display 3x.
+  static const int _maxDimension = 1080;
+  static const int _targetMaxBytes = 300 * 1024; // ~300KB
   static const int _downloadHardMaxBytes = 2 * 1024 * 1024; // 2MB (guard)
 
   static Future<Directory>? _dirFuture;
@@ -159,7 +159,7 @@ class PostPreviewCache {
       final resized = _resizeIfNeeded(decoded, _maxDimension);
 
       // Tentativi con qualità decrescente per rientrare nel target.
-      final qualities = <int>[68, 60, 52, 45, 38];
+      final qualities = <int>[82, 76, 70, 62, 55];
       List<int> best = img.encodeJpg(resized, quality: qualities.first);
 
       for (final q in qualities) {
@@ -170,13 +170,13 @@ class PostPreviewCache {
 
       // Se ancora troppo grande, riduci un po' la dimensione e ritenta.
       if (best.length > _targetMaxBytes) {
-        final smaller = _resizeIfNeeded(resized, 384);
-        best = img.encodeJpg(smaller, quality: 52);
+        final smaller = _resizeIfNeeded(resized, 860);
+        best = img.encodeJpg(smaller, quality: 70);
       }
 
       if (best.length > _targetMaxBytes) {
-        final smaller = _resizeIfNeeded(resized, 320);
-        best = img.encodeJpg(smaller, quality: 45);
+        final smaller = _resizeIfNeeded(resized, 720);
+        best = img.encodeJpg(smaller, quality: 62);
       }
 
       return best;

@@ -15,8 +15,8 @@ class PostPreviewRemoteStorage {
   const PostPreviewRemoteStorage();
 
   static const int _hardMaxBytes = 2 * 1024 * 1024; // 2MB (guard)
-  static const int _maxDimension = 512;
-  static const int _targetMaxBytes = 100 * 1024; // ~100KB
+  static const int _maxDimension = 1080;
+  static const int _targetMaxBytes = 300 * 1024; // ~300KB
 
   /// Cerca un'anteprima gia' salvata in Storage (condivisa tra tutti gli utenti).
   Future<String?> resolveExistingPreviewUrl({
@@ -195,7 +195,7 @@ class PostPreviewRemoteStorage {
 
       final resized = _resizeIfNeeded(decoded, _maxDimension);
 
-      final qualities = <int>[68, 60, 52, 45, 38];
+      final qualities = <int>[82, 76, 70, 62, 55];
       List<int> best = img.encodeJpg(resized, quality: qualities.first);
       for (final q in qualities) {
         final out = img.encodeJpg(resized, quality: q);
@@ -204,13 +204,13 @@ class PostPreviewRemoteStorage {
       }
 
       if (best.length > _targetMaxBytes) {
-        final smaller = _resizeIfNeeded(resized, 384);
-        best = img.encodeJpg(smaller, quality: 52);
+        final smaller = _resizeIfNeeded(resized, 860);
+        best = img.encodeJpg(smaller, quality: 70);
       }
 
       if (best.length > _targetMaxBytes) {
-        final smaller = _resizeIfNeeded(resized, 320);
-        best = img.encodeJpg(smaller, quality: 45);
+        final smaller = _resizeIfNeeded(resized, 720);
+        best = img.encodeJpg(smaller, quality: 62);
       }
 
       return best;
